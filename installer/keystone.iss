@@ -3,7 +3,7 @@
 ; firewall so the phone can find it on the hotspot.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.1.1"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\build\app\Keystone_artefacts\Release"

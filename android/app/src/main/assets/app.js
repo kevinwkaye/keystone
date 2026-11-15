@@ -162,7 +162,11 @@ var KS = (function () {
     }).join('');
     var bl = S.bloomDrag != null ? S.bloomDrag : (S.meter.bloom || 0);
     var offline = S.link !== 'connected' ? '<div class="card"><span style="font-size:17px;font-weight:700">Looking for Keystone</span>' +
-      '<span class="small">Turn on this phone\'s hotspot and switch on the laptop. Keystone joins the hotspot by itself and this screen connects within a few seconds. No internet or mobile data needed.</span></div>' : '';
+      '<span class="small">Turn on this phone\'s hotspot and switch on the laptop. Keystone joins the hotspot by itself and this screen connects within a few seconds. No internet or mobile data needed.</span>' +
+      (S.linkDetail ? '<span class="small" style="color:#F2EDE4">' + esc(S.linkDetail) + '</span>' : '') +
+      '<div class="note"><input id="manualIp" inputmode="decimal" placeholder="Laptop address, e.g. 10.42.0.17" aria-label="Laptop address" value="' + esc(S.manualIp || '') + '">' +
+      '<button type="button" data-act="manual">Connect</button></div>' +
+      '<span class="small">Your hotspot settings list the laptop under Connected devices, often with its address.</span></div>' : '';
     var note = Date.now() < S.noteUntil ? '<div class="note"><input id="noteText" maxlength="200" placeholder="Add a note to that Keep (optional)" aria-label="Note for the last Keep"><button type="button" data-act="note">Save</button></div>' : '';
     return '<section class="screen">' +
       '<div class="top"><div class="brand">' + PEBBLE + '<span class="title">Keystone</span></div>' + pill() + '</div>' +
@@ -507,6 +511,7 @@ var KS = (function () {
     var i2 = d.i != null ? +d.i : -1;
     switch (d.act) {
       case 'keep': send({ t: 'keep' }); break;
+      case 'manual': var mi = document.getElementById('manualIp'); if (mi && mi.value.trim()) { S.manualIp = mi.value.trim(); if (window.KeystoneNative && KeystoneNative.connectTo) KeystoneNative.connectTo(S.manualIp); toast('TRYING'); } break;
       case 'prev': send({ t: 'songStep', d: -1 }); break;
       case 'next': send({ t: 'songStep', d: 1 }); break;
       case 'note': var nt = document.getElementById('noteText'); if (nt && nt.value.trim()) send({ t: 'keepNote', text: nt.value.trim() }); S.noteUntil = 0; render(); break;
@@ -543,6 +548,7 @@ var KS = (function () {
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && e.target.id === 'renameText') { var b = document.querySelector('[data-act="renameSave"]'); if (b) b.click(); }
+    if (e.key === 'Enter' && e.target.id === 'manualIp') { var mb = document.querySelector('[data-act="manual"]'); if (mb) mb.click(); }
     if (e.key === 'Enter' && e.target.id === 'noteText') { var n = document.querySelector('[data-act="note"]'); if (n) n.click(); }
   });
 

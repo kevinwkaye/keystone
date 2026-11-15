@@ -72,6 +72,13 @@ final class Link {
         if (socket != null) outbox.offer(line);
     }
 
+    /** An address typed on the phone: tried first on every round until it works. */
+    void connectTo(String host) {
+        prefs().edit().putString("manual", host.trim()).apply();
+        Thread w = worker;
+        if (w != null) w.interrupt();   // wake from any sleep and try it now
+    }
+
     private void closeSocket() {
         Socket s = socket;
         socket = null;
@@ -82,13 +89,27 @@ final class Link {
 
     private void loop() {
         while (running) {
-            listener.onStatus("searching", "");
+            String nets = describeNetworks();
+            listener.onStatus("searching", nets + " Calling Keystone...");
             InetSocketAddress target = null;
+            String manual = prefs().getString("manual", null);
+            if (manual != null && !manual.isEmpty()) {
+                target = tryConnectable(manual, TCP_PORT, 1500);
+                if (target == null) listener.onStatus("searching", nets + " Nothing answered at " + manual + ".");
+            }
             String last = prefs().getString("last", null);
-            if (last != null) target = tryConnectable(last, TCP_PORT, 700);
+            if (target == null && last != null) target = tryConnectable(last, TCP_PORT, 700);
             if (target == null) target = discover(3000);
-            if (target == null) target = sweep();
-            if (target == null) { sleep(1000); continue; }
+            if (target == null) {
+                listener.onStatus("searching", nets + " No reply to the broadcast call. Checking every address...");
+                target = sweep();
+            }
+            if (target == null) {
+                listener.onStatus("searching", nets + " No reply to the broadcast call, and nothing answered on port " + TCP_PORT
+                        + " at any of " + lastSweepCount + " addresses (" + lastSweepRange + "). Trying again.");
+                sleep(3000);
+                continue;
+            }
             prefs().edit().putString("last", target.getAddress().getHostAddress()).apply();
             runConnection(target);
         }
@@ -198,16 +219,37 @@ final class Link {
         return out;
     }
 
+    private volatile int lastSweepCount = 0;
+    private volatile String lastSweepRange = "none";
+
+    /** The phone's own networks, so the screen can say where it's looking. */
+    private static String describeNetworks() {
+        List<String> parts = new ArrayList<>();
+        try {
+            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!ni.isUp() || ni.isLoopback()) continue;
+                for (InterfaceAddress ia : ni.getInterfaceAddresses())
+                    if (ia.getAddress() instanceof Inet4Address)
+                        parts.add(ia.getAddress().getHostAddress() + " (" + ni.getName() + ")");
+            }
+        } catch (Exception ignored) { }
+        return parts.isEmpty() ? "This phone has no network up: turn the hotspot on." : "This phone is " + String.join(", ", parts) + ".";
+    }
+
     // When broadcasts are blocked: try every address on each local /24 at once.
     private InetSocketAddress sweep() {
         List<InetAddress> candidates = new ArrayList<>();
+        List<String> ranges = new ArrayList<>();
         for (InterfaceAddress ia : localAddresses()) {
             byte[] a = ia.getAddress().getAddress();
+            ranges.add((a[0] & 0xff) + "." + (a[1] & 0xff) + "." + (a[2] & 0xff) + ".x");
             for (int host = 1; host < 255; host++) {
                 if (host == (a[3] & 0xff)) continue;
                 try { candidates.add(InetAddress.getByAddress(new byte[] { a[0], a[1], a[2], (byte) host })); } catch (Exception ignored) { }
             }
         }
+        lastSweepCount = candidates.size();
+        lastSweepRange = ranges.isEmpty() ? "none" : String.join(", ", ranges);
         if (candidates.isEmpty()) return null;
         final AtomicReference<InetSocketAddress> found = new AtomicReference<>();
         ExecutorService pool = Executors.newFixedThreadPool(48);

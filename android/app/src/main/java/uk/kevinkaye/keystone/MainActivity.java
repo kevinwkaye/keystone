@@ -147,6 +147,9 @@ public class MainActivity extends Activity {
         public void send(String line) { link.send(line); }
 
         @JavascriptInterface
+        public void connectTo(String host) { link.connectTo(host); }
+
+        @JavascriptInterface
         public String version() { return BuildConfig.VERSION_NAME; }
     }
 }
