@@ -84,9 +84,10 @@ public:
         slapMix.setTime (0.05f, sr);
         onMix.setTime (0.02f, sr);
         detAtt = onePoleCoef (0.012f, sr);
+        gainGlide = onePoleCoef (0.004f, sr);
         reset();
     }
-    void reset() { shelf.reset(); weight.reset(); env = 0; slapMix.reset (0); onMix.reset (1); grSmooth = 0; }
+    void reset() { shelf.reset(); weight.reset(); env = 0; gainDb = 0; slapMix.reset (0); onMix.reset (1); grSmooth = 0; }
 
     void update (const Vals& v)
     {
@@ -121,9 +122,11 @@ public:
         if (over > 3.0f) gr = over * (1.0f - 1.0f / ratio);
         else if (over > -3.0f) gr = (over + 3.0f) * (over + 3.0f) / 12.0f * (1.0f - 1.0f / ratio);
         const float makeup = lerp (0.5f, 0.62f, s) * std::max (0.0f, (-8.0f - thr)) * (1.0f - 1.0f / ratio);
+        // glide the gain itself, so a change of settings (slap on) never steps it
         const float gDb = (makeup - gr) * on;
+        gainDb = gDb + (gainDb - gDb) * gainGlide;
         grSmooth = gr * on;
-        return x * dbToGain (gDb);
+        return x * dbToGain (gainDb);
     }
     float reduction() const { return grSmooth; }
 
@@ -132,7 +135,7 @@ private:
     Biquad shelf, weight;
     float lastTight = 99, lastWeight = 99;
     float amount = 0.35f, slapAmount = 0.7f, relSec = 0.15f;
-    float env = 0, detAtt = 0, grSmooth = 0;
+    float env = 0, detAtt = 0, grSmooth = 0, gainDb = 0, gainGlide = 0;
     Smoothed slapMix, onMix;
 };
 

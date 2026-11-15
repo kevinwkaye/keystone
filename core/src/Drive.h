@@ -79,7 +79,7 @@ public:
         lowIntoHpMix.setTime (0.05f, sr);
         lowIntoHp1.highPass (100, 0.707f, sr);
         lowIntoHp2 = lowIntoHp1;
-        trimCoef = 0.02f;
+        trimGlide = 1.0f - onePoleCoef (0.08f, sr);
         reset();
     }
     void reset()
@@ -87,7 +87,7 @@ public:
         for (auto& vc : voices) vc.reset();
         dryDelay.reset(); capDelay.reset();
         onS.reset (0); xf = 0; xfTarget = 0;
-        trim[0] = trim[1] = 1.0f;
+        trim[0] = trim[1] = trimTarget[0] = trimTarget[1] = 1.0f;
         lowIntoHp1.reset(); lowIntoHp2.reset();
     }
 
@@ -156,6 +156,7 @@ public:
             for (int i = 0; i < n; ++i)
             {
                 xf = stepXf (xf);
+                glideTrims();
                 const float w = smoothstep (xf);
                 const float y = namIn[(size_t) i];
                 float a = voices[0].postCapture (y) * trim[0];
@@ -172,6 +173,7 @@ public:
             for (int i = 0; i < n; ++i)
             {
                 xf = stepXf (xf);
+                glideTrims();
                 const float w = smoothstep (xf);
                 const float x = namIn[(size_t) i];
                 float a = 0, b = 0;
@@ -197,14 +199,14 @@ public:
         for (int k = 0; k < 2; ++k)
         {
             auto& vc = voices[k];
-            if (! autoMatch) { trim[k] += (1.0f - trim[k]) * 0.05f; vc.clearMeasure(); continue; }
+            if (! autoMatch) { trimTarget[k] = 1.0f; vc.clearMeasure(); continue; }
             if (vc.measuredSamples > (int) (0.1f * sr))
             {
                 const float in = std::sqrt (vc.sumIn / vc.measuredSamples), out = std::sqrt (vc.sumOut / std::max (1, vc.measuredOutSamples));
                 if (in > 3.0e-3f && out > 1.0e-5f && vc.measuredOutSamples > 0)
                 {
                     const float want = clampf (trim[k] * in / out * vc.levelGain, 0.06f, 16.0f);
-                    trim[k] += (want - trim[k]) * 0.15f;
+                    trimTarget[k] += (want - trimTarget[k]) * 0.15f;   // the trim glides there sample by sample
                 }
                 vc.clearMeasure();
             }
@@ -212,6 +214,11 @@ public:
     }
 
 private:
+    void glideTrims()
+    {
+        trim[0] += (trimTarget[0] - trim[0]) * trimGlide;
+        trim[1] += (trimTarget[1] - trim[1]) * trimGlide;
+    }
     float stepXf (float x) const
     {
         if (x < xfTarget) return std::min (xfTarget, x + xfStep);
@@ -309,8 +316,8 @@ private:
 
     float sr = 48000;
     Voice voices[2];
-    float trim[2] { 1, 1 };
-    float trimCoef = 0.02f;
+    float trim[2] { 1, 1 }, trimTarget[2] { 1, 1 };
+    float trimGlide = 0.0003f;
     bool on = true, useCapture = false, autoMatch = true;
     float xf = 0, xfTarget = 0, xfStep = 0.001f;
     float lowInto = 0.35f, lastSplit = -1;
