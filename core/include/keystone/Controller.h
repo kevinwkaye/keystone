@@ -63,6 +63,7 @@ public:
     void setValue (P p, float v, bool broadcast = true);
     float value (P p) const { return engine.getParam (p); }
     bool tunerOn() const;
+    void notify (const std::string& text) { queueToast (text); }
     std::string lastToast() const { return toast; }
 
 private:
