@@ -170,6 +170,7 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
             if (in[c] != nullptr) for (int i = 0; i < n; ++i) m = std::max (m, std::abs (in[c][i]));
             chanLevel[c] = std::max (m, chanLevel[c] * 0.995f);
         }
+        // which input carries the bass is easy to lose track of: log it when it changes
         if (choice == 1) chosen = 0;
         else if (choice == 2) chosen = 1;
         else

@@ -1,10 +1,10 @@
-Keystone 0.1.3: the phone connects when it is on home Wi-Fi and hosting the hotspot at the same time. 0.1.2: Keystone logs every phone connection, a once-a-minute heartbeat and the stack of any crash, and odd characters in device or file names can no longer break the link. 0.1.1: the phone shows where it is looking for Keystone and lets you type the laptop's address. Keystone 0.1: the whole live chain, run from a laptop with no screen and controlled from your phone.
+Keystone 0.1.4: the Tuner and Output pages show the bass input level in words, and the log records it every minute. 0.1.3: the phone connects when it is on home Wi-Fi and hosting the hotspot at the same time. 0.1.2: Keystone logs every phone connection, a once-a-minute heartbeat and the stack of any crash, and odd characters in device or file names can no longer break the link. 0.1.1: the phone shows where it is looking for Keystone and lets you type the laptop's address. Keystone 0.1: the whole live chain, run from a laptop with no screen and controlled from your phone.
 
 ## Download
 
-- **Keystone-0.1.3-Setup.exe**: the Windows 11 app. Starts with Windows, runs with the lid closed, plays through the UM2 in Windows' low-latency exclusive mode, listens to the footswitches and expression pedal over USB.
-- **Keystone-0.1.3.apk**: the phone controller. Finds Keystone on your hotspot by itself, works with no internet, keeps the screen awake.
-- **Keystone-0.1.3-linux-arm64.tar.gz**: the same app built for ARM64 Linux, for the Pi later. Built and tested here so portability problems show up early.
+- **Keystone-0.1.4-Setup.exe**: the Windows 11 app. Starts with Windows, runs with the lid closed, plays through the UM2 in Windows' low-latency exclusive mode, listens to the footswitches and expression pedal over USB.
+- **Keystone-0.1.4.apk**: the phone controller. Finds Keystone on your hotspot by itself, works with no internet, keeps the screen awake.
+- **Keystone-0.1.4-linux-arm64.tar.gz**: the same app built for ARM64 Linux, for the Pi later. Built and tested here so portability problems show up early.
 
 ## Latency
 

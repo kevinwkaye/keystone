@@ -340,7 +340,8 @@ private:
         {
             heartbeatTick = 0;
             Logger::writeToLog ("Still running. Phones connected: " + String (link.clientCount()) + ". " + (audio ? audio->status() : String())
-                                + ". CPU " + String (audio ? audio->cpuLoad() * 100.0f : 0.0f, 1) + "%");
+                                + ". CPU " + String (audio ? audio->cpuLoad() * 100.0f : 0.0f, 1) + "%. Bass input peak "
+                                + String (Decibels::gainToDecibels (engine.meters().inPeak, -100.0f), 0) + " dB");
         }
         controller->tick (now);
         flush();

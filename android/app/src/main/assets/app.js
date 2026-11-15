@@ -236,8 +236,19 @@ var KS = (function () {
       '<button type="button" class="' + (drop ? '' : 'on') + '" data-set="drone.tuning" data-v="0" style="min-height:52px;font-size:17px">Standard E</button>' +
       '<button type="button" class="' + (drop ? 'on' : '') + '" data-set="drone.tuning" data-v="1" style="min-height:52px;font-size:17px">Drop D</button></div></div>' +
       '<label class="switch">Mute output while tuning<input type="checkbox" data-toggle="tuner.mute"' + (muted ? ' checked' : '') + '></label>' +
+      '<div class="small" id="inLevel">' + inputText() + '</div>' +
       '<div class="small">Reference A = ' + Math.round(val('tuner.ref')) + ' Hz. Hold C, or tap any footswitch, to leave the tuner.</div>' +
       nav('tuner') + '</section>';
+  }
+
+  // what the bass input is doing, in words
+  function inputText() {
+    var d = S.meter.in;
+    if (d == null) return 'Input: waiting for Keystone';
+    if (d < -70) return 'Input: silent. Check the cable, the input gain and Windows microphone access.';
+    if (d < -40) return 'Input: very quiet (' + Math.round(d) + ' dB). Turn the input gain up.';
+    if (d > -1) return 'Input: clipping (' + Math.round(d) + ' dB). Turn the input gain down.';
+    return 'Input: ' + Math.round(d) + ' dB, good';
   }
 
   function moduleState(m) {
@@ -374,6 +385,7 @@ var KS = (function () {
       var mt = S.meter;
       extra = '<section class="card"><h2 class="label">Keep</h2><label class="switch" style="background:#262626">Tag Keeps as Live<input type="checkbox" data-act="keeperLive"' + (S.keeperLive ? ' checked' : '') + '></label></section>' +
         '<section class="card"><h2 class="label">Keystone</h2><span class="small">Audio: ' + esc(S.audio || 'unknown') + '</span>' +
+        '<span class="small" id="inLevel">' + inputText() + '</span>' +
         '<span class="small">CPU ' + (mt.cpu != null ? mt.cpu : '-') + '%' + (mt.light ? ', effects in light mode' : '') + '. Round trip ' + (mt.lat || '-') + ' ms.</span>' +
         '<span class="small">Version ' + esc(S.schema.version) + '</span></section>';
     }
@@ -446,6 +458,8 @@ var KS = (function () {
       if (droneTile && droneTile.textContent !== want) render(true);
     } else if (S.screen === 'tuner') {
       render(true);
+    } else if (S.screen === 'module' && S.module === 'output') {
+      var il = document.getElementById('inLevel'); if (il) il.textContent = inputText();
     } else if (S.screen === 'module' && S.module === 'bloom') {
       var b2 = document.getElementById('bloomBar'); if (b2) b2.style.width = (m.bloom * 100) + '%';
     }
