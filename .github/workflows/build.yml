@@ -44,6 +44,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item bench.md bench-windows.md
 
+      - name: Link test (start Keystone, connect like the phone)
+        run: python tools/linktest.py build\app\Keystone_artefacts\Release\Keystone.exe
+
       - name: Installer
         shell: pwsh
         run: |
