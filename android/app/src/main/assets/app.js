@@ -13,17 +13,22 @@ var KS = (function () {
     footswitch: '', audio: '', keeperLive: false,
     meter: {}, screen: 'play', module: null, prevScreen: 'play', tunerAuto: false,
     editVoice: null, sel: null, openRow: -1, renameRow: -1, confirmDel: -1,
-    noteFor: 0, noteUntil: 0, bloomDrag: null
+    noteFor: 0, noteUntil: 0, bloomDrag: null,
+    health: null, rtt: null, healthAt: 0
   };
 
   // ---------------------------------------------------------------- transport
+  var NAV_ONLY = { hello: 1, ping: 1, tuner: 1 };
+  function connected() { return S.link === 'connected'; }
   function send(o) {
+    if (!connected() && !NAV_ONLY[o.t]) { toast('NOT CONNECTED'); return false; }
     var line = JSON.stringify(o);
     if (window.KeystoneNative) window.KeystoneNative.send(line);
     else if (window.KSMock) window.KSMock.send(line);
   }
   var pendingSet = {}, setTimer = null;
   function setParam(id, v) {          // throttled while dragging
+    if (!connected()) { toast('NOT CONNECTED'); return; }
     S.values[id] = v;
     pendingSet[id] = v;
     if (!setTimer) setTimer = setTimeout(function () {
@@ -38,23 +43,32 @@ var KS = (function () {
     try { m = typeof line === 'string' ? JSON.parse(line) : line; } catch (e) { return; }
     switch (m.t) {
       case 'schema':
-        S.schema = m; S.params = {}; S.modules = m.modules;
-        m.params.forEach(function (p) { S.params[p.id] = p; });
-        render(); break;
+        useSchema(m);
+        try { localStorage.setItem('ks.schema', JSON.stringify(m)); } catch (e) {}
+        queueRender(); break;
       case 'state':
         S.values = m.values; S.songs = m.songs; S.current = m.current; S.edited = m.edited;
         S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile;
         S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive;
         tunerState(m.tuner);
-        render(); break;
+        try { localStorage.setItem('ks.state', JSON.stringify(m)); } catch (e) {}
+        queueRender(); break;
       case 'val':
+        if (pendingSet[m.id] === undefined && S.values[m.id] === m.v && S.edited === m.edited) break;   // nothing new
         if (pendingSet[m.id] === undefined) S.values[m.id] = m.v;
         S.edited = m.edited;
-        render(true); break;
+        queueRender(true); break;
+      case 'health':
+        S.health = m; S.healthAt = Date.now();
+        if (S.screen === 'health') queueRender(true); else strip();
+        break;
+      case 'pong':
+        if (m.ts) S.rtt = Date.now() - m.ts;
+        break;
       case 'meter':
         S.meter = m;
         if (m.tuner) tunerState(true); else if (S.tuner) tunerState(false);
-        meters(); break;
+        queueMeters(); break;
       case 'toast':
         toast(m.text);
         if (m.text === 'KEPT') { S.noteUntil = Date.now() + 20000; nod(); render(true); }
@@ -63,9 +77,38 @@ var KS = (function () {
   }
 
   function onLink(status, detail) {
+    if (status !== 'connected') { S.health = null; S.rtt = null; }
     S.link = status; S.linkDetail = detail || '';
     if (status === 'connected') send({ t: 'hello', client: 'android', v: 1 });
     render(true);
+  }
+
+  function useSchema(m) {
+    S.schema = m; S.params = {}; S.modules = m.modules;
+    m.params.forEach(function (p) { S.params[p.id] = p; });
+  }
+  // Menus work before Keystone is found: the last state seen, or the built-in defaults
+  function loadOffline() {
+    var sc = null, st = null;
+    try { sc = JSON.parse(localStorage.getItem('ks.schema')); st = JSON.parse(localStorage.getItem('ks.state')); } catch (e) {}
+    if (!sc && window.KS_DEFAULT) { sc = window.KS_DEFAULT.schema; st = window.KS_DEFAULT.state; }
+    if (sc) useSchema(sc);
+    if (st) { S.values = st.values || {}; S.songs = st.songs || []; S.current = st.current || 0; S.captures = st.captures || []; S.capture = st.capture; S.captureFile = st.captureFile; }
+  }
+
+  // Renders and meter updates are coalesced into one per screen frame, so a burst of
+  // messages never queues up work behind your finger
+  var renderQueued = 0, metersQueued = false;
+  function queueRender(soft) {
+    if (renderQueued === 2 || (renderQueued === 1 && soft)) return;
+    var first = !renderQueued;
+    renderQueued = soft ? 1 : 2;
+    if (first) requestAnimationFrame(function () { var hard = renderQueued === 2; renderQueued = 0; render(!hard); });
+  }
+  function queueMeters() {
+    if (metersQueued) return;
+    metersQueued = true;
+    requestAnimationFrame(function () { metersQueued = false; meters(); });
   }
 
   function tunerState(on) {
@@ -128,8 +171,63 @@ var KS = (function () {
     '<path d="M88 116 Q 100 126, 112 116" fill="none" stroke="#0B0B12" stroke-width="6" stroke-linecap="round"/></svg>';
 
   function pill() {
-    var c = S.link === 'connected';
-    return '<div class="pill"><span class="dot ' + (c ? '' : 'searching') + '"></span>' + (c ? 'Connected' : 'Searching') + '</div>';
+    var c = S.link === 'connected', w = warnings().length;
+    var label = !c ? 'Searching' : w ? w + (w > 1 ? ' problems' : ' problem') : 'Connected';
+    return '<button type="button" class="pill" data-go="health" style="border:none" aria-label="Open Health"><span class="dot ' + (!c ? 'searching' : w ? 'warn' : '') + '"></span>' + label + '</button>';
+  }
+
+  // ---- Health: what to check on stage, in plain words
+  function warnings() {
+    var h = S.health, out = [];
+    if (!connected() || !h) return out;
+    if (!h.audio.ok) out.push('Audio interface not running: ' + h.audio.text);
+    else if (h['in'].dead) out.push('No signal at all from the interface. Check Windows microphone access and the cable.');
+    else if (h['in'].db > -1) out.push('Bass input clipping: turn the input gain down');
+    if (!h.fs.ok) out.push('Footswitches not connected');
+    if (h.laptop.recent > 0) out.push(h.laptop.recent + ' dropouts in the last minute');
+    if (h.laptop.cpu > 80) out.push('Laptop CPU at ' + h.laptop.cpu + '%');
+    if (S.healthAt && Date.now() - S.healthAt > 5000) out.push('Keystone has gone quiet: no news for ' + Math.round((Date.now() - S.healthAt) / 1000) + ' s');
+    return out;
+  }
+  function stripText(w) { return w[0] + (w.length > 1 ? ' (+' + (w.length - 1) + ' more)' : ''); }
+  function strip() {
+    var el = document.getElementById('warnStrip'), w = warnings();
+    var pl = document.querySelector('.pill');
+    if (pl) { var np = pill(); if (pl.outerHTML !== np) pl.outerHTML = np; }
+    if (S.screen !== 'play' || !w.length) { if (el) el.remove(); return; }
+    var html = '<button type="button" id="warnStrip" data-go="health" class="warnstrip">' + esc(stripText(w)) + '</button>';
+    if (el) { if (el.textContent !== stripText(w)) el.outerHTML = html; }
+    else { var top = document.querySelector('.screen .top'); if (top) top.insertAdjacentHTML('afterend', html); }
+  }
+  function ago(sec) { return sec < 0 ? 'never' : sec < 60 ? sec + ' s ago' : Math.round(sec / 60) + ' min ago'; }
+  function healthScreen() {
+    var h = S.health, c = connected(), g = '#5DCAA5', o = '#F0997B', w = warnings();
+    var head = !c ? '<span class="small" style="color:#F0997B">Not connected</span>' : w.length ? '<span class="small" style="color:#F0997B">' + w.length + (w.length > 1 ? ' problems' : ' problem') + '</span>' : '<span class="small" style="color:#5DCAA5">All good</span>';
+    var rows = [];
+    if (!c || !h) rows.push({ n: 'Phone link', d: S.linkDetail || 'Looking for Keystone', ok: false, st: c ? 'WAITING' : 'SEARCHING' });
+    else {
+      rows.push({ n: 'Audio interface', d: h.audio.text, ok: h.audio.ok });
+      rows.push({ n: 'Footswitches', d: h.fs.text + (h.fs.ago >= 0 ? ', last press ' + ago(h.fs.ago) + ' (' + h.fs.last + ')' : ''), ok: h.fs.ok });
+      rows.push({ n: 'Expression', d: h.exp.ago < 0 ? 'Not moved yet' : 'Bloom ' + Math.round(h.exp.pos * 100) + '%, moved ' + ago(h.exp.ago) + (h.exp.cal ? '' : ', not calibrated'), ok: h.exp.ago >= 0, st: h.exp.ago < 0 ? 'IDLE' : 'OK' });
+      rows.push({ n: 'Output', d: h.out.db + ' dB peak' + (h.out.lim > 0.5 ? ', limiter working ' + h.out.lim.toFixed(1) + ' dB' : ', limiter idle'), ok: true });
+      rows.push({ n: 'Laptop', d: 'CPU ' + h.laptop.cpu + '%, ' + (h.laptop.dropouts ? h.laptop.dropouts + ' dropouts, ' + h.laptop.recent + ' in the last minute' : 'no dropouts') + (h.laptop.light ? ', effects light' : '') + ', up ' + Math.round(h.uptime / 60) + ' min', ok: h.laptop.cpu <= 80 && h.laptop.recent === 0 });
+      rows.push({ n: 'Phone link', d: (S.linkDetail || '') + (S.rtt != null ? ', ' + S.rtt + ' ms round trip' : ''), ok: true });
+    }
+    var inDb = h ? h['in'].db : null;
+    var frac = inDb == null ? 0 : Math.max(0, Math.min(1, (inDb + 60) / 60));
+    var inCol = inDb == null || inDb < -50 ? '#8A847A' : inDb > -1 ? o : g;
+    return '<section class="screen" style="gap:14px">' + header('Health', { id: 'play', label: 'Play' }, head) +
+      '<section class="card" style="gap:10px"><h2 class="label">Bass in</h2><div class="bar" style="height:14px"><div style="width:' + (frac * 100) + '%;background:' + inCol + '"></div></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:14px"><span>' + esc(inputText()) + '</span><span class="muted">' + (h ? 'Input ' + h['in'].ch : '') + '</span></div></section>' +
+      '<section class="card" style="padding:6px 16px;gap:0">' + rows.map(function (r) {
+        var col = r.ok ? g : o;
+        return '<div style="display:flex;align-items:center;gap:12px;min-height:54px;border-bottom:1px solid #262626"><span style="width:10px;height:10px;border-radius:50%;background:' + col + ';flex:none"></span>' +
+          '<span style="display:flex;flex-direction:column;flex:1;min-width:0"><span style="font-size:17px;font-weight:500">' + esc(r.n) + '</span><span class="small" style="font-size:13px">' + esc(r.d) + '</span></span>' +
+          '<span style="font-size:13px;font-weight:700;color:' + col + '">' + (r.st || (r.ok ? 'OK' : 'CHECK')) + '</span></div>';
+      }).join('') + '</section>' +
+      '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
+      '<div class="small">If something goes wrong on stage, a warning strip appears across the top of Play. Tap it to come here.</div>' +
+      nav('play') + '</section>';
   }
   function nav(active) {
     function b(id, label) { return '<button type="button" data-go="' + id + '" class="' + (active === id ? 'on' : '') + '">' + label + '</button>'; }
@@ -211,6 +309,26 @@ var KS = (function () {
       '<circle cx="155" cy="140" r="9" fill="#4B57FF"/></svg>';
   }
 
+  function tunerView() {
+    var t = S.meter.tuner || {};
+    var valid = !!t.valid, cents = valid ? t.cents : 0, inTune = valid && Math.abs(cents) <= 2;
+    return {
+      note: valid ? t.note.replace('#', '\u266F') : '-', oct: valid ? String(t.oct) : ' ',
+      p: needle(90 - Math.max(-50, Math.min(50, cents)) * 1.8), col: inTune ? '#5DCAA5' : '#F2EDE4',
+      cents: valid ? (cents > 0 ? '+' : '') + Math.round(cents) + ' cents' : '--',
+      msg: !valid ? 'Play a string' : inTune ? 'In tune' : Math.abs(cents) < 10 ? 'Nearly there. Green when within 2 cents.' : cents < 0 ? 'Flat: tune up' : 'Sharp: tune down'
+    };
+  }
+  function updateTuner() {
+    var v = tunerView(), q = function (id) { return document.getElementById(id); };
+    if (!q('tnote')) return;
+    if (q('tnote').textContent !== v.note) { q('tnote').textContent = v.note; q('toct').textContent = v.oct; }
+    q('tneedle').setAttribute('x2', v.p.x.toFixed(1)); q('tneedle').setAttribute('y2', v.p.y.toFixed(1)); q('tneedle').setAttribute('stroke', v.col);
+    q('tcents').textContent = v.cents; q('tcents').style.color = v.col;
+    q('tmsg').textContent = v.msg;
+    var il = q('inLevel'); if (il) il.textContent = inputText();
+  }
+
   function tunerScreen() {
     var t = S.meter.tuner || {};
     var valid = t.valid, cents = valid ? t.cents : 0;
@@ -221,7 +339,7 @@ var KS = (function () {
     var muted = on('tuner.mute');
     return '<section class="screen" style="gap:20px">' +
       '<div class="top"><span class="title">Tuner</span><div class="pill"><span class="dot" style="background:' + (muted ? '#F0997B' : '#5DCAA5') + '"></span>' + (muted ? 'Output muted' : 'Output live') + '</div></div>' +
-      '<div class="tnote">' + flip(valid ? t.note.replace('#', '♯') : '-', 'big') + flip(valid ? t.oct : ' ', 'oct') + '</div>' +
+      '<div class="tnote"><span class="flip big" id="tnote">' + esc(valid ? t.note.replace('#', '\u266F') : '-') + '</span><span class="flip oct" id="toct">' + esc(valid ? t.oct : ' ') + '</span></div>' +
       '<div class="card" style="align-items:center;gap:4px;padding:16px"><svg width="310" height="150" viewBox="0 0 310 150" role="img" aria-label="Tuning needle">' +
       '<path d="M35 140 A 120 120 0 0 1 275 140" fill="none" stroke="#3A3A40" stroke-width="2"/>' +
       '<path d="M135 22 A 120 120 0 0 1 175 22" fill="none" stroke="#5DCAA5" stroke-width="8"/><line x1="155" y1="20" x2="155" y2="4" stroke="#5DCAA5" stroke-width="3"/>' +
@@ -230,8 +348,8 @@ var KS = (function () {
       '<text x="30" y="126" font-size="13" fill="#F0997B" text-anchor="middle">Flat</text><text x="280" y="126" font-size="13" fill="#F0997B" text-anchor="middle">Sharp</text>' +
       '<line id="tneedle" x1="155" y1="140" x2="' + p.x.toFixed(1) + '" y2="' + p.y.toFixed(1) + '" stroke="' + (inTune ? '#5DCAA5' : '#F2EDE4') + '" stroke-width="3" stroke-linecap="round"/>' +
       '<circle cx="155" cy="140" r="9" fill="#4B57FF"/></svg>' +
-      '<div class="cents" style="color:' + (inTune ? '#5DCAA5' : '#F2EDE4') + '">' + (valid ? (cents > 0 ? '+' : '') + Math.round(cents) + ' cents' : '--') + '</div>' +
-      '<div class="small">' + msg + '</div></div>' +
+      '<div class="cents" id="tcents" style="color:' + (inTune ? '#5DCAA5' : '#F2EDE4') + '">' + (valid ? (cents > 0 ? '+' : '') + Math.round(cents) + ' cents' : '--') + '</div>' +
+      '<div class="small" id="tmsg">' + msg + '</div></div>' +
       '<div style="display:flex;flex-direction:column;gap:10px"><div class="label">Tuning</div><div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))">' +
       '<button type="button" class="' + (drop ? '' : 'on') + '" data-set="drone.tuning" data-v="0" style="min-height:52px;font-size:17px">Standard E</button>' +
       '<button type="button" class="' + (drop ? 'on' : '') + '" data-set="drone.tuning" data-v="1" style="min-height:52px;font-size:17px">Drop D</button></div></div>' +
@@ -243,6 +361,7 @@ var KS = (function () {
 
   // what the bass input is doing, in words
   function inputText() {
+    if (S.health && S.health['in'].dead) return 'Input: no signal at all. Check Windows microphone access.';
     var d = S.meter.in;
     if (d == null) return 'Input: waiting for Keystone';
     if (d < -70) return 'Input: silent. Check the cable, the input gain and Windows microphone access.';
@@ -419,7 +538,7 @@ var KS = (function () {
   var app = document.getElementById('app');
   var lastScreenKey = '';
   function render(soft) {
-    if (!S.schema && S.screen !== 'play') S.screen = 'play';
+    if (!S.schema && S.screen !== 'play' && S.screen !== 'health') S.screen = 'play';
     var active = document.activeElement;
     if (soft && active && active.tagName === 'INPUT' && active.type === 'text') return;   // don't wipe typing
     if (soft && S.dragging) return;
@@ -429,6 +548,7 @@ var KS = (function () {
       case 'tone': html = S.schema ? toneScreen() : playScreen(); break;
       case 'module': html = S.schema ? moduleScreen() : playScreen(); break;
       case 'setlist': html = setlistScreen(); break;
+      case 'health': html = healthScreen(); break;
       default: html = playScreen();
     }
     var key = S.screen + (S.module || '');
@@ -437,6 +557,7 @@ var KS = (function () {
     if (key === lastScreenKey) window.scrollTo(0, y); else window.scrollTo(0, 0);
     lastScreenKey = key;
     if (S.sel) sheet();
+    strip();
   }
 
   // meters only touch what moves
@@ -457,7 +578,7 @@ var KS = (function () {
       var want = m.drone ? 'HOLDING' + (m.drone > 1 ? ' ' + m.drone : '') : 'READY';
       if (droneTile && droneTile.textContent !== want) render(true);
     } else if (S.screen === 'tuner') {
-      render(true);
+      updateTuner();
     } else if (S.screen === 'module' && S.module === 'output') {
       var il = document.getElementById('inLevel'); if (il) il.textContent = inputText();
     } else if (S.screen === 'module' && S.module === 'bloom') {
@@ -511,13 +632,22 @@ var KS = (function () {
     if (!t) return;
     var d = t.dataset;
     if (d.go) return go(d.go);
-    if (d.stomp) { send({ t: 'stomp', k: d.stomp }); return; }
+    if (d.stomp) {
+      // show the change at once; Keystone's answer confirms it
+      if (send({ t: 'stomp', k: d.stomp })) {
+        if (d.stomp === 'B') S.values['bitrot.on'] = on('bitrot.on') ? 0 : 1;
+        if (d.stomp === 'C') S.values['filter.on'] = on('filter.on') ? 0 : 1;
+        if (d.stomp === 'A' && on('drive.on')) S.values['drive.voice'] = Math.round(val('drive.voice')) ? 0 : 1;
+        render(true);
+      }
+      return;
+    }
     if (d.module) { S.module = d.module; return go('module'); }
     if (d.set) { setParam(d.set, +d.v); return render(true); }
     if (d.toggle) { setParam(d.toggle, t.checked ? 1 : 0); return render(true); }
     if (d.flip) { S.sel = S.sel === d.flip ? null : d.flip; render(true); if (!S.sel) sheetEl.hidden = true; return; }
     if (d.step) return step(+d.step);
-    if (d.song) { send({ t: 'song', i: +d.song }); return; }
+    if (d.song) { if (send({ t: 'song', i: +d.song })) { S.current = +d.song; render(true); } return; }
     if (d.menu) { var i = +d.menu; S.openRow = S.openRow === i ? -1 : i; S.renameRow = -1; S.confirmDel = -1; return render(); }
     if (d.capture) { send({ t: 'capture', file: d.capture }); S.showCaptures = false; return render(); }
     if (d.learn) { send({ t: 'learn', sw: +d.learn }); return; }
@@ -526,8 +656,10 @@ var KS = (function () {
     switch (d.act) {
       case 'keep': send({ t: 'keep' }); break;
       case 'manual': var mi = document.getElementById('manualIp'); if (mi && mi.value.trim()) { S.manualIp = mi.value.trim(); if (window.KeystoneNative && KeystoneNative.connectTo) KeystoneNative.connectTo(S.manualIp); toast('TRYING'); } break;
-      case 'prev': send({ t: 'songStep', d: -1 }); break;
-      case 'next': send({ t: 'songStep', d: 1 }); break;
+      case 'prev': if (send({ t: 'songStep', d: -1 }) && S.songs.length) { S.current = (S.current + S.songs.length - 1) % S.songs.length; render(true); } break;
+      case 'next': if (send({ t: 'songStep', d: 1 }) && S.songs.length) { S.current = (S.current + 1) % S.songs.length; render(true); } break;
+      case 'restartAudio': send({ t: 'restartAudio' }); break;
+      case 'light': setParam('output.quality', Math.round(val('output.quality')) === 2 ? 0 : 2); render(true); break;
       case 'note': var nt = document.getElementById('noteText'); if (nt && nt.value.trim()) send({ t: 'keepNote', text: nt.value.trim() }); S.noteUntil = 0; render(); break;
       case 'sheetClose': S.sel = null; sheetEl.hidden = true; render(true); break;
       case 'captures': S.showCaptures = !S.showCaptures; render(); break;
@@ -546,6 +678,10 @@ var KS = (function () {
       case 'delNo': S.confirmDel = -1; render(); break;
     }
   });
+
+  document.addEventListener('pointerdown', function (e) { if (e.target.type === 'range') S.dragging = true; });
+  document.addEventListener('pointerup', function () { if (S.dragging && S.bloomDrag == null && !drag) { S.dragging = false; queueRender(true); } });
+  document.addEventListener('pointercancel', function () { if (S.bloomDrag == null && !drag) S.dragging = false; });
 
   document.addEventListener('input', function (e) {
     var t = e.target;
@@ -639,6 +775,8 @@ var KS = (function () {
     return false;
   }
 
+  loadOffline();
+  setInterval(function () { if (connected()) strip(); }, 1000);
   render();
   return { onMessage: onMessage, onLink: onLink, back: back, state: S };
 })();

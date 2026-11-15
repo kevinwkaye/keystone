@@ -27,6 +27,10 @@ public:
     double latencyMs() const { return latency.load(); }
     float cpuLoad() const { return (float) deviceManager.getCpuUsage(); }
     bool running() const { return isRunning.load(); }
+    int dropouts() const;                      // the device's own count plus late callbacks
+    int inputChannel() const { return chosenChannel.load(); }
+    juce::String deviceName() const;
+    void restart() { needsReopen.store (true); }
 
     void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
                                            const juce::AudioIODeviceCallbackContext&) override;
@@ -51,5 +55,7 @@ private:
     // input channel choice (Auto picks the louder input, with hysteresis)
     float chanLevel[2] { 0, 0 };
     int chosen = 1, louderFor = 0;
+    std::atomic<int> chosenChannel { 1 }, lateCallbacks { 0 };
+    double callbackBudgetMs = 3.0;
     juce::CriticalSection statusLock;
 };

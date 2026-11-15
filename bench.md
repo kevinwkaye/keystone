@@ -6,8 +6,8 @@
 
 | Case | 64 samples | 128 samples |
 |---|---|---|
-| Song default, modelled drive | 2.4% | 1.8% |
-| Everything on, Bloom at 80% | 2.8% | 2.8% |
-| Everything on, light effects | 2.9% | 3.2% |
+| Song default, modelled drive | 1.8% | 2.0% |
+| Everything on, Bloom at 80% | 3.3% | 2.8% |
+| Everything on, light effects | 3.6% | 2.7% |
 
 CPU is the share of one core for one Keystone at 48 kHz, measured on the build machine.

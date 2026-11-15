@@ -133,3 +133,6 @@ input[type=range] { width: 100%; accent-color: var(--blue); height: 32px; }
 @keyframes blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(0.1); } }
 .pebble.nod { animation: nod 0.6s ease-in-out 2; }
 @keyframes nod { 50% { transform: translateY(4px) rotate(-4deg); } }
+
+.dot.warn { background: var(--orange); }
+.warnstrip { width: 100%; min-height: 48px; border: none; border-radius: 10px; background: var(--orange); color: #0E0E10; font-size: 15px; font-weight: 700; text-align: left; padding: 8px 14px; }

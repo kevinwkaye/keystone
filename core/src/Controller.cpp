@@ -585,5 +585,6 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         if (onCalibrate) onCalibrate (m.value ("step", 0));
     }
     else if (t == "state") reply (stateJson());
+    else if (t == "restartAudio") { if (onRestartAudio) onRestartAudio(); queueToast ("RESTARTING AUDIO"); }
 }
 } // namespace ks

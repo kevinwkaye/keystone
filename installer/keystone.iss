@@ -3,7 +3,7 @@
 ; firewall so the phone can find it on the hotspot.
 
 #ifndef AppVersion
-  #define AppVersion "0.1.4"
+  #define AppVersion "0.1.5"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\build\app\Keystone_artefacts\Release"
@@ -44,7 +44,7 @@ Name: "{group}\Keystone folder (captures, log, songs)"; Filename: "{userdocs}\Ke
 Name: "{group}\Uninstall Keystone"; Filename: "{uninstallexe}"
 
 [Registry]
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Keystone"; ValueData: """{app}\Keystone.exe"""; Flags: uninsdeletevalue; Tasks: startup
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Keystone"; ValueData: """{app}\Keystone.exe"" --background"; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
 ; firewall: one rule for the app covers the phone link (TCP 47801) and discovery (UDP 47800) on every network type

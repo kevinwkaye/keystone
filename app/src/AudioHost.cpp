@@ -136,7 +136,22 @@ void AudioHost::audioDeviceAboutToStart (AudioIODevice* dev)
     // round trip: device's own input and output latency plus the engine's alignment
     const int lat = dev->getInputLatencyInSamples() + dev->getOutputLatencyInSamples() + engine.latencySamples();
     latency.store (lat * 1000.0 / sr);
+    callbackBudgetMs = bs * 1000.0 / sr;
     isRunning.store (true);
+}
+
+int AudioHost::dropouts() const
+{
+    int n = lateCallbacks.load();
+    if (auto* dev = const_cast<AudioDeviceManager&> (deviceManager).getCurrentAudioDevice())
+        n += std::max (0, dev->getXRunCount());
+    return n;
+}
+
+String AudioHost::deviceName() const
+{
+    const ScopedLock l (statusLock);
+    return openName;
 }
 
 void AudioHost::audioDeviceStopped() { isRunning.store (false); }
@@ -153,6 +168,7 @@ void AudioHost::audioDeviceError (const String& message)
 void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
                                                   const AudioIODeviceCallbackContext&)
 {
+    const double startMs = Time::getMillisecondCounterHiRes();
     if ((size_t) n > monoIn.size())
     {
         for (int c = 0; c < numOut; ++c) if (out[c] != nullptr) FloatVectorOperations::clear (out[c], n);
@@ -193,6 +209,9 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
 
     keeper.pushInput (monoIn.data(), monoIn.data(), n);
     keeper.pushOutput (monoOut.data(), monoOut.data(), n);
+    chosenChannel.store (use);
+    // a callback that took longer than its own buffer is a dropout in the making
+    if (Time::getMillisecondCounterHiRes() - startMs > callbackBudgetMs) lateCallbacks.fetch_add (1);
 }
 
 void AudioHost::timerCallback()

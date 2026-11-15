@@ -18,6 +18,10 @@ juce_add_gui_app(Keystone
     VERSION ${PROJECT_VERSION}
     ICON_BIG ${CMAKE_CURRENT_SOURCE_DIR}/icon.png)
 
+juce_add_binary_data(KeystoneData SOURCES
+    Resources/RobotoCondensed.ttf
+    Resources/RobotoCondensed-Bold.ttf)
+
 target_sources(Keystone PRIVATE
     src/Main.cpp
     src/AudioHost.cpp
@@ -43,6 +47,7 @@ target_compile_definitions(Keystone PRIVATE
 
 target_link_libraries(Keystone PRIVATE
     keystone_core
+    KeystoneData
     juce::juce_core
     juce::juce_events
     juce::juce_audio_basics
@@ -50,7 +55,7 @@ target_link_libraries(Keystone PRIVATE
     juce::juce_audio_formats
     juce::juce_recommended_config_flags)
 
-if(WIN32)
+if(WIN32 OR KEYSTONE_FORCE_TRAY)
     # a tray icon for anyone with a screen; the Pi build stays headless
     target_compile_definitions(Keystone PRIVATE KEYSTONE_TRAY=1)
     target_link_libraries(Keystone PRIVATE juce::juce_gui_extra)

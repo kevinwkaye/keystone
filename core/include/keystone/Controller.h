@@ -18,7 +18,7 @@ class Controller
 {
 public:
     static constexpr int kMaxSongs = 15;
-    static constexpr const char* kVersion = "0.1.4";
+    static constexpr const char* kVersion = "0.1.5";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -51,6 +51,7 @@ public:
     std::function<void (bool)> setKeeperLiveTag;
     std::function<int()> lastKeepNumber;
     std::function<void (const std::string&)> onLog;
+    std::function<void()> onRestartAudio;
 
     // songs
     int songCount() const;

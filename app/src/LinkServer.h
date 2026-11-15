@@ -32,6 +32,7 @@ public:
     void broadcast (const juce::String& line, bool droppable = false);
     int clientCount() const;
     juce::String addresses() const;
+    juce::StringArray clientAddresses() const;
 
 private:
     struct Client;

@@ -104,6 +104,7 @@ struct LinkServer::Client : public Thread
     };
 
     const int id;
+    String from;
     std::unique_ptr<StreamingSocket> socket;
     LinkServer& owner;
     std::atomic<bool> alive { true };
@@ -228,6 +229,7 @@ void LinkServer::run()
             const ScopedLock l (clientsLock);
             id = nextId++;
             c = std::make_shared<Client> (id, std::move (s), *this);
+            c->from = from;
             clients[id] = c;
         }
         Logger::writeToLog ("Link: connection " + String (id) + " from " + from);
@@ -271,6 +273,14 @@ int LinkServer::clientCount() const
     int n = 0;
     for (auto& [id, c] : clients) n += c->alive ? 1 : 0;
     return n;
+}
+
+StringArray LinkServer::clientAddresses() const
+{
+    const ScopedLock l (clientsLock);
+    StringArray a;
+    for (auto& [id, c] : clients) if (c->alive) a.addIfNotAlreadyThere (c->from);
+    return a;
 }
 
 String LinkServer::addresses() const

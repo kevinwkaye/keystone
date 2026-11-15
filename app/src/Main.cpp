@@ -6,6 +6,7 @@
 // anyone with a screen. Logs go to Documents/Keystone/keystone.log.
 
 #include "AudioHost.h"
+#include "Health.h"
 #include "Keeper.h"
 #include "LinkServer.h"
 #include "PedalControl.h"
@@ -17,7 +18,9 @@
 
 #if KEYSTONE_TRAY
 #include <juce_gui_extra/juce_gui_extra.h>
+#include "StatusWindow.h"
 #endif
+#include <deque>
 
 #if JUCE_WINDOWS
 #include <windows.h>
@@ -79,6 +82,7 @@ class Tray : public SystemTrayIconComponent
 public:
     std::function<String()> tooltip;
     std::function<void (int)> onMenu;
+    std::function<void()> onShow;
 
     Tray()
     {
@@ -96,10 +100,12 @@ public:
         setIconTooltip ("Keystone");
     }
     void mouseEnter (const MouseEvent&) override { if (tooltip) setIconTooltip (tooltip()); }
-    void mouseDown (const MouseEvent&) override
+    void mouseDown (const MouseEvent& e) override
     {
         if (tooltip) setIconTooltip (tooltip());
+        if (! e.mods.isPopupMenu()) { if (onShow) onShow(); return; }
         PopupMenu m;
+        m.addItem (4, "Show Keystone");
         m.addSectionHeader (tooltip ? tooltip().upToFirstOccurrenceOf ("\n", false, false) : "Keystone");
         m.addItem (1, "Open the Keystone folder");
         m.addItem (2, "Open the Keepers folder");
@@ -118,7 +124,7 @@ public:
     const String getApplicationName() override { return "Keystone"; }
     const String getApplicationVersion() override { return ks::Controller::kVersion; }
     bool moreThanOneInstanceAllowed() override { return false; }
-    void anotherInstanceStarted (const String&) override {}
+    void anotherInstanceStarted (const String&) override { showWindow(); }   // opened again from the Start menu
     void suspended() override {}
     void resumed() override {}
     void systemRequestedQuit() override { quit(); }
@@ -178,6 +184,7 @@ public:
         housekeeping->startThread (Thread::Priority::low);
 
         controller->onLog = [] (const std::string& msg) { Logger::writeToLog (String (msg)); };
+        controller->onRestartAudio = [this] { Logger::writeToLog ("Audio: restart asked for"); audio->restart(); };
         link.onMessage = [this] (int client, const String& line)
         {
             try
@@ -194,11 +201,14 @@ public:
 #if KEYSTONE_TRAY
         tray = std::make_unique<Tray>();
         tray->tooltip = [this] { return statusText(); };
+        tray->onShow = [this] { showWindow(); };
+        if (! args.contains ("--background")) showWindow();   // started at sign-in: stay in the tray
         tray->onMenu = [this] (int item)
         {
             if (item == 1) home.startAsProcess();
             else if (item == 2) Keeper::folder().startAsProcess();
             else if (item == 3) { auto z = keeper.exportZip(); if (z.existsAsFile()) z.revealToUser(); }
+            else if (item == 4) showWindow();
             else if (item == 9) quit();
         };
 #endif
@@ -215,6 +225,7 @@ public:
         if (housekeeping) housekeeping->stopThread (2000);
         midi.reset();
 #if KEYSTONE_TRAY
+        window.reset();
         tray.reset();
 #endif
         audio.reset();
@@ -254,6 +265,7 @@ public:
         if (cc == pedals.expCC)
         {
             lastExpRaw.store (val);
+            lastExpTime.store (Time::getMillisecondCounterHiRes() * 0.001);
             engine.setBloom (pedals.expressionValue (val));
             return;
         }
@@ -265,6 +277,7 @@ public:
             const double now = Time::getMillisecondCounterHiRes() * 0.001;
             MessageManager::callAsync ([this, sw, down, now]
             {
+                if (down) { lastFsTime = now; lastFsName = String::charToString ((juce_wchar) ('A' + sw)) + " press"; }
                 if (down) controller->footswitchPress (sw, now);
                 else controller->footswitchRelease (sw, now);
                 flush();
@@ -312,6 +325,62 @@ private:
         controller->audioStatus = [this] { return audio ? audio->status().toStdString() : std::string(); };
     }
 
+public:
+    Health health()
+    {
+        Health h;
+        const double now = Time::getMillisecondCounterHiRes() * 0.001;
+        const auto m = engine.meters();
+        h.version = ks::Controller::kVersion;
+        h.song = String (controller->songName (controller->currentSong()));
+        h.songNumber = controller->currentSong() + 1;
+        h.uptimeSec = now - startedAt;
+        h.audioOk = audio && audio->running();
+        h.audioText = audio ? audio->status() : String();
+        h.inDb = Decibels::gainToDecibels (m.inPeak, -100.0f);
+        h.inChannel = audio ? audio->inputChannel() : 1;
+        h.inputDead = h.audioOk && m.inPeak < 1.0e-6f;
+        h.fsOk = midi && midi->connected();
+        h.fsText = midi ? midi->status().fromFirstOccurrenceOf ("Connected: ", false, false) : String();
+        if (h.fsText.isEmpty() && midi) h.fsText = midi->status();
+        h.fsAgoSec = lastFsTime < 0 ? -1 : now - lastFsTime;
+        h.fsLast = lastFsName;
+        h.expPos = m.bloom;
+        const double et = lastExpTime.load();
+        h.expAgoSec = et < 0 ? -1 : now - et;
+        h.expCalibrated = pedals.heel != 0 || pedals.toe != 127;
+        h.outDb = Decibels::gainToDecibels (m.outPeak, -100.0f);
+        h.limDb = m.limiterReduction;
+        h.cpu = audio ? audio->cpuLoad() : 0.0f;
+        h.dropouts = audio ? audio->dropouts() : 0;
+        dropHistory.push_back ({ now, h.dropouts });
+        while (! dropHistory.empty() && now - dropHistory.front().first > 60) dropHistory.pop_front();
+        h.dropoutsRecent = dropHistory.empty() ? 0 : h.dropouts - dropHistory.front().second;
+        h.light = m.light;
+        h.phones = link.clientCount();
+        h.phoneAddresses = link.clientAddresses().joinIntoString (", ");
+        h.laptopAddresses = link.addresses();
+        return h;
+    }
+
+private:
+    void showWindow()
+    {
+#if KEYSTONE_TRAY
+        if (window == nullptr)
+        {
+            auto* view = new status::View();
+            view->getHealth = [this] { return cachedHealth; };
+            view->onRestart = [this] { audio->restart(); };
+            view->onOpenFolder = [this] { home.startAsProcess(); };
+            view->onHide = [this] { if (window) window->setVisible (false); };
+            window = std::make_unique<status::Window> (view);
+        }
+        window->setVisible (true);
+        window->toFront (true);
+#endif
+    }
+
     void flush()
     {
         for (auto& b : controller->takeBroadcasts()) link.broadcast (String::fromUTF8 (b.c_str()));
@@ -345,6 +414,13 @@ private:
         }
         controller->tick (now);
         flush();
+        // health once a second: the status window and the phone's Health page
+        if (++healthTick >= 100)
+        {
+            healthTick = 0;
+            cachedHealth = health();
+            if (link.clientCount() > 0) link.broadcast (cachedHealth.toJson(), true);
+        }
         // meters about 25 times a second
         if (++meterTick >= 4)
         {
@@ -378,7 +454,16 @@ private:
     std::unique_ptr<Tray> tray;
 #endif
     std::atomic<int> learnTarget { -1 }, lastExpRaw { 0 };
-    int meterTick = 0, settingsTick = 0, heartbeatTick = 0;
+    int meterTick = 0, settingsTick = 0, heartbeatTick = 0, healthTick = 95;
+    double startedAt = Time::getMillisecondCounterHiRes() * 0.001;
+    double lastFsTime = -1;
+    String lastFsName;
+    std::atomic<double> lastExpTime { -1.0 };
+    std::deque<std::pair<double, int>> dropHistory;
+    Health cachedHealth;
+#if KEYSTONE_TRAY
+    std::unique_ptr<status::Window> window;
+#endif
     Watchdog watchdog;
     Time lastPedalFileTime;
 };

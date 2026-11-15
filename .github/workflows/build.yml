@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: "0.1.4"
+  VERSION: "0.1.5"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.
@@ -84,6 +84,8 @@ jobs:
           model=$(find build/_deps -name wavenet_a1_standard.nam | head -1)
           ./build/keystone_tests "$model"
           cp bench.md bench-linux-arm64.md
+          ./build/keystone_tests --defaults android/app/src/main/assets/defaults.js
+          git diff --exit-code android/app/src/main/assets/defaults.js || { echo "::error::defaults.js is out of date: run keystone_tests --defaults"; exit 1; }
 
       - name: Package and add to the release
         env:
