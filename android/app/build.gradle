@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'uk.kevinkaye.keystone'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'uk.kevinkaye.keystone'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    // One fixed key, kept in the repo, so each new APK installs over the last one.
+    // It only signs this hobby app; it protects nothing else.
+    signingConfigs {
+        release {
+            storeFile file('keystone.jks')
+            storePassword 'keystone-flip-fella'
+            keyAlias 'keystone'
+            keyPassword 'keystone-flip-fella'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            signingConfig signingConfigs.release
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

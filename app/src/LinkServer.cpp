@@ -2,6 +2,7 @@
 
 #include "keystone/Controller.h"
 
+#include <cstring>
 #include <deque>
 
 using namespace juce;
