@@ -93,6 +93,10 @@ final class Link {
             listener.onStatus("searching", nets + " Calling Keystone...");
             InetSocketAddress target = null;
             String manual = prefs().getString("manual", null);
+            if (manual != null && !manual.isEmpty() && isOwnAddress(manual)) {
+                listener.onStatus("searching", nets + " " + manual + " is this phone. Type the laptop's address instead.");
+                manual = null;
+            }
             if (manual != null && !manual.isEmpty()) {
                 target = tryConnectable(manual, TCP_PORT, 1500);
                 if (target == null) listener.onStatus("searching", nets + " Nothing answered at " + manual + ".");
@@ -196,6 +200,11 @@ final class Link {
             if (lock != null) try { lock.release(); } catch (Exception ignored) { }
         }
         return null;
+    }
+
+    private static boolean isOwnAddress(String host) {
+        for (InterfaceAddress ia : localAddresses()) if (ia.getAddress().getHostAddress().equals(host)) return true;
+        return false;
     }
 
     private static List<InetAddress> broadcastAddresses() {
