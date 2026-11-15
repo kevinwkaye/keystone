@@ -19,6 +19,14 @@ using json = nlohmann::json;
 
 namespace ks
 {
+// Never throw on odd characters: a device or file name that isn't valid UTF-8 is replaced,
+// not allowed to take the link down.
+static std::string dumps (const json& j) { return j.dump (-1, ' ', false, json::error_handler_t::replace); }
+
+// Paths travel as UTF-8 everywhere; Windows' narrow paths would use the ANSI code page.
+static fs::path toPath (const std::string& utf8) { return fs::path (std::u8string (utf8.begin(), utf8.end())); }
+static std::string fromPath (const fs::path& p) { const auto u = p.u8string(); return std::string (u.begin(), u.end()); }
+
 struct Controller::Song
 {
     std::string name;
@@ -82,7 +90,7 @@ static void writeJsonAtomic (const fs::path& p, const json& j)
 void Controller::load()
 {
     // setlist
-    const auto sl = readJson (fs::path (dataDir) / "setlist.json");
+    const auto sl = readJson (toPath (dataDir) / "setlist.json");
     s->songs.clear();
     if (sl.is_object() && sl.contains ("songs") && sl["songs"].is_array())
     {
@@ -108,7 +116,7 @@ void Controller::load()
     }
 
     // global settings
-    const auto st = readJson (fs::path (dataDir) / "settings.json");
+    const auto st = readJson (toPath (dataDir) / "settings.json");
     if (st.is_object())
     {
         if (st.contains ("globals") && st["globals"].is_object())
@@ -143,7 +151,7 @@ void Controller::saveSetlist() const
         js["values"] = song.values;
         j["songs"].push_back (js);
     }
-    writeJsonAtomic (fs::path (dataDir) / "setlist.json", j);
+    writeJsonAtomic (toPath (dataDir) / "setlist.json", j);
 }
 
 void Controller::saveSettings() const
@@ -154,7 +162,7 @@ void Controller::saveSettings() const
         if (isGlobal (i)) g[paramTable()[i].id] = engine.getParam ((P) i);
     j["globals"] = g;
     j["capture"] = s->captureFile;
-    writeJsonAtomic (fs::path (dataDir) / "settings.json", j);
+    writeJsonAtomic (toPath (dataDir) / "settings.json", j);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -211,7 +219,7 @@ void Controller::setValue (P p, float v, bool broadcast)
     if (broadcast)
     {
         json j { { "t", "val" }, { "id", info (p).id }, { "v", engine.getParam (p) }, { "edited", edited() } };
-        queue (j.dump());
+        queue (dumps (j));
     }
 }
 
@@ -366,7 +374,7 @@ void Controller::keep()
     e["tempo"] = nullptr;
     e["capture"] = engine.captureName();
     e["droneLayers"] = engine.meters().droneLayers;
-    if (onKeep) onKeep (e.dump());
+    if (onKeep) onKeep (dumps (e));
     queueToast ("KEPT");
 }
 
@@ -377,13 +385,14 @@ std::vector<std::string> Controller::listCaptures() const
 {
     std::vector<std::string> out;
     std::error_code ec;
-    if (! fs::is_directory (capturesDir, ec)) return out;
-    for (const auto& entry : fs::directory_iterator (capturesDir, ec))
+    const auto dir = toPath (capturesDir);
+    if (! fs::is_directory (dir, ec)) return out;
+    for (const auto& entry : fs::directory_iterator (dir, ec))
     {
         if (! entry.is_regular_file()) continue;
-        auto ext = entry.path().extension().string();
+        auto ext = fromPath (entry.path().extension());
         std::transform (ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".nam") out.push_back (entry.path().filename().string());
+        if (ext == ".nam") out.push_back (fromPath (entry.path().filename()));
     }
     std::sort (out.begin(), out.end());
     return out;
@@ -393,7 +402,7 @@ bool Controller::useCapture (const std::string& file, std::string& error)
 {
     if (file.empty()) { engine.clearCapture(); s->captureFile.clear(); saveSettings(); return true; }
     if (file.find ("..") != std::string::npos || file.find_first_of ("/\\") != std::string::npos) { error = "Bad file name"; return false; }
-    if (! engine.loadCapture ((fs::path (capturesDir) / file).string(), error)) return false;
+    if (! engine.loadCapture (fromPath (toPath (capturesDir) / toPath (file)), error)) return false;
     s->captureFile = file;
     saveSettings();
     return true;
@@ -407,7 +416,7 @@ void Controller::queueState() { queue (stateJson()); }
 void Controller::queueToast (const std::string& text)
 {
     toast = text;
-    queue (json { { "t", "toast" }, { "text", text } }.dump());
+    queue (dumps (json { { "t", "toast" }, { "text", text } }));
 }
 
 std::vector<std::string> Controller::takeBroadcasts()
@@ -449,7 +458,7 @@ std::string Controller::schemaJson() const
     j["modules"] = json::array();
     for (int i = 0; i < count; ++i)
         j["modules"].push_back ({ { "id", mods[i].id }, { "title", mods[i].title }, { "group", mods[i].group }, { "summary", mods[i].summary } });
-    return j.dump();
+    return dumps (j);
 }
 
 std::string Controller::stateJson() const
@@ -473,7 +482,7 @@ std::string Controller::stateJson() const
     j["footswitch"] = footswitchStatus ? footswitchStatus() : std::string();
     j["audio"] = audioStatus ? audioStatus() : std::string();
     j["version"] = kVersion;
-    return j.dump();
+    return dumps (j);
 }
 
 std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleRate, double latencyMs) const
@@ -501,10 +510,16 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
                        { "oct", m.tunerMidi >= 0 ? m.tunerMidi / 12 - 1 : 0 }, { "cents", std::round (m.tunerCents * 10) / 10 },
                        { "hz", std::round (m.tunerFreq * 10) / 10 }, { "valid", m.tunerMidi >= 0 } };
     }
-    return j.dump();
+    return dumps (j);
 }
 
 void Controller::handleMessage (const std::string& line, const std::function<void (const std::string&)>& reply)
+{
+    try { handleMessageInner (line, reply); }
+    catch (const std::exception& e) { if (onLog) onLog (std::string ("Link: couldn't handle ") + line.substr (0, 120) + ": " + e.what()); }
+}
+
+void Controller::handleMessageInner (const std::string& line, const std::function<void (const std::string&)>& reply)
 {
     json m;
     try { m = json::parse (line); }
@@ -517,7 +532,7 @@ void Controller::handleMessage (const std::string& line, const std::function<voi
         reply (schemaJson());
         reply (stateJson());
     }
-    else if (t == "ping") reply (json { { "t", "pong" }, { "ts", m.value ("ts", 0.0) } }.dump());
+    else if (t == "ping") reply (dumps (json { { "t", "pong" }, { "ts", m.value ("ts", 0.0) } }));
     else if (t == "set")
     {
         const int p = findParam (m.value ("id", std::string()).c_str());

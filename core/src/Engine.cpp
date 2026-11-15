@@ -394,7 +394,7 @@ bool Engine::loadCapture (const std::string& path, std::string& error)
     try
     {
         nam::activations::Activation::enable_fast_tanh();
-        auto model = nam::get_dsp (std::filesystem::path (path));
+        auto model = nam::get_dsp (std::filesystem::path (std::u8string (path.begin(), path.end())));
         if (model == nullptr) { error = "That file isn't a capture Keystone can read"; return false; }
         if (model->NumInputChannels() != 1 || model->NumOutputChannels() != 1) { error = "Only mono captures are supported"; return false; }
         model->Reset (sr, impl->maxBlock);

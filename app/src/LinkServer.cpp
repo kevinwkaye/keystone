@@ -28,13 +28,14 @@ struct LinkServer::Client : public Thread
         writer.startThread();
         MemoryBlock pending;
         char buf[4096];
+        const char* why = "stopped";
         while (! threadShouldExit() && alive)
         {
             const int ready = socket->waitUntilReady (true, 500);
-            if (ready < 0) break;
+            if (ready < 0) { why = "socket error while waiting"; break; }
             if (ready == 0) continue;
             const int got = socket->read (buf, sizeof (buf), false);
-            if (got <= 0) break;
+            if (got <= 0) { why = got == 0 ? "closed by the phone" : "read error"; break; }
             pending.append (buf, (size_t) got);
             // split into lines
             const char* data = static_cast<const char*> (pending.getData());
@@ -51,9 +52,10 @@ struct LinkServer::Client : public Thread
                 MessageManager::callAsync ([o, cid, line]() { if (o->onMessage) o->onMessage (cid, line); });
             }
             if (start > 0) pending.removeSection (0, start);
-            if (pending.getSize() > 1 << 20) break;   // nobody sends a megabyte line
+            if (pending.getSize() > 1 << 20) { why = "line too long"; break; }
         }
         alive = false;
+        Logger::writeToLog ("Link: connection " + String (id) + " ended (" + String (why) + ")");
         const int cid = id;
         LinkServer* o = &owner;
         MessageManager::callAsync ([o, cid]() { if (o->onDisconnect) o->onDisconnect (cid); o->removeDead(); });
@@ -219,6 +221,7 @@ void LinkServer::run()
     {
         std::unique_ptr<StreamingSocket> s (listener->waitForNextConnection());
         if (s == nullptr) { if (! threadShouldExit()) Thread::sleep (100); continue; }
+        const auto from = s->getHostName();
         std::shared_ptr<Client> c;
         int id;
         {
@@ -227,6 +230,7 @@ void LinkServer::run()
             c = std::make_shared<Client> (id, std::move (s), *this);
             clients[id] = c;
         }
+        Logger::writeToLog ("Link: connection " + String (id) + " from " + from);
         c->startThread();
         LinkServer* self = this;
         MessageManager::callAsync ([self, id]() { if (self->onConnect) self->onConnect (id); });

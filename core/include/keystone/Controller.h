@@ -18,7 +18,7 @@ class Controller
 {
 public:
     static constexpr int kMaxSongs = 15;
-    static constexpr const char* kVersion = "0.1.1";
+    static constexpr const char* kVersion = "0.1.2";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -50,6 +50,7 @@ public:
     std::function<bool()> keeperLiveTag;
     std::function<void (bool)> setKeeperLiveTag;
     std::function<int()> lastKeepNumber;
+    std::function<void (const std::string&)> onLog;
 
     // songs
     int songCount() const;
@@ -75,6 +76,7 @@ private:
     std::string toast;
 
     void onFootswitch (int sw, int event);
+    void handleMessageInner (const std::string& line, const std::function<void (const std::string&)>& reply);
     void applySong (int i);
     void saveSetlist() const;
     void saveSettings() const;

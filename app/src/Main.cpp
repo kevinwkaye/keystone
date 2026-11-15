@@ -29,6 +29,31 @@ class KeystoneApp;
 static KeystoneApp* theApp = nullptr;
 static void midiSink (const MidiMessage& m);
 
+// If Keystone ever crashes, the log says where.
+static void crashHandler (void*)
+{
+    Logger::writeToLog ("CRASH. Stack:\n" + SystemStats::getStackBacktrace());
+}
+
+// Notices if the main thread stops answering, so a freeze shows in the log.
+class Watchdog : public Thread
+{
+public:
+    Watchdog() : Thread ("Keystone watchdog") {}
+    std::atomic<int64_t> lastBeat { Time::currentTimeMillis() };
+    void run() override
+    {
+        bool reported = false;
+        while (! threadShouldExit())
+        {
+            wait (1000);
+            const auto stalled = Time::currentTimeMillis() - lastBeat.load();
+            if (stalled > 5000 && ! reported) { Logger::writeToLog ("WARNING: the main thread hasn't answered for " + String (stalled / 1000) + " s"); reported = true; }
+            if (stalled < 2000 && reported) { Logger::writeToLog ("Main thread answering again"); reported = false; }
+        }
+    }
+};
+
 // ---------------------------------------------------------------------------------------
 // Runs engine.idle() off the audio and message threads: tuner, drone analysis, freeing
 // old captures.
@@ -115,6 +140,9 @@ public:
                                     "With no capture, the Drive stage uses its modelled fallback.\r\n");
         logger = std::make_unique<FileLogger> (home.getChildFile ("keystone.log"), "Keystone " + getApplicationVersion() + " started", 512 * 1024);
         Logger::setCurrentLogger (logger.get());
+        SystemStats::setApplicationCrashHandler (crashHandler);
+        std::set_terminate ([] { Logger::writeToLog ("TERMINATE: an unhandled error stopped Keystone. Stack:\n" + SystemStats::getStackBacktrace()); std::abort(); });
+        watchdog.startThread();
 
 #if JUCE_WINDOWS
         // keep the laptop awake with the lid closed and give audio priority
@@ -149,12 +177,17 @@ public:
         housekeeping = std::make_unique<Housekeeping> (engine);
         housekeeping->startThread (Thread::Priority::low);
 
+        controller->onLog = [] (const std::string& msg) { Logger::writeToLog (String (msg)); };
         link.onMessage = [this] (int client, const String& line)
         {
-            controller->handleMessage (line.toStdString(), [this, client] (const std::string& r) { link.send (client, String (r)); });
-            flush();
+            try
+            {
+                controller->handleMessage (line.toStdString(), [this, client] (const std::string& r) { link.send (client, String::fromUTF8 (r.c_str())); });
+                flush();
+            }
+            catch (const std::exception& e) { Logger::writeToLog ("Link: error handling a message: " + String (e.what())); }
         };
-        link.onConnect = [] (int client) { Logger::writeToLog ("Link: phone " + String (client) + " connected"); };
+        link.onConnect = [] (int client) { Logger::writeToLog ("Link: phone " + String (client) + " ready"); };
         link.onDisconnect = [] (int client) { Logger::writeToLog ("Link: phone " + String (client) + " left"); };
         link.start();
 
@@ -176,6 +209,7 @@ public:
     void shutdown() override
     {
         stopTimer();
+        watchdog.stopThread (2000);
         link.stop();
         if (audio) audio->stop();
         if (housekeeping) housekeeping->stopThread (2000);
@@ -280,7 +314,7 @@ private:
 
     void flush()
     {
-        for (auto& b : controller->takeBroadcasts()) link.broadcast (String (b));
+        for (auto& b : controller->takeBroadcasts()) link.broadcast (String::fromUTF8 (b.c_str()));
     }
 
     String statusText() const
@@ -294,7 +328,20 @@ private:
 
     void timerCallback() override
     {
+        watchdog.lastBeat.store (Time::currentTimeMillis());
+        try { tickSafely(); }
+        catch (const std::exception& e) { Logger::writeToLog ("Error in the main loop: " + String (e.what())); }
+    }
+
+    void tickSafely()
+    {
         const double now = Time::getMillisecondCounterHiRes() * 0.001;
+        if (++heartbeatTick >= 6000)   // once a minute
+        {
+            heartbeatTick = 0;
+            Logger::writeToLog ("Still running. Phones connected: " + String (link.clientCount()) + ". " + (audio ? audio->status() : String())
+                                + ". CPU " + String (audio ? audio->cpuLoad() * 100.0f : 0.0f, 1) + "%");
+        }
         controller->tick (now);
         flush();
         // meters about 25 times a second
@@ -302,7 +349,7 @@ private:
         {
             meterTick = 0;
             if (link.clientCount() > 0)
-                link.broadcast (String (controller->meterJson (audio->cpuLoad(), audio->bufferSize(), audio->sampleRate(), audio->latencyMs())), true);
+                link.broadcast (String::fromUTF8 (controller->meterJson (audio->cpuLoad(), audio->bufferSize(), audio->sampleRate(), audio->latencyMs()).c_str()), true);
         }
         // pedal settings saved by another Flip Fella plugin reload within a couple of seconds
         if (++settingsTick >= 200)
@@ -330,7 +377,8 @@ private:
     std::unique_ptr<Tray> tray;
 #endif
     std::atomic<int> learnTarget { -1 }, lastExpRaw { 0 };
-    int meterTick = 0, settingsTick = 0;
+    int meterTick = 0, settingsTick = 0, heartbeatTick = 0;
+    Watchdog watchdog;
     Time lastPedalFileTime;
 };
 
