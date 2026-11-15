@@ -11,6 +11,7 @@
 #include "Analysis.h"
 #include "Drone.h"
 
+#include <algorithm>
 #include <chrono>
 #include <complex>
 #include <functional>
@@ -321,6 +322,32 @@ static void testClicks()
     }
 }
 
+// A held tone through the drive must stay smooth: level matching once stepped its trim
+// ten times a second, a faint click each time.
+static void testSteadyDrive()
+{
+    std::printf ("Steady drive\n");
+    double worst[2] {};
+    for (int fixedTrim = 0; fixedTrim < 2; ++fixedTrim)
+    {
+        Engine e;
+        e.prepare (kSr, 64);
+        e.setParam (P::DriveSource, 1);
+        e.setParam (P::DimOn, 0);                        // its chorus moves the level on purpose
+        e.setParam (P::DriveMatch, fixedTrim ? 0 : 1);   // reference: no level matching at all
+        const double f = 220, amp = 0.05;
+        auto in = sine (f, 3.0, amp);
+        auto out = render (e, in);
+        std::vector<double> sc;
+        for (size_t a = (size_t) (0.15 * kSr); a + 2400 < (size_t) (1.6 * kSr); a += 2400)   // while the level match is still settling
+            sc.push_back (clickScore (out, a, a + 2400, f, amp));
+        auto sorted = sc;
+        std::sort (sorted.begin(), sorted.end());
+        worst[fixedTrim] = sorted.back() / sorted[sorted.size() / 2];
+    }
+    CHECK (worst[0] < std::max (1.3, worst[1] * 1.15), "level matching adds no steps: worst window %.2fx the median, %.2fx without matching", worst[0], worst[1]);
+}
+
 // ---------------------------------------------------------------------------------------
 static void testTuner()
 {
@@ -509,6 +536,7 @@ int main (int argc, char** argv)
         testGrains();
         testBloomSafety();
         testClicks();
+        testSteadyDrive();
         testTuner();
         testController();
         testCapture (capture);

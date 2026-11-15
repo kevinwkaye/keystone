@@ -88,6 +88,9 @@ public:
         dryDelay.reset(); capDelay.reset();
         onS.reset (0); xf = 0; xfTarget = 0;
         trim[0] = trim[1] = trimTarget[0] = trimTarget[1] = 1.0f;
+        trimSeeded[0] = trimSeeded[1] = false;
+        idle = true;
+        warmLeft = 0;
         lowIntoHp1.reset(); lowIntoHp2.reset();
     }
 
@@ -105,6 +108,13 @@ public:
                           V (v, P::EdgePresence), V (v, P::EdgeGate), Vi (v, P::EdgeMode), useCapture);
         voices[1].update (sr, V (v, P::DriveGain), V (v, P::DriveTone), V (v, P::DriveLevel), V (v, P::DriveLowCut),
                           V (v, P::DrivePresence), V (v, P::DriveGate), Vi (v, P::DriveMode), useCapture);
+        for (int k = 0; k < 2; ++k)
+            if (! trimSeeded[k])
+            {
+                // a starting guess so the first switch-on is near the right level
+                trim[k] = trimTarget[k] = useCapture ? 1.0f : 1.0f / std::sqrt (voices[k].gain);
+                trimSeeded[k] = true;
+            }
         lowInto = V (v, P::DriveLowInto);
         lowIntoHpMix.set (lowInto > 0.01f ? 1.0f : 0.0f);
         if (std::fabs (splitFreq - lastSplit) > 0.5f)
@@ -123,8 +133,17 @@ public:
     {
         if (! active())
         {
+            idle = true;
             for (int i = 0; i < n; ++i) { dryDelay.push (high[i]); high[i] = dryDelay.at (kLatency); }
             return;
+        }
+        if (idle)
+        {
+            // coming back on: clear stale filter state and run 20 ms silently before
+            // fading in, so the first wet samples are settled, not a transient
+            idle = false;
+            for (auto& vc : voices) vc.reset();
+            warmLeft = (int) (0.02f * sr);
         }
         // input with some of the low band, if asked
         for (int i = 0; i < n; ++i) namIn[(size_t) i] = high[i] + lowInto * low[i];
@@ -192,7 +211,9 @@ public:
             float wet = namOut[(size_t) i];
             if (hm > 0.0001f) { const float h = lowIntoHp2.process (lowIntoHp1.process (wet)); wet = wet + (h - wet) * hm; }
             dryDelay.push (high[i]);
-            const float g = onS.next();
+            float g;
+            if (warmLeft > 0) { --warmLeft; g = onS.value; }
+            else g = onS.next();
             high[i] = dryDelay.at (kLatency) * (1.0f - g) + wet * g;
         }
         // level match: steer each voice's trim towards the level of the clean high band
@@ -317,6 +338,8 @@ private:
     float sr = 48000;
     Voice voices[2];
     float trim[2] { 1, 1 }, trimTarget[2] { 1, 1 };
+    bool trimSeeded[2] { false, false }, idle = true;
+    int warmLeft = 0;
     float trimGlide = 0.0003f;
     bool on = true, useCapture = false, autoMatch = true;
     float xf = 0, xfTarget = 0, xfStep = 0.001f;
