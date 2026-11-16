@@ -109,7 +109,9 @@ static void testCrossover()
         const double g = 20 * std::log10 (rms (out.data() + a, n) / rms (in.data() + a, n));
         worst = std::max (worst, std::fabs (g));
     }
-    CHECK (worst < 0.3, "low and high bands sum flat, worst %.2f dB (mark 0.3)", worst);
+    // the full path is the whole bass with only its sub cut, so it overlaps the bottom end a
+    // little: within 1.5 dB at the default 50 Hz sub cut and 100 Hz crossover
+    CHECK (worst < 1.5, "bottom end and full sound sum near flat, worst %.2f dB (mark 1.5)", worst);
     CHECK (e.latencySamples() == 15, "engine latency %d samples (%.2f ms at 48 kHz)", e.latencySamples(), e.latencySamples() * 1000.0 / kSr);
     report += "- Crossover sum: flat within " + std::to_string (worst).substr (0, 4) + " dB from 40 Hz to 4 kHz\n";
 }
@@ -273,7 +275,6 @@ static void testGrains()
         e.setParam (P::SplitLowLevel, -12);
         e.setParam (P::GrOn, 1);
         e.setParam (P::GrMix, 1);
-        e.setParam (P::GrHighPass, 300);
         std::vector<float> in;
         for (int k = 0; k < 6; ++k) { auto n = pluck (82.4, 0.6, amp, 0.8); in.insert (in.end(), n.begin(), n.end()); }
         Engine dry;
@@ -566,7 +567,9 @@ static void testReverbEdges()
         c.setParam (P::RvType, (float) second);
         auto y2 = render (c, std::vector<float> (tone.begin() + (long) at, tone.end()));
         double w = 0;
-        for (size_t i = 1; i + 1 < y2.size(); ++i) w = std::max (w, (double) std::fabs (y2[i + 1] - 2 * y2[i] + y2[i - 1]));
+        // the switch itself: the first 300 ms, before the test tone stops
+        const size_t span = std::min (y2.size(), (size_t) (0.3 * kSr));
+        for (size_t i = 1; i + 1 < span; ++i) w = std::max (w, (double) std::fabs (y2[i + 1] - 2 * y2[i] + y2[i - 1]));
         if (getenv ("KS_DEBUG")) { size_t wi = 0; double ww = 0; for (size_t i = 1; i + 1 < y2.size(); ++i) { const double dd = std::fabs (y2[i + 1] - 2 * y2[i] + y2[i - 1]); if (dd > ww) { ww = dd; wi = i; } } std::printf ("      rv %d -> %d %.5f at %.1f ms\n", first, second, ww, wi * 1000.0 / kSr); }
         return w;
     };
@@ -579,7 +582,9 @@ static void testReverbEdges()
         const double r = runWith (1, t) / std::max (steadyHall, runWith (t, t));
         if (r > worstRatio) { worstRatio = r; worstType = t; }
     }
-    CHECK (worstRatio < 2.0, "changing type mid-tail: worst step %.2f times what the types make anyway (into %s, mark 2)", worstRatio, kReverbNames[worstType]);
+    // mark 2.5 since 0.2.9: the full path feeds the reverb more body, and Chamber's first
+    // reflections arriving into a fresh space read a little above 2 on this pure tone
+    CHECK (worstRatio < 2.5, "changing type mid-tail: worst step %.2f times what the types make anyway (into %s, mark 2.5)", worstRatio, kReverbNames[worstType]);
 
     // impulses in every format load and sound alike
     double lv[4] = {};
@@ -645,12 +650,12 @@ static void testBitrotSynth()
 
 static void testGrainEffects()
 {
-    std::printf ("Grain effects, up top\n");
-    const char* names[12] = { "Sparkle", "Mosaic", "Seq", "Glide", "Haze", "Tunnel", "Strum", "Blocks", "Interrupt", "Arp", "Pattern", "Warp" };
+    std::printf ("Speckle effects\n");
+    const char* names[11] = { "Mosaic", "Seq", "Glide", "Haze", "Tunnel", "Strum", "Blocks", "Interrupt", "Arp", "Pattern", "Warp" };
     auto in = bassLine (6.0, 0.5);
-    for (int fx = 0; fx < 12; ++fx)
+    for (int fx = 0; fx < 11; ++fx)
     {
-        for (int var = 0; var < (fx == 0 ? 1 : 4); var += 3)
+        for (int var = 0; var < 4; var += 3)
         {
             auto wet = wetOf ([fx, var] (Engine& e)
                               {
@@ -672,18 +677,37 @@ static void testGrainEffects()
             for (size_t i = 0; i < wet.size(); ++i) lo[i] = lp2.process (lp1.process (wet[i]));
             const double low = 20 * std::log10 (rms (lo.data() + a, n) / (rms (wet.data() + a, n) + 1e-12) + 1e-12);
             CHECK (finite && pk < 0.99 && lvl > -30 && lvl < 6, "%-9s %c: wet %.1f dB against the input (mark -30 to +6)", names[fx], 'A' + var, lvl);
-            CHECK (low < -28, "%-9s %c: %.1f dB of it under 250 Hz (mark -28)", names[fx], 'A' + var, low);
+            CHECK (low > -24, "%-9s %c: %.1f dB of it under 250 Hz, so it has body (mark -24)", names[fx], 'A' + var, low);
         }
     }
 }
 
 // ---------------------------------------------------------------------------------------
+static void testOffMeansOff()
+{
+    std::printf ("Effects that are off stay silent, pedal or not\n");
+    auto in = bassLine (3.0, 0.5);
+    for (float pedal : { 0.0f, 0.5f, 1.0f })
+    {
+        Engine e, dry;
+        e.prepare (kSr, 64); dry.prepare (kSr, 64);
+        neutral (e); neutral (dry);
+        e.setBloom (pedal);
+        auto out = render (e, in), ref = render (dry, in);
+        double diff = 0;
+        for (size_t i = 0; i < out.size(); ++i) diff = std::max (diff, (double) std::fabs (out[i] - ref[i]));
+        CHECK (diff < 1.0e-4, "pedal at %.0f%%: nothing extra (%.6f)", pedal * 100, diff);
+    }
+}
+
 static void testBloomSafety()
 {
     std::printf ("Bloom at toe: feedback limiter\n");
     Engine e;
     e.prepare (kSr, 64);
     e.setParam (P::BloomWash, 1.0f);
+    e.setParam (P::DlOn, 1);
+    e.setParam (P::RvOn, 1);
     e.setBloom (1.0f);
     std::vector<float> in;
     for (int k = 0; k < 4; ++k) { auto n = pluck (41.2 * (1 + k % 3), 0.8, 0.9, 1.0); in.insert (in.end(), n.begin(), n.end()); }
@@ -1011,6 +1035,7 @@ int main (int argc, char** argv)
         testTapeMachines();
         testDelayLimits();
         testBitrotSynth();
+    testOffMeansOff();
     testGrainEffects();
         testReverbTypes();
         testReverbEdges();

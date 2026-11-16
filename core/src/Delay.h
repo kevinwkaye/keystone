@@ -80,14 +80,14 @@ public:
         float mix = on ? V (v, P::DlMix) : 0.0f;
         float fb = V (v, P::DlFeedback);
         hold = on && Vb (v, P::DlHold);
-        if (bloomActive && zone3 > 0)
+        if (bloomActive && on && zone3 > 0)
         {
             const float reach = V (v, P::BloomWash);
             fb = fb + (1.02f * reach - fb) * zone3;   // past 1 only with the loop limiter
             mix = std::max (mix, zone3 * 0.45f * reach);
         }
         if (hold) fb = 1.0f;
-        if (! on && ! hold && ! (bloomActive && zone3 > 0)) fb = std::min (fb, 0.6f);   // tails die away naturally
+        if (! on && ! hold && ! (bloomActive && on && zone3 > 0)) fb = std::min (fb, 0.6f);   // tails die away naturally
         mixS.set (mix);
         fbS.set (fb);
 
@@ -136,9 +136,9 @@ public:
         static const float trims[kTypes] = { 1.0f, 1.12f, 1.1f, 0.95f, 1.0f, 1.0f, 1.05f, 1.1f, 1.15f, 1.2f, 1.05f, 1.0f };
         trimS.set (trims[pendingType]);
 
-        gateS.set (heelBack && cutTails ? 0.0f : 1.0f);
-        feeding = (on && ! hold) || (bloomActive && zone3 > 0);
-        anyOn = on || (bloomActive && zone3 > 0);
+        gateS.set (heelBack && cutTails && ! on ? 0.0f : 1.0f);
+        feeding = (on && ! hold) || (bloomActive && on && zone3 > 0);
+        anyOn = on || (bloomActive && on && zone3 > 0);
         updateFilters();
     }
 
@@ -154,6 +154,7 @@ public:
             if (swG <= 0) { swG = 0; type = pendingType; svf.reset(); crush.reset(); xf = 1; headNow = timeTarget; }
         }
         else if (swG < 1) swG = std::min (1.0f, swG + 1.0f / (0.01f * sr));
+        swS = swG * swG * swG * (swG * (6.0f * swG - 15.0f) + 10.0f);   // a smooth S-curve, so the dip has no corners to click on
         const float fb = fbS.next();
         if ((count++ & 15) == 0) updateLoopFilters (fb);
 
@@ -199,7 +200,7 @@ public:
         if (type == Ice) loop = loop + (up - loop) * iceBlend;
         loop = lim.process (loop * fb);
         const float g = gateS.next();
-        line.push (in + loop * g * swG);
+        line.push (in + loop * g * swS);
 
         // ---- output colour ----
         float wet = y;
@@ -210,12 +211,12 @@ public:
             case Filter: wet = sweep (wet); break;
             default: break;
         }
-        if (type == Tape && springAmt > 0.001f) wet += springTank (wet * swG) * springAmt;
+        if (type == Tape && springAmt > 0.001f) wet += springTank (wet * swS) * springAmt;
 
         // duck from the dry signal, so repeats bloom in the gaps
         const float dk = 1.0f - duck * 0.9f * clampf (dEnv * 8.0f, 0.0f, 1.0f);
         tail = std::max (std::fabs (wet), tail * 0.9999f);
-        return wet * dk * swG * trimS.next() * mixS.next() * g;
+        return wet * dk * swS * trimS.next() * mixS.next() * g;
     }
 
 private:
@@ -368,7 +369,7 @@ private:
         // second line: fed alongside the first, or by the first one's repeats
         float l2 = loop2 (b);
         l2 = lim2.process (l2 * fb);
-        line2.push ((dualSeries ? a : in) + l2 * gateS.value * swG);
+        line2.push ((dualSeries ? a : in) + l2 * gateS.value * swS);
         y = (a + b) * 0.72f;
         fbSig = a;
     }
@@ -455,7 +456,7 @@ private:
     float sweepSpeed = 0.4f, filtRes = 0.5f, svfRes = 0.5f, bits = 8, lofiRate = 8000;
     float timeTarget = 20160, headNow = 20160, headNext = 20160, xf = 1;
     float lfo = 0, lfo2 = 0, wowPhase = 0, flutterPhase = 0, tremPhase = 0, sweepPhase = 0, drift = 0;
-    float swellPos = 1, swellG = 1, swellFall = 0.99f, tail = 0, swG = 1;
+    float swellPos = 1, swellG = 1, swellFall = 0.99f, tail = 0, swG = 1, swS = 1;
     int crinkleLeft = 0;
     float crinkleDepth = 0, crinkleShift = 0;
     unsigned count = 0;

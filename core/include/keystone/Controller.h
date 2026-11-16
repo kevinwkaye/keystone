@@ -19,7 +19,7 @@ class Controller
 public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;
-    static constexpr const char* kVersion = "0.2.8";
+    static constexpr const char* kVersion = "0.2.9";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);

@@ -386,15 +386,15 @@ var KS = (function () {
   }
   function summary(m) {
     switch (m.id) {
-      case 'split': return 'Crossover ' + fmt('split.freq') + ' Hz, tight shelf';
+      case 'split': return 'Bottom end under ' + fmt('split.freq') + ' Hz, full sound above ' + fmt('split.subCut') + ' Hz';
       case 'lowcomp': return on('lowcomp.slap') ? 'Slap mode on' : 'Light, slap mode ready';
       case 'drive': {
         var e = Math.round(val('drive.edge.source')) === 0 && S.capture ? 'capture' : 'model';
         var d = Math.round(val('drive.source')) === 0 && S.capture ? 'capture' : 'model';
         return 'Edge on the ' + e + ', Drive on the ' + d;
       }
-      case 'dim': return 'Mode ' + fmt('dim.mode') + ', mono safe';
-      case 'grains': return (Math.round(val('grains.effect')) ? fmt('grains.effect') + ' ' + fmt('grains.variant') : 'Sparkle') + ', ' + fmt('grains.pitch') + ', ' + fmt('grains.hp') + ' to ' + fmt('grains.ceiling');
+      case 'dim': return 'Mode ' + fmt('dim.mode') + ' on the ' + (Math.round(val('dim.path')) ? 'full sound' : 'bottom end');
+      case 'grains': return fmt('grains.effect') + ' ' + fmt('grains.variant') + ', ' + fmt('grains.subdiv') + (Math.round(val('grains.pitch')) ? ', ' + fmt('grains.pitch') + ' up' : '');
       case 'delay': return fmt('delay.type') + ', ' + (Math.round(val('delay.sync')) ? fmt('delay.sync') : fmt('delay.time')) + ', ' + fmt('delay.feedback') + ' repeats';
       case 'reverb': return fmt('reverb.type') + (Math.round(val('reverb.type')) === 11 ? (S.space ? ', ' + S.space : ', no space loaded') : Math.round(val('reverb.type')) === 10 ? ', ' + fmt('reverb.length') : ', ' + fmt('reverb.decay'));
       case 'preamp': return 'Blend ' + Math.round(val('preamp.blend') * 100) + '% Cut, mid ' + fmt('preamp.midFreq');
@@ -451,7 +451,6 @@ var KS = (function () {
     ['Multi A: heads 1 and 2 together.', 'Multi B: heads 2 and 3 together.', 'Multi C: heads 1 and 3 together.'],
     ['Single A: one sliding head.', 'Single B: the sliding head and a half-time head.', 'Single C: the sliding head and a three-quarter head.']];
   var GRAIN_FX = [
-    ['Sparkle: pitched grains with their own size, density and spray.'],
     ['normal and double speed loops', 'normal and half speed', 'all double speed', 'half, normal, double and quad'],
     ['filtered, shuffled slices', 'normal and half speed bounce', 'overlapping layers with sweeps', 'crushed layers'],
     ['half to normal', 'double to half', 'normal to double', 'both directions at once'],
@@ -480,9 +479,8 @@ var KS = (function () {
     if (id === 'reverb.type') return REVERB_TYPES[Math.round(val(id))] || '';
     if (id === 'delay.type') return DELAY_TYPES[Math.round(val(id))] || '';
     if (id === 'delay.tapeMode') return (TAPE_MODES[Math.round(val('delay.tapeMachine'))] || [])[Math.round(val(id))] || '';
-    if (id === 'grains.variant' || (id === 'grains.effect' && Math.round(val(id)) === 0)) {
+    if (id === 'grains.variant') {
       var e = Math.round(val('grains.effect')), v = Math.round(val('grains.variant'));
-      if (e === 0) return GRAIN_FX[0][0];
       var name = S.params['grains.effect'].choices[e];
       return name + ' ' + 'ABCD'[v] + ': ' + (GRAIN_FX[e] || [])[v] + '.';
     }
@@ -492,7 +490,15 @@ var KS = (function () {
     if (id === 'bitrot.corrupt') return 'Low keeps the loop tight on the note. High lets it hunt, dive and glitch between notes.';
     if (id === 'bitrot.gate') return 'How quiet a note can be and still play the synth. It follows how hard you play, so hiss never plays it.';
     if (id === 'bitrot.clean') return 'How much of your clean bass stays under the synth, lows included.';
-    if (id === 'grains.pitch') return 'Every effect plays pitched up, always in key, so it never lands on the bass, guitars or keys.';
+    if (id === 'grains.pitch') return 'Off plays Speckle on your full sound. The others pitch it up first, always in key, to sit above the band.';
+    if (id === 'grains.subdiv') return 'Steps of the delay time, so tap tempo sets Speckle too.';
+    if (id === 'grains.filter') return 'Fully up is open. Down darkens the effect, and right down mutes it.';
+    if (id === 'grains.space') return 'A dotted echo and a reverb on the effect only. Fully up is all space.';
+    if (id === 'split.subCut') return 'The full sound path is your whole bass with just the sub cut, so drive, Speckle and the spaces have body without mud.';
+    if (id === 'split.lowLevel') return 'Bottom end dry: the clean low band under everything, below the crossover.';
+    if (id === 'split.wetLevel') return 'Bottom end wet: how much of the Dimension chorus and the drone join the bottom end.';
+    if (id === 'split.highLevel') return 'Full sound: the drive, Bitrot, preamp, filter, Speckle, delay and reverb path.';
+    if (id === 'dim.path') return 'Bottom end widens your low band. Full sound puts it on the drive and effects path instead.';
     return '';
   }
   function renderParams(list) {

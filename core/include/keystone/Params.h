@@ -44,8 +44,10 @@ struct ParamInfo
     P(SplitFreq,      "split.freq",      "Crossover",     "split",   "Split",          Flip,   70,   150,  100,  "Hz", "",   Log) \
     P(SplitTight,     "split.tight",     "Tight shelf",   "split",   "Split",          Flip,   -9,   0,    -4,   "dB", "",   None) \
     P(SplitWeight,    "split.weight",    "Weight",        "split",   "Split",          Flip,   0,    4,    1.5f, "dB", "",   None) \
-    P(SplitLowLevel,  "split.lowLevel",  "Low level",     "split",   "Levels",         Flip,   -12,  6,    0,    "dB", "",   None) \
-    P(SplitHighLevel, "split.highLevel", "High level",    "split",   "Levels",         Flip,   -12,  6,    0,    "dB", "",   None) \
+    P(SplitSubCut,    "split.subCut",    "Sub cut",       "split",   "Split",          Flip,   30,   150,  50,   "Hz", "",   Log) \
+    P(SplitLowLevel,  "split.lowLevel",  "Bottom dry",    "split",   "Levels",         Flip,   -12,  6,    0,    "dB", "",   None) \
+    P(SplitWetLevel,  "split.wetLevel",  "Bottom wet",    "split",   "Levels",         Flip,   0,    1,    1,    "%",  "",   None) \
+    P(SplitHighLevel, "split.highLevel", "Full sound",    "split",   "Levels",         Flip,   -12,  6,    0,    "dB", "",   None) \
     P(CompOn,         "lowcomp.on",      "On",            "lowcomp", "",               Toggle, 0,    1,    1,    "",   "",   None) \
     P(CompAmount,     "lowcomp.amount",  "Squeeze",       "lowcomp", "Compression",    Flip,   0,    1,    0.35f,"%",  "",   None) \
     P(CompRelease,    "lowcomp.release", "Release",       "lowcomp", "Compression",    Flip,   40,   400,  150,  "ms", "",   Log) \
@@ -69,21 +71,21 @@ struct ParamInfo
     P(EdgeGain,       "drive.edge.gain", "Gain",          "drive",   "Voice settings", Flip,   0,    10,   3,    "",   "",   None) \
     P(EdgeTone,       "drive.edge.tone", "Tone",          "drive",   "Voice settings", Flip,   0,    10,   6.5f, "",   "",   None) \
     P(EdgeLevel,      "drive.edge.level","Level",         "drive",   "Voice settings", Flip,   -12,  12,   0,    "dB", "",   None) \
-    P(EdgeLowCut,     "drive.edge.lowcut","Low cut",      "drive",   "Voice settings", Flip,   20,   300,  120,  "Hz", "",   Log) \
+    P(EdgeLowCut,     "drive.edge.lowcut","Low cut",      "drive",   "Voice settings", Flip,   20,   300,  70,  "Hz", "",   Log) \
     P(EdgePresence,   "drive.edge.presence","Presence",   "drive",   "Voice settings", Flip,   -6,   6,    2,    "dB", "",   None) \
     P(EdgeGate,       "drive.edge.gate", "Gate",          "drive",   "Voice settings", Flip,   -90,  -30,  -70,  "dB", "",   None) \
     P(EdgeMode,       "drive.edge.mode", "Clipping",      "drive",   "Clipping (model only)", Choice, 0, 2, 1,  "",   "LED|Clean|Silicon", None) \
     P(DriveGain,      "drive.drive.gain","Gain",          "drive",   "Voice settings", Flip,   0,    10,   6.5f, "",   "",   None) \
     P(DriveTone,      "drive.drive.tone","Tone",          "drive",   "Voice settings", Flip,   0,    10,   6.5f, "",   "",   None) \
     P(DriveLevel,     "drive.drive.level","Level",        "drive",   "Voice settings", Flip,   -12,  12,   0,    "dB", "",   None) \
-    P(DriveLowCut,    "drive.drive.lowcut","Low cut",     "drive",   "Voice settings", Flip,   20,   300,  120,  "Hz", "",   Log) \
+    P(DriveLowCut,    "drive.drive.lowcut","Low cut",     "drive",   "Voice settings", Flip,   20,   300,  70,  "Hz", "",   Log) \
     P(DrivePresence,  "drive.drive.presence","Presence",  "drive",   "Voice settings", Flip,   -6,   6,    2,    "dB", "",   None) \
     P(DriveGate,      "drive.drive.gate","Gate",          "drive",   "Voice settings", Flip,   -90,  -30,  -60,  "dB", "",   None) \
     P(DriveMode,      "drive.drive.mode","Clipping",      "drive",   "Clipping (model only)", Choice, 0, 2, 0,  "",   "LED|Clean|Silicon", None) \
     P(DriveFade,      "drive.fade",      "Switch fade",   "drive",   "Behaviour",      Flip,   5,    50,   15,   "ms", "",   None) \
     P(DriveMatch,     "drive.match",     "Level match",   "drive",   "Behaviour",      Choice, 0,    1,    1,    "",   "Off|Auto", None) \
     P(DriveMorph,     "drive.morph",     "Exp morph",     "drive",   "Behaviour",      Choice, 0,    1,    0,    "",   "Off|On", None) \
-    P(DriveLowInto,   "drive.lowInto",   "Low end into drive","drive","Behaviour",     Slider, 0,    1,    0.35f,"%",  "None|Full", None) \
+    P(DriveLowInto,   "drive.lowInto",   "Low end into drive","drive","Behaviour",     Slider, 0,    1,    0,    "%",  "None|Full", Hidden) \
     P(BitrotOn,       "bitrot.on",       "On",            "bitrot",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(BitrotSquare,   "bitrot.square",   "Square",        "bitrot",  "Voices",         Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(BitrotSub,      "bitrot.sub",      "Sub",           "bitrot",  "Voices",         Flip,   0,    1,    0.6f, "%",  "",   None) \
@@ -128,25 +130,27 @@ struct ParamInfo
     P(DimOn,          "dim.on",          "On",            "dim",     "",               Toggle, 0,    1,    1,    "",   "",   None) \
     P(DimMode,        "dim.mode",        "Mode",          "dim",     "Mode",           Choice, 0,    3,    1,    "",   "1|2|3|4", None) \
     P(DimMix,         "dim.mix",         "Mix",           "dim",     "Mix",            Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(DimPath,        "dim.path",        "Works on",      "dim",     "Path",           Choice, 0,    1,    0,    "",   "Bottom end|Full sound", None) \
     P(GrOn,           "grains.on",       "On",            "grains",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
-    P(GrEffect,       "grains.effect",   "Effect",        "grains",  "Effect",         Choice, 0,    11,   0,    "",   "Sparkle|Mosaic|Seq|Glide|Haze|Tunnel|Strum|Blocks|Interrupt|Arp|Pattern|Warp", None) \
+    P(GrEffect,       "grains.effect",   "Effect",        "grains",  "Effect",         Choice, 0,    10,   3,    "",   "Mosaic|Seq|Glide|Haze|Tunnel|Strum|Blocks|Interrupt|Arp|Pattern|Warp", None) \
     P(GrVariant,      "grains.variant",  "Variation",     "grains",  "Effect",         Choice, 0,    3,    0,    "",   "A|B|C|D", None) \
-    P(GrPitch,        "grains.pitch",    "Pitch",         "grains",  "Pitch",          Choice, 0,    3,    1,    "",   "Octave|Oct + 5th|2 octaves|Scatter", None) \
+    P(GrActivity,     "grains.activity", "Activity",      "grains",  "Movement",       Flip,   0,    1,    0.55f,"%",  "",   None) \
+    P(GrRepeats,      "grains.repeats",  "Repeats",       "grains",  "Movement",       Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(GrContour,      "grains.contour",  "Shape",         "grains",  "Movement",       Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(GrRev,          "grains.rev",      "Reverse",       "grains",  "Movement",       Toggle, 0,    1,    0,    "",   "",   None) \
+    P(GrSubdiv,       "grains.subdiv",   "Time",          "grains",  "Time",           Choice, 0,    8,    6,    "",   "1 bar|1/2|1/4 dot|1/4|1/4 trip|1/8 dot|1/8|1/8 trip|1/16", None) \
+    P(GrHold,         "grains.hold",     "Hold",          "grains",  "Time",           Toggle, 0,    1,    0,    "",   "",   None) \
+    P(GrFilter,       "grains.filter",   "Filter",        "grains",  "Filter and mod", Flip,   0,    1,    1,    "%",  "",   None) \
+    P(GrRes,          "grains.res",      "Resonance",     "grains",  "Filter and mod", Flip,   0,    1,    0.2f, "%",  "",   None) \
+    P(GrModDepth,     "grains.modDepth", "Mod depth",     "grains",  "Filter and mod", Flip,   0,    1,    0,    "%",  "",   None) \
+    P(GrModRate,      "grains.modRate",  "Mod rate",      "grains",  "Filter and mod", Flip,   0,    1,    0.4f, "%",  "",   None) \
+    P(GrSpace,        "grains.space",    "Space",         "grains",  "Space",          Flip,   0,    1,    0.4f, "%",  "",   None) \
+    P(GrSpaceType,    "grains.spaceType","Space type",    "grains",  "Space",          Choice, 0,    3,    2,    "",   "Bright room|Dark medium|Large hall|Ambient", None) \
+    P(GrPitch,        "grains.pitch",    "Pitch",         "grains",  "Pitch",          Choice, 0,    4,    0,    "",   "Off|Octave|Oct + 5th|2 octaves|Scatter", None) \
     P(GrScatter,      "grains.scatter",  "Movement",      "grains",  "Pitch",          Slider, 0,    1,    0.4f, "%",  "Steady|Scattered", None) \
-    P(GrActivity,     "grains.activity", "Activity",      "grains",  "Movement",       Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(GrRepeats,      "grains.repeats",  "Repeats",       "grains",  "Movement",       Flip,   0,    1,    0.45f,"%",  "",   None) \
-    P(GrContour,      "grains.contour",  "Shape",         "grains",  "Movement",       Flip,   0,    1,    0.55f,"%",  "",   None) \
-    P(GrSize,         "grains.size",     "Size",          "grains",  "Grains",         Flip,   20,   300,  80,   "ms", "",   Log) \
-    P(GrDensity,      "grains.density",  "Density",       "grains",  "Grains",         Flip,   1,    40,   12,   "/s", "",   Log) \
-    P(GrSpray,        "grains.spray",    "Spray",         "grains",  "Grains",         Flip,   0,    1,    0.3f, "%",  "",   None) \
-    P(GrReverse,      "grains.reverse",  "Reverse",       "grains",  "Grains",         Flip,   0,    1,    0.2f, "%",  "",   None) \
-    P(GrFeedback,     "grains.feedback", "Feedback",      "grains",  "Grains",         Flip,   0,    0.9f, 0.25f,"%",  "",   None) \
-    P(GrShape,        "grains.shape",    "Envelope",      "grains",  "Grains",         Choice, 0,    1,    0,    "",   "Bell|Smooth", None) \
-    P(GrHighPass,     "grains.hp",       "High-pass",     "grains",  "Placement",      Flip,   300,  4000, 1000, "Hz", "",   Log) \
-    P(GrCeiling,      "grains.ceiling",  "Ceiling",       "grains",  "Placement",      Flip,   3000, 14000,6000, "Hz", "",   Log) \
-    P(GrBright,       "grains.bright",   "Brightness",    "grains",  "Placement",      Flip,   -6,   6,    2,    "dB", "",   None) \
-    P(GrMix,          "grains.mix",      "Mix",           "grains",  "Placement",      Flip,   0,    1,    0.35f,"%",  "",   None) \
-    P(GrSource,       "grains.source",   "Source",        "grains",  "Source",         Choice, 0,    1,    0,    "",   "Clean|Dirty", None) \
+    P(GrVolume,       "grains.volume",   "Volume",        "grains",  "Output",         Flip,   -12,  12,   0,    "dB", "",   None) \
+    P(GrMix,          "grains.mix",      "Mix",           "grains",  "Output",         Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(GrSource,       "grains.source",   "Source",        "grains",  "Output",         Choice, 0,    1,    0,    "",   "Clean|Dirty", None) \
     P(BloomGrains,    "bloom.grains",    "Bloom reach",   "grains",  "Bloom reach",    Slider, 0,    1,    1,    "%",  "None|Full", None) \
     P(DlOn,           "delay.on",        "On",            "delay",   "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(DlType,         "delay.type",      "Type",          "delay",   "Type",           Choice, 0,    11,   0,    "",   "Digital|Bucket|Tape|Dual|Pattern|Reverse|Ice|Swell|Trem|Filter|Lo-fi|Galaxy", None) \

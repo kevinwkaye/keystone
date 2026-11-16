@@ -20,10 +20,7 @@ const char* showIf (P p)
 {
     switch (p)
     {
-        case P::GrVariant: case P::GrActivity: case P::GrRepeats: case P::GrContour:
-            return "grains.effect!=0";
-        case P::GrSize: case P::GrDensity: case P::GrSpray: case P::GrReverse: case P::GrFeedback: case P::GrShape:
-            return "grains.effect=0";
+        case P::GrScatter: return "grains.pitch=4";
         case P::DlTapeMachine: case P::DlTapeMode: case P::DlTapeAge: case P::DlWow: case P::DlCrinkle:
         case P::DlBias: case P::DlSpring: case P::DlBoost:
             return "delay.type=2";
@@ -55,17 +52,17 @@ const ModuleInfo* moduleTable (int& count)
 {
     // signal order, as on the Tone page
     static const ModuleInfo mods[] = {
-        { "split", "Split", "Low band", "Crossover and tight shelf" },
-        { "lowcomp", "Low compressor", "Low band", "Light, slap mode on hold D" },
-        { "drone", "Drone", "Low band", "Capture, duck, octave, dimension" },
-        { "drive", "Drive", "High band", "Edge and Drive voices" },
-        { "bitrot", "Bitrot", "Whole bass", "Tracking synth: square, sub, oscillator" },
-        { "preamp", "Preamp", "High band", "Growl to Cut, mid focus" },
-        { "filter", "Filter", "High band", "Envelope or manual" },
-        { "dim", "Dimension", "High band", "Mono safe" },
-        { "grains", "Grains", "High band", "Sparkle and eleven grain effects, all up top" },
-        { "delay", "Delay", "High band", "Twelve types, tape machine, tap" },
-        { "reverb", "Reverb", "High band", "Twelve spaces, shimmer, your own impulses" },
+        { "split", "Split", "Three paths", "Bottom dry, bottom wet, full sound" },
+        { "lowcomp", "Low compressor", "Bottom dry", "Light, slap mode on hold D" },
+        { "drone", "Drone", "Bottom wet", "Capture, duck, octave, dimension" },
+        { "drive", "Drive", "Full sound", "Edge and Drive voices" },
+        { "bitrot", "Bitrot", "Full sound", "Tracking synth: square, sub, oscillator" },
+        { "preamp", "Preamp", "Full sound", "Growl to Cut, mid focus" },
+        { "filter", "Filter", "Full sound", "Envelope or manual" },
+        { "dim", "Dimension", "Bottom wet", "Mono safe chorus" },
+        { "grains", "Speckle", "Full sound", "Eleven effects, filter, mod and space" },
+        { "delay", "Delay", "Full sound", "Twelve types, tape machine, tap" },
+        { "reverb", "Reverb", "Full sound", "Twelve spaces, shimmer, your own impulses" },
         { "bloom", "Bloom sweep", "Control", "Grains then wash, per song" },
         { "footswitches", "Footswitches", "Control", "Tap and hold jobs" },
         { "output", "Output", "Control", "Level, limiter, amp or PA" },

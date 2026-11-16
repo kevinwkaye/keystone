@@ -30,6 +30,10 @@ struct Engine::Impl
 
     DcBlock dc;
     LR4 split;
+    Biquad subCut1, subCut2;
+    float lastSubCut = -1;
+    Smoothed wetLevel;
+    std::vector<float> fullBuf;
     DelayLine lowAlign;            // lines the low band up with the high band's latency
     LowBand low;
     Drone drone;
@@ -118,6 +122,9 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.split.freq = -1;
     d.split.set (100, s);
     d.split.reset();
+    d.lastSubCut = -1;
+    d.wetLevel.setTime (0.03f, s); d.wetLevel.reset (1);
+    d.fullBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.lowAlign.prepare (Drive::kLatency + 4);
     d.low.prepare (s);
     d.drone.prepare (s);
@@ -272,10 +279,22 @@ void Engine::process (const float* in, float* out, int numSamples)
         // ---- module updates ----
         const float splitF = V (v, P::SplitFreq);
         d.split.set (splitF, d.sr);
+        // the full sound path: the whole bass with only the sub cut (4th order, so it sums
+        // with the bottom end within 2 dB)
+        const float subCut = V (v, P::SplitSubCut);
+        if (std::fabs (subCut - d.lastSubCut) > 0.1f)
+        {
+            d.subCut1.highPass (subCut, 0.5412f, d.sr);
+            d.subCut2.highPass (subCut, 1.3066f, d.sr);
+            if (d.lastSubCut < 0) { d.subCut1.reset(); d.subCut2.reset(); }
+            d.lastSubCut = subCut;
+        }
+        d.wetLevel.set (V (v, P::SplitWetLevel));
+        const bool dimLow = Vi (v, P::DimPath) == 0;
         d.low.update (v);
         d.drone.update (v, d.play.level);
         d.drone.block (n);
-        d.drive.update (v, bloomOn, bl, splitF, d.haveCapture.load());
+        d.drive.update (v, bloomOn, bl, subCut, d.haveCapture.load());
         auto* cap = d.capture.take();
         d.bitrot.update (v);
         d.preamp.update (v);
@@ -310,7 +329,10 @@ void Engine::process (const float* in, float* out, int numSamples)
             float lo, hi;
             d.split.split (s, lo, hi);
             d.lowBuf[(size_t) i] = d.low.process (lo);
-            d.highBuf[(size_t) i] = hi;
+            (void) hi;
+            const float full = d.subCut2.process (d.subCut1.process (s));
+            d.highBuf[(size_t) i] = full;
+            d.fullBuf[(size_t) i] = full;
             d.droneBuf[(size_t) i] = d.drone.process (s);
             // tuner feed
             const float t = d.tunerLp2.process (d.tunerLp1.process (s));
@@ -334,7 +356,7 @@ void Engine::process (const float* in, float* out, int numSamples)
             const bool active = Vb (v, P::BitrotOn) || d.bitrotOn.current() > 1.0e-4f;
             if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); return; }
             float* sy = d.synthBuf.data();
-            for (int i = 0; i < n; ++i) sy[i] = hb[i] + d.lowBuf[(size_t) i];
+            for (int i = 0; i < n; ++i) sy[i] = d.cleanBuf[(size_t) i];   // the whole bass, sub included, so it tracks the fundamental
             d.bitrot.process (sy, n);
             for (int i = 0; i < n; ++i)
             {
@@ -358,11 +380,11 @@ void Engine::process (const float* in, float* out, int numSamples)
             const float fg = filtHigh ? d.filtOn.next() : 0.0f;
             if (fg > 1.0e-4f) h = h + (d.filter.process (h) - h) * fg;
             const float dg = d.dimOn.next();
-            if (dg > 1.0e-4f) h = h + (d.dim.process (h) - h) * dg;
+            if (! dimLow && dg > 1.0e-4f) h = h + (d.dim.process (h) - h) * dg;
             h *= d.highLevel.next();
 
             // ---- ambient ----
-            const float grainSrc = d.grains.sourceDirty() ? h : d.cleanBuf[(size_t) i];
+            const float grainSrc = d.grains.sourceDirty() ? h : d.fullBuf[(size_t) i];
             const float gr = d.grains.process (grainSrc, playLevel);
             const float dr = d.droneBuf[(size_t) i];
             const float droneSend = dr * V (v, P::DroneSend);
@@ -372,14 +394,19 @@ void Engine::process (const float* in, float* out, int numSamples)
 
             // ---- sum, mono out ----
             d.lowAlign.push (d.lowBuf[(size_t) i]);
-            float core = d.lowAlign.at (Drive::kLatency) * d.lowLevel.next() * lm[i] + h;
+            // bottom end dry, bottom end wet (Dimension), full sound
+            const float lowA = d.lowAlign.at (Drive::kLatency);
+            float bottom = lowA * d.lowLevel.next();
+            const float wl = d.wetLevel.next();
+            if (dimLow && dg > 1.0e-4f) bottom += (d.dim.process (lowA) - lowA) * dg * wl;
+            float core = bottom * lm[i] + h;
             if (! filtHigh)
             {
                 // the envelope filter on the whole bass, so it sweeps the note you play
                 const float wg = d.filtOn.next();
                 if (wg > 1.0e-4f) core = core + (d.filter.process (core) - core) * wg;
             }
-            float o = core + dr + gr + dl + rv;
+            float o = core + dr * wl + gr + dl + rv;
             o *= d.outLevel.next();
             if (pa) o = d.paLp.process (d.paHp.process (o));
             o *= d.tunerGate.next();

@@ -1,300 +1,121 @@
 #pragma once
-// Grains as ear candy: Sparkle (below) or one of Speckle's eleven effects (SpeckleFx.h),: pitched up an octave, an octave and a fifth, two
-// octaves, or a scatter of those, high-passed so the sparkle lands in the open 1 to 4 kHz
-// space. Mono-friendly movement from timing and pitch variation, not stereo spread.
+// Speckle in Keystone: the whole Speckle engine from Kevin's Speckle plugin (core/src/spk),
+// eleven effects with its filter, pitch mod and space, on the full sound path. Mono in,
+// mono out (the engine's stereo is summed). An octave pitch-up before it is optional.
 //
-// Lessons applied: band-limited polyphase read head for pitch-ups (Backtrack), grains
-// only spawn from audio that has sound in it, judged against the playing level (Speckle).
+// It only runs while it's switched on (plus a short fade), so it is never heard when off.
 
 #include "SpeckleFx.h"
+#include "spk/SpeckleEngine.h"
 
 namespace ks
 {
 class Grains
 {
 public:
-    static constexpr int kMaxVoices = 8, kPhases = 128, kMaxTaps = 32;
-    static constexpr int kEnvTable = 1024, kLevelDecim = 64;
+    static constexpr int kBlock = spk::EffectBank::block;
 
     void prepare (float sr_)
     {
         sr = sr_;
-        int n = 1;
-        while (n < (int) (2.8f * sr)) n <<= 1;
-        buf.assign ((size_t) n, 0.0f);
-        mask = n - 1;
-        level.assign ((size_t) (n / kLevelDecim), 0.0f);
-        levelMask = (int) level.size() - 1;
-        buildTables (kMaxTaps);
-        for (int i = 0; i < kEnvTable; ++i)
-        {
-            const float t = (float) i / (kEnvTable - 1);
-            // bell: quick raised-cosine attack, then a ringing decay to zero
-            const float a = 0.1f;
-            bell[i] = t < a ? 0.5f - 0.5f * std::cos (kPi * t / a)
-                            : std::exp (-3.5f * (t - a) / (1 - a)) * (0.5f + 0.5f * std::cos (kPi * (t - a) / (1 - a)));
-            smooth[i] = 0.5f - 0.5f * std::cos (kTwoPi * t);
-        }
-        hp1.reset(); hp2.reset(); shelf.reset(); ceil1.reset(); ceil2.reset();
-        speckle.prepare (sr);
+        eng.prepare (sr);
+        shifter.prepare (sr);
         mixS.setTime (0.05f, sr);
-        envAtt = onePoleCoef (0.003f, sr);
-        envRel = onePoleCoef (0.8f, sr);
-        makeupGlide = 1.0f - onePoleCoef (1.0f, sr);
         reset();
     }
     void reset()
     {
-        std::fill (buf.begin(), buf.end(), 0.0f);
-        std::fill (level.begin(), level.end(), 0.0f);
-        for (auto& v : voices) v.on = false;
-        wp = 0; levelAcc = 0; levelCount = 0; untilNext = 0; fbSample = 0;
         mixS.reset (0);
-        activity = 0;
-        speckle.reset();
-        std::fill (std::begin (spIn), std::end (spIn), 0.0f);
-        std::fill (std::begin (spOut), std::end (spOut), 0.0f);
-        spIdx = 0; spTail = 0;
+        std::fill (std::begin (inL), std::end (inL), 0.0f);
+        std::fill (std::begin (outM), std::end (outM), 0.0f);
+        idx = 0; activity = 0; running = false;
     }
 
-    void update (const Vals& v, float bloomZone2, bool bloomActive, bool light)
+    void update (const Vals& v, float bloomZone2, bool bloomActive, bool /*light*/)
     {
         const bool on = Vb (v, P::GrOn);
         const float mix = V (v, P::GrMix);
         float m = on ? mix : 0.0f;
-        densityScale = 1.0f;
-        if (bloomActive)
-        {
-            // a third to two thirds: grains join, mix and density rising over the drone
-            const float reach = V (v, P::BloomGrains);
-            const float bm = bloomZone2 * reach * std::max (mix, 0.35f);
-            if (bm > m) { m = bm; densityScale = 0.3f + 0.7f * bloomZone2; }
-        }
+        // the expression pedal pushes Speckle further in when it's on; it never brings it in
+        if (on && bloomActive) m = mix + (1.0f - mix) * bloomZone2 * V (v, P::BloomGrains);
         mixS.set (m);
-        pitchMode = Vi (v, P::GrPitch);
-        scatter = V (v, P::GrScatter);
-        sizeS = V (v, P::GrSize) * 0.001f * sr;
-        density = V (v, P::GrDensity);
-        spray = V (v, P::GrSpray);
-        reverseProb = V (v, P::GrReverse);
-        feedback = V (v, P::GrFeedback);
-        bellShape = Vi (v, P::GrShape) == 0;
         dirty = Vi (v, P::GrSource) == 1;
-        effect = Vi (v, P::GrEffect);
-        sp.effect = std::max (0, effect - 1);
-        sp.variant = Vi (v, P::GrVariant);
-        sp.activity = V (v, P::GrActivity);
-        sp.repeats = V (v, P::GrRepeats);
-        sp.shape = V (v, P::GrContour);
+
+        p.effect = std::max (0, std::min ((int) spk::kNumEffects - 1, Vi (v, P::GrEffect)));
+        p.variant = Vi (v, P::GrVariant);
+        p.reverse = Vb (v, P::GrRev);
+        p.activity = V (v, P::GrActivity);
+        p.repeats = V (v, P::GrRepeats);
+        p.shape = V (v, P::GrContour);
+        // the delay's time (tap tempo sets it) is the beat
+        static constexpr float subdiv[9] = { 4.0f, 2.0f, 1.5f, 1.0f, 2.0f / 3.0f, 0.75f, 0.5f, 1.0f / 3.0f, 0.25f };
+        p.beatSamples = clampf (V (v, P::DlTime), 150.0f, 1500.0f) * 0.001f * sr;
+        p.stepSamples = p.beatSamples * subdiv[std::max (0, std::min (8, Vi (v, P::GrSubdiv)))];
+        p.filter = V (v, P::GrFilter);
+        p.resonance = V (v, P::GrRes);
+        p.modDepth = V (v, P::GrModDepth);
+        p.modRateHz = 0.05f * std::pow (2.0f, V (v, P::GrModRate) * 7.3f);
+        p.space = V (v, P::GrSpace);
+        p.reverbMode = std::max (0, std::min (3, Vi (v, P::GrSpaceType)));
+        p.volumeDb = V (v, P::GrVolume);
+        p.hold = Vb (v, P::GrHold);
+        p.mix = 1.0f;   // all wet: Keystone keeps the dry itself
+        p.inputMode = spk::InputGuitar;   // the full path already has its sub cut
+        p.detectorMode = spk::InputBass;
+        p.bypass = false; p.trails = true;
+        p.loopPre = false; p.loopOnly = false;
+        p.loopLevel = 0.0f;
+
+        pitchMode = Vi (v, P::GrPitch);
         static const float ratios[3] = { 2.0f, 3.0f, 4.0f };
-        sp.scatter = pitchMode == 3;
-        sp.ratio = ratios[std::max (0, std::min (2, pitchMode))];
-        sp.scatterAmount = scatter;
-        sp.beatSamples = clampf (V (v, P::DlTime), 150.0f, 1500.0f) * 0.001f * sr;
-        const float ce = V (v, P::GrCeiling);
-        if (ce != lastCeil) { ceil1.lowPass (ce, 0.5412f, sr); ceil2.lowPass (ce, 1.3066f, sr); lastCeil = ce; }
-        const float hp = V (v, P::GrHighPass), br = V (v, P::GrBright);
-        if (hp != lastHp) { hp1.highPass (hp, 0.5412f, sr); hp2.highPass (hp, 1.3066f, sr); lastHp = hp; }
-        if (br != lastBright) { shelf.highShelf (3000.0f, br, sr, 0.8f); lastBright = br; }
-        const int taps = light ? 16 : kMaxTaps;
-        if (taps != tapsNow) buildTables (taps);
-        maxVoices = light ? 3 : kMaxVoices;
+        if (pitchMode >= 1 && pitchMode <= 3) shifter.setRatio (ratios[pitchMode - 1]);
+        if (pitchMode == 4)
+        {
+            // scatter: wander between the three intervals, more often with more movement
+            if (++scatterTick > (int) (40 - 35 * V (v, P::GrScatter))) { scatterTick = 0; shifter.setRatio (ratios[(rng.next() >> 8) % 3]); }
+        }
     }
 
     bool sourceDirty() const { return dirty; }
-    bool active() const { return mixS.value > 1.0e-4f || mixS.target > 0 || anyVoice; }
-
-    // source: the clean or dirty signal (always recorded, so grains have history)
-    // returns the wet grain signal, already scaled by mix
-    float process (float source, float playLevel)
-    {
-        wp = (wp + 1) & mask;
-        buf[(size_t) wp] = source + fbSample;
-        levelAcc = std::max (levelAcc, std::fabs (source));
-        if (++levelCount >= kLevelDecim)
-        {
-            level[(size_t) ((wp / kLevelDecim) & levelMask)] = levelAcc;
-            levelAcc = 0; levelCount = 0;
-        }
-
-        const float m = mixS.next();
-        if (effect > 0)
-        {
-            // Speckle effects, a block at a time (32 samples, under a millisecond late)
-            fbSample = 0;
-            if (m < 1.0e-4f && spTail < 1.0e-5f) { activity *= 0.999f; anyVoice = false; return 0.0f; }
-            const float y0 = spOut[spIdx];
-            spIn[spIdx] = source;
-            if (++spIdx >= SpeckleFx::kBlock)
-            {
-                speckle.process (spIn, spOut, SpeckleFx::kBlock, sp);
-                spIdx = 0;
-                activity += (std::min (1.0f, (float) speckle.grainCount() / 24.0f) - activity) * 0.05f;
-            }
-            // makeup before the filters, so its movement never adds lows
-            float y = ceil2.process (ceil1.process (shelf.process (hp2.process (hp1.process (y0 * makeupG)))));
-            makeup (source, y / makeupG);
-            y = std::tanh (y);
-            spTail = std::max (std::fabs (y), spTail * 0.9999f);
-            anyVoice = spTail > 1.0e-5f;
-            return y * m;
-        }
-        if (m < 1.0e-4f && ! anyVoice) { fbSample = 0; activity *= 0.999f; return 0.0f; }
-
-        if (--untilNext <= 0 && m > 1.0e-4f) spawn (playLevel);
-
-        float sum = 0;
-        anyVoice = false;
-        int count = 0;
-        for (auto& g : voices)
-        {
-            if (! g.on) continue;
-            anyVoice = true;
-            ++count;
-            const float t = (float) g.age / (float) g.len;
-            const float* env = g.bell ? bell : smooth;
-            const float e = env[std::min (kEnvTable - 1, (int) (t * (kEnvTable - 1)))];
-            sum += read (g.pos, g.table) * e * g.gain;
-            g.pos += g.inc;
-            if (++g.age >= g.len) g.on = false;
-        }
-        activity += ((float) count / (float) maxVoices - activity) * 0.001f;
-        float y = sum * norm;
-        y = ceil2.process (ceil1.process (shelf.process (hp2.process (hp1.process (y * makeupG)))));
-        makeup (source, y / makeupG);
-        y = std::tanh (y);
-        // feedback back into the buffer, gently limited so cascades never run away
-        fbSample = std::tanh (y * feedback * 1.2f) * 0.8f;
-        return y * m;
-    }
+    bool active() const { return mixS.value > 1.0e-4f || mixS.target > 0; }
     float activityLevel() const { return activity; }
 
-    // Lifting grains above the band leaves little of a bass note's energy, so the wet is
-    // brought back up towards the level you're playing at (up to +24 dB, never down), and
-    // Mix then means what it says. Only while you play: silence and hiss aren't lifted.
-    float makeup (float in, float wet)
+    // source: the clean or dirty full sound. Returns the wet signal, already scaled by mix.
+    // A block of 32 samples at a time, under a millisecond late.
+    float process (float source, float /*playLevel*/)
     {
-        const float a = std::fabs (in), b = std::fabs (wet);
-        inEnv = a > inEnv ? a + (inEnv - a) * envAtt : a + (inEnv - a) * envRel;
-        wetEnv = b > wetEnv ? b + (wetEnv - b) * envAtt : b + (wetEnv - b) * envRel;
-        const float want = inEnv > 2.0e-3f && wetEnv > 1.0e-6f ? clampf (0.7f * inEnv / wetEnv, 1.0f, 16.0f) : 1.0f;
-        makeupG += (want - makeupG) * makeupGlide;
-        return makeupG;
+        const float m = mixS.next();
+        if (m < 1.0e-4f && mixS.target <= 0.0f)
+        {
+            running = false;
+            activity *= 0.999f;
+            return 0.0f;
+        }
+        running = true;
+        const float y = outM[idx];
+        inL[idx] = pitchMode > 0 ? shifter.process (source) : source;
+        if (++idx >= kBlock)
+        {
+            float l[kBlock], r[kBlock];
+            for (int i = 0; i < kBlock; ++i) { l[i] = inL[i]; r[i] = inL[i]; }
+            eng.process (l, r, kBlock, p);
+            for (int i = 0; i < kBlock; ++i) outM[i] = 0.5f * (l[i] + r[i]);
+            idx = 0;
+            activity += (std::min (1.0f, (float) eng.uiGrains.load (std::memory_order_relaxed) / 24.0f) - activity) * 0.05f;
+        }
+        return y * m;
     }
 
 private:
-    struct Voice
-    {
-        bool on = false, bell = true;
-        double pos = 0;
-        double inc = 2;
-        int len = 1, age = 0, table = 0;
-        float gain = 1;
-    };
-
-    void buildTables (int taps)
-    {
-        tapsNow = taps;
-        // windowed sinc per pitch ratio (2, 3, 4): cutoff below the new Nyquist
-        const float ratios[3] = { 2.0f, 3.0f, 4.0f };
-        for (int r = 0; r < 3; ++r)
-        {
-            const double fc = 0.47 / ratios[r];
-            for (int ph = 0; ph < kPhases; ++ph)
-            {
-                const double frac = (double) ph / kPhases;
-                double sum = 0;
-                for (int k = 0; k < taps; ++k)
-                {
-                    const double x = (double) (k - taps / 2 + 1) - frac;
-                    const double s = std::fabs (x) < 1e-9 ? 2 * fc : std::sin (2 * M_PI * fc * x) / (M_PI * x);
-                    const double w = 0.42 + 0.5 * std::cos (M_PI * x / (taps / 2.0)) + 0.08 * std::cos (2 * M_PI * x / (taps / 2.0));
-                    const double h = std::fabs (x) >= taps / 2.0 ? 0.0 : s * w;
-                    table[r][ph][k] = (float) h;
-                    sum += h;
-                }
-                if (sum != 0) for (int k = 0; k < taps; ++k) table[r][ph][k] = (float) (table[r][ph][k] / sum);
-            }
-        }
-    }
-
-    float read (double pos, int t) const
-    {
-        const int i = (int) std::floor (pos);
-        const float frac = (float) (pos - i);
-        const int ph = std::min (kPhases - 1, (int) (frac * kPhases));
-        const float* h = table[t][ph];
-        float s = 0;
-        const int base = i - tapsNow / 2 + 1;
-        for (int k = 0; k < tapsNow; ++k) s += h[k] * buf[(size_t) ((base + k) & mask)];
-        return s;
-    }
-
-    float levelAt (int pos) const { return level[(size_t) (((pos & mask) / kLevelDecim) & levelMask)]; }
-
-    void spawn (float playLevel)
-    {
-        const float rate = std::max (0.5f, density * densityScale);
-        const float jitter = 1.0f + scatter * 0.8f * rng.bi();
-        untilNext = std::max (16, (int) (sr / rate * jitter));
-
-        Voice* g = nullptr;
-        int busy = 0;
-        for (auto& v : voices) if (v.on) ++busy;
-        if (busy >= maxVoices) return;
-        for (auto& v : voices) if (! v.on) { g = &v; break; }
-        if (g == nullptr) return;
-
-        int choice = pitchMode;
-        if (pitchMode == 3) choice = (int) (rng.uni() * 3.0f) % 3;   // scatter, always in key
-        const float ratios[3] = { 2.0f, 3.0f, 4.0f };
-        const float detuneCents = scatter * 10.0f * rng.bi();
-        const float ratio = ratios[choice] * std::pow (2.0f, detuneCents / 1200.0f);
-        const int len = std::max (64, (int) (sizeS * (1.0f + scatter * 0.3f * rng.bi())));
-        const bool rev = rng.uni() < reverseProb;
-        const int offset = (int) (0.015f * sr + spray * 0.35f * sr * rng.uni()) + tapsNow;
-        const int travel = (int) (ratio * len) + tapsNow;
-        int start = rev ? wp - offset : wp - offset - travel;
-        if ((offset + travel) * 1 >= mask - 64) return;
-
-        // only spawn from audio that actually has a note in it
-        const int centre = rev ? start - travel / 2 : start + travel / 2;
-        const float lv = std::max (levelAt (centre), levelAt (start));
-        if (lv < std::max (playLevel * 0.0708f, 2.0e-5f)) { untilNext = (int) (0.01f * sr); return; }
-
-        g->on = true;
-        g->bell = bellShape;
-        g->pos = start;
-        g->inc = rev ? -ratio : ratio;
-        g->len = len;
-        g->age = 0;
-        g->table = choice;
-        g->gain = 1.0f + 0.15f * scatter * rng.bi();
-        const float overlap = std::max (1.0f, rate * len / sr);
-        norm = 1.6f / std::sqrt (overlap);
-    }
-
     float sr = 48000;
-    std::vector<float> buf, level;
-    int mask = 0, levelMask = 0, wp = 0, levelCount = 0;
-    float levelAcc = 0;
-    float table[3][kPhases][kMaxTaps] {};
-    int tapsNow = kMaxTaps;
-    float bell[kEnvTable] {}, smooth[kEnvTable] {};
-    Voice voices[kMaxVoices];
-    int maxVoices = kMaxVoices, untilNext = 0;
-    bool anyVoice = false, bellShape = true, dirty = false;
-    int pitchMode = 1;
-    float scatter = 0.4f, sizeS = 3840, density = 12, densityScale = 1, spray = 0.3f, reverseProb = 0.2f, feedback = 0.25f;
-    float norm = 1, fbSample = 0, activity = 0;
-    float lastHp = -1, lastBright = -99, lastCeil = -1;
-    float inEnv = 0, wetEnv = 0, makeupG = 1, envAtt = 0.999f, envRel = 0.9999f, makeupGlide = 0.0001f;
-    Biquad hp1, hp2, shelf, ceil1, ceil2;
-    int effect = 0, spIdx = 0;
-    float spIn[SpeckleFx::kBlock] {}, spOut[SpeckleFx::kBlock] {}, spTail = 0;
-    SpeckleFx speckle;
-    SpeckleFx::Settings sp;
+    spk::SpeckleEngine eng;
+    spk::EngineParams p;
+    UpShifter shifter;
     Smoothed mixS;
     Rng rng;
+    float inL[kBlock] = {}, outM[kBlock] = {};
+    int idx = 0, pitchMode = 0, scatterTick = 0;
+    float activity = 0;
+    bool dirty = false, running = false;
 };
 } // namespace ks

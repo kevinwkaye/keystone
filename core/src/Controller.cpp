@@ -111,6 +111,17 @@ void Controller::load()
                 song.values["filter.low"] = 200.0f;
                 song.values["bloom.autocap"] = 0.0f;
             }
+            // setlist version 3: Speckle is the whole Speckle engine (Sparkle is gone and the
+            // effects moved down one), the octave up is off, and the drive has its body back
+            if (sl.value ("version", 1) < 3)
+            {
+                const float fx = song.values["grains.effect"];
+                song.values["grains.effect"] = fx < 0.5f ? 3.0f : fx - 1.0f;   // Sparkle becomes Haze
+                song.values["grains.pitch"] = 0.0f;
+                song.values["drive.lowInto"] = 0.0f;
+                song.values["drive.edge.lowcut"] = 70.0f;
+                song.values["drive.drive.lowcut"] = 70.0f;
+            }
             s->songs.push_back (song);
             if ((int) s->songs.size() >= kMaxSongs) break;
         }
@@ -158,7 +169,7 @@ void Controller::load()
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 2;
+    j["version"] = 3;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)

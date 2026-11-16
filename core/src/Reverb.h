@@ -99,7 +99,7 @@ public:
         float mix = on ? V (v, P::RvMix) : 0.0f;
         float decay = V (v, P::RvDecay);
         freeze = on && Vb (v, P::RvFreeze) && pendingType != Spring && pendingType != Nonlinear && pendingType != Impulse;
-        if (bloomActive && zone3 > 0)
+        if (bloomActive && on && zone3 > 0)
         {
             const float reach = V (v, P::BloomWash);
             decay = decay + (40.0f * reach - decay) * zone3;
@@ -110,8 +110,8 @@ public:
         vals = &v;
         lightMode = light;
         voice (v);
-        gateS.set (heelBack && cutTails ? 0.0f : 1.0f);
-        feeding = (on && ! freeze) || (bloomActive && zone3 > 0);
+        gateS.set (heelBack && cutTails && ! on ? 0.0f : 1.0f);
+        feeding = (on && ! freeze) || (bloomActive && on && zone3 > 0);
         updateGains();
     }
 
@@ -126,7 +126,7 @@ public:
             { 1.00f, 0.70f, 0.3f, 0.45f, 0.90f, 1.00f },   // Hall
             { 0.60f, 0.85f, 0.0f, 0.30f, 1.40f, 1.05f },   // Plate
             { 0.30f, 0.50f, 0.0f, 0.10f, 1.00f, 1.00f },   // Spring (own tank)
-            { 0.62f, 0.72f, 1.0f, 0.20f, 0.75f, 1.15f },   // Chamber
+            { 0.62f, 0.72f, 1.0f, 0.20f, 0.75f, 1.0f },    // Chamber
             { 1.45f, 0.85f, 0.0f, 0.65f, 0.85f, 1.00f },   // Cloud
             { 1.10f, 0.75f, 0.0f, 0.50f, 0.90f, 1.05f },   // Bloom
             { 1.00f, 0.72f, 0.0f, 0.55f, 1.00f, 1.70f },   // Chorale
@@ -201,14 +201,15 @@ public:
                 updateGains();
             }
         }
-        else if (sw < 1) sw = std::min (1.0f, sw + 1.0f / (0.01f * sr));
+        else if (sw < 1) sw = std::min (1.0f, sw + 1.0f / (0.025f * sr));
+        const float swS = sw * sw * sw * (sw * (6.0f * sw - 15.0f) + 10.0f);   // a smooth S-curve, no corners to click on
         if ((count++ & 15) == 0) updateLoopFilters();
 
         const float dEnv = duckEnv.process (x);
         float in = feeding ? x : 0.0f;
         if (swellSamples > 1.0f) in *= swell (x);
         pre.push (in);
-        float s = pre.frac (std::max (1.0f, predelay)) * sw;   // ramped, so a new type's own lines start smoothly
+        float s = pre.frac (std::max (1.0f, predelay)) * swS;   // ramped, so a new type's own lines start smoothly
 
         float wet = 0;
         switch (type)
@@ -223,7 +224,7 @@ public:
         const float g = gateS.next();
         const float dk = 1.0f - duck * 0.9f * clampf (dEnv * 8.0f, 0.0f, 1.0f);
         tail = std::max (std::fabs (wet), tail * 0.9999f);
-        return wet * trim * dk * sw * mixS.next() * g;
+        return wet * trim * dk * swS * mixS.next() * g;
     }
 
 private:
