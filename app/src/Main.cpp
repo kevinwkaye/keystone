@@ -30,6 +30,26 @@ using namespace juce;
 
 class KeystoneApp;
 static KeystoneApp* theApp = nullptr;
+
+// Keystone is a live instrument: ask Windows not to slow it down to save power (it runs
+// with no window, which Windows 11 otherwise treats as a background job and moves to the
+// slow cores) and to give it a high priority.
+static void raiseProcessPriority()
+{
+#if JUCE_WINDOWS
+    SetPriorityClass (GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+   #ifdef PROCESS_POWER_THROTTLING_CURRENT_VERSION
+    PROCESS_POWER_THROTTLING_STATE state {};
+    state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    state.StateMask = 0;   // never throttle
+    const bool ok = SetProcessInformation (GetCurrentProcess(), ProcessPowerThrottling, &state, sizeof (state)) != 0;
+    Logger::writeToLog (String ("Priority: high, power saving ") + (ok ? "switched off for Keystone" : "could not be switched off"));
+   #else
+    Logger::writeToLog ("Priority: high");
+   #endif
+#endif
+}
 static void midiSink (const MidiMessage& m);
 
 // If Keystone ever crashes, the log says where.
@@ -162,6 +182,7 @@ public:
                             + String (SystemStats::getCpuSpeedInMegahertz()) + " MHz, AVX " + (SystemStats::hasAVX() ? "yes" : "no")
                             + ", AVX2 " + (SystemStats::hasAVX2() ? "yes" : "no") + ", FMA " + (SystemStats::hasFMA3() ? "yes" : "no")
                             + ". Keystone " + build + ".");
+        raiseProcessPriority();
         SystemStats::setApplicationCrashHandler (crashHandler);
         std::set_terminate ([] { Logger::writeToLog ("TERMINATE: an unhandled error stopped Keystone. Stack:\n" + SystemStats::getStackBacktrace()); std::abort(); });
         watchdog.startThread();
@@ -190,6 +211,11 @@ public:
 
         audio = std::make_unique<AudioHost> (engine, keeper);
         if (args.contains ("--list-devices")) Logger::writeToLog ("Audio devices:\n" + audio->deviceList());
+        audio->onBufferStepLearnt = [this] (int step)
+        {
+            engine.setParam (ks::P::OutBufferStep, (float) step);
+            if (controller) controller->saveGlobals();
+        };
         audio->start (wantDevice, wantBuffer);
 
         midi = std::make_unique<DirectMidiInput>();

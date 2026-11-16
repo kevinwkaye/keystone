@@ -82,7 +82,8 @@ bool AudioHost::tryOpen()
         setup.outputChannels.clear();
         setup.outputChannels.setRange (0, 2, true);
         setup.sampleRate = 48000.0;
-        setup.bufferSize = wantBuffer > 0 ? wantBuffer : 64;
+        const int wantSamples = wantBuffer > 0 ? wantBuffer : (int) std::lround (targetBufferMs() * 0.001 * 48000.0);
+        setup.bufferSize = wantSamples;
         auto err = deviceManager.setAudioDeviceSetup (setup, true);
         auto* dev = deviceManager.getCurrentAudioDevice();
         if (err.isNotEmpty() || dev == nullptr)
@@ -94,13 +95,15 @@ bool AudioHost::tryOpen()
         }
         if (err.isNotEmpty() || dev == nullptr) { lastError = typeName + ": " + err; continue; }
 
-        // smallest buffer the device allows from 64 samples up (or the one asked for)
+        // the size asked for, or the nearest the device offers at or above it
         int best = dev->getCurrentBufferSizeSamples();
         if (wantBuffer <= 0)
         {
+            const int want = (int) std::lround (targetBufferMs() * 0.001 * dev->getCurrentSampleRate());
             int pick = 0;
             for (int b : dev->getAvailableBufferSizes())
-                if (b >= 64 && (pick == 0 || b < pick)) pick = b;
+                if (b >= std::max (64, want) && (pick == 0 || b < pick)) pick = b;
+            if (pick == 0) for (int b : dev->getAvailableBufferSizes()) pick = std::max (pick, b);
             if (pick > 0 && pick != best)
             {
                 setup.bufferSize = pick;
@@ -109,6 +112,12 @@ bool AudioHost::tryOpen()
         }
         dev = deviceManager.getCurrentAudioDevice();
         if (dev == nullptr) { lastError = typeName + ": device closed"; continue; }
+        openedBuffer = dev->getCurrentBufferSizeSamples();
+        silentInputBlocks.store (0);
+        xrunsBase.store (std::max (0, dev->getXRunCount()));
+        lastLate = lateCallbacks.load();
+        lastXrun = 0;
+        dropTicks = 0;
         deviceManager.addAudioCallback (this);
         {
             const ScopedLock l (statusLock);
@@ -205,6 +214,13 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
     }
     if (avail > 0 && in[use] != nullptr) FloatVectorOperations::copy (monoIn.data(), in[use], n);
     else FloatVectorOperations::clear (monoIn.data(), n);
+    // a live interface input always has a little noise; exact digital silence on every
+    // input means the input stream has stopped
+    bool allZero = true;
+    for (int c = 0; c < numIn && allZero; ++c)
+        if (in[c] != nullptr)
+            for (int i = 0; i < n; ++i) if (in[c][i] != 0.0f) { allZero = false; break; }
+    if (allZero && numIn > 0) silentInputBlocks.fetch_add (1); else silentInputBlocks.store (0);
 
     engine.process (monoIn.data(), monoOut.data(), n);
 
@@ -227,12 +243,67 @@ void AudioHost::timerCallback()
         if (tryOpen()) Logger::writeToLog ("Audio: device open again");
         return;
     }
+    auto* dev = deviceManager.getCurrentAudioDevice();
+    // the input stream stopped (digital silence for 2 s): open the device again
+    if (dev != nullptr && isRunning.load() && openedBuffer > 0
+        && silentInputBlocks.load() * (double) openedBuffer > 2.0 * currentRate.load())
+    {
+        Logger::writeToLog ("Audio: the interface's input went silent (the stream stopped), opening it again");
+        silentInputBlocks.store (0);
+        if (tryOpen()) Logger::writeToLog ("Audio: device open again");
+        return;
+    }
+    // dropouts: log the two kinds separately every 30 s, and in Auto step the buffer up
+    if (dev != nullptr && isRunning.load() && ++dropTicks >= 10)
+    {
+        dropTicks = 0;
+        const int late = lateCallbacks.load() - lastLate;
+        const int xr = std::max (0, dev->getXRunCount() - xrunsBase.load()) - lastXrun;
+        lastLate += late;
+        lastXrun += xr;
+        if (late + xr > 0)
+            Logger::writeToLog ("Audio: in the last 30 s, " + String (xr) + " dropouts reported by the interface, "
+                                + String (late) + " blocks where Keystone ran late (buffer " + String (openedBuffer) + " samples)");
+        const int choice = (int) std::lround (engine.getParam (ks::P::OutBuffer));
+        const int step = std::clamp ((int) std::lround (engine.getParam (ks::P::OutBufferStep)), 0, 3);
+        if (choice == 0 && late + xr >= 6 && step < 3 && wantBuffer <= 0)
+        {
+            Logger::writeToLog ("Audio: too many dropouts, moving the buffer up a step");
+            if (onBufferStepLearnt) onBufferStepLearnt (step + 1);
+            openedForSetting = String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep));
+            if (tryOpen()) Logger::writeToLog ("Audio: device open again");
+            return;
+        }
+    }
+    // the buffer setting was changed on the phone
+    {
+        const String setting = String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep));
+        if (openedForSetting.isEmpty()) openedForSetting = setting;
+        else if (setting != openedForSetting)
+        {
+            openedForSetting = setting;
+            Logger::writeToLog ("Audio: buffer setting changed");
+            if (tryOpen()) Logger::writeToLog ("Audio: device open again");
+            return;
+        }
+    }
     // running on the laptop's own sound: keep looking for the interface and move to it
     if (! onInterface.load() && interfacePresent())
     {
         Logger::writeToLog ("Audio: the audio interface has appeared, switching to it");
         if (tryOpen()) Logger::writeToLog ("Audio: now on the audio interface");
     }
+}
+
+// Auto: the buffer Keystone has learnt works on this computer (starts at 6 ms); or the
+// size chosen on the phone (Tone, Output, Setup).
+int AudioHost::targetBufferMs() const
+{
+    static const double stepMs[4] = { 3.0, 4.0, 6.0, 10.0 };
+    const int choice = (int) std::lround (engine.getParam (ks::P::OutBuffer));
+    if (choice >= 1 && choice <= 4) return (int) stepMs[choice - 1];
+    const int step = std::clamp ((int) std::lround (engine.getParam (ks::P::OutBufferStep)), 0, 3);
+    return (int) stepMs[step];
 }
 
 bool AudioHost::interfacePresent()

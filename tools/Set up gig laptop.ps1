@@ -26,6 +26,7 @@ Step 'Never sleep or hibernate on a timer'       { powercfg /change standby-time
 Step 'No sign-in when waking from sleep'         { powercfg /setacvalueindex SCHEME_CURRENT SUB_NONE CONSOLELOCK 0; powercfg /setdcvalueindex SCHEME_CURRENT SUB_NONE CONSOLELOCK 0 }
 Step 'USB audio and footswitch never suspended'  { powercfg /setacvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0; powercfg /setdcvalueindex SCHEME_CURRENT 2a737441-1930-4402-8d77-b2bebba308a3 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0 }
 Step 'Wi-Fi at full power (steady phone link)'   { powercfg /setacvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0; powercfg /setdcvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0 }
+Step 'Best performance when plugged in (no slow cores for audio)' { powercfg /setacvalueindex SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 100; powercfg /overlaysetactive ded574b5-45a0-4f42-8737-46345c09c238 }
 Step 'Apply the power plan'                       { powercfg /setactive SCHEME_CURRENT }
 
 # ---- sign-in

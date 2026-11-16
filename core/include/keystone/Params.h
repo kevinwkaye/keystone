@@ -203,6 +203,8 @@ struct ParamInfo
     P(OutLimit,       "output.limit",    "Limiter",       "output",  "Output",         Toggle, 0,    1,    1,    "",   "",   None) \
     P(OutVoicing,     "output.voicing",  "Into",          "output",  "Output",         Choice, 0,    1,    0,    "",   "Amp|PA", None) \
     P(OutQuality,     "output.quality",  "Effects quality","output", "Setup",          Choice, 0,    2,    0,    "",   "Auto|Full|Light", Global) \
+    P(OutBuffer,      "output.buffer",   "Audio buffer",  "output",  "Setup",          Choice, 0,    4,    0,    "",   "Auto|3 ms|4 ms|6 ms|10 ms", Global) \
+    P(OutBufferStep,  "output.bufferStep","Buffer learnt", "output", "Setup",          Choice, 0,    3,    2,    "",   "3 ms|4 ms|6 ms|10 ms", Global | Hidden) \
     P(OutInput,       "output.input",    "Bass input",    "output",  "Setup",          Choice, 0,    2,    0,    "",   "Auto|Input 1|Input 2", Global) \
     P(TunerMute,      "tuner.mute",      "Mute output while tuning","tuner","Tuner",   Toggle, 0,    1,    1,    "",   "",   Global | Hidden) \
     P(TunerRef,       "tuner.ref",       "Reference A",   "tuner",   "Tuner",          Flip,   430,  450,  440,  "Hz", "",   Global | Hidden) \

@@ -8,6 +8,7 @@
 #include "keystone/Engine.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <functional>
 
 class AudioHost : public juce::AudioIODeviceCallback, private juce::Timer
 {
@@ -32,6 +33,8 @@ public:
     juce::String deviceName() const;
     bool onAudioInterface() const { return onInterface.load(); }
     void restart() { needsReopen.store (true); }
+    // Auto buffer: called when Keystone steps the buffer up after dropouts (0 = 3 ms ... 3 = 10 ms)
+    std::function<void (int)> onBufferStepLearnt;
 
     void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
                                            const juce::AudioIODeviceCallbackContext&) override;
@@ -42,6 +45,7 @@ public:
 private:
     void timerCallback() override;
     bool tryOpen();
+    int targetBufferMs() const;
     bool interfacePresent();
     static bool nameMatches (const juce::String& name, const juce::String& preferred);
 
@@ -57,7 +61,9 @@ private:
     // input channel choice (Auto picks the louder input, with hysteresis)
     float chanLevel[2] { 0, 0 };
     int chosen = 1, louderFor = 0;
-    std::atomic<int> chosenChannel { 1 }, lateCallbacks { 0 };
+    std::atomic<int> chosenChannel { 1 }, lateCallbacks { 0 }, silentInputBlocks { 0 }, xrunsBase { 0 };
+    int openedBuffer = 0, lastDropCheck = 0, dropTicks = 0, lastLate = 0, lastXrun = 0;
+    juce::String openedForSetting;
     double callbackBudgetMs = 3.0;
     juce::CriticalSection statusLock;
 };
