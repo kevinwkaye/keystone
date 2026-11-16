@@ -1,0 +1,118 @@
+name: Build Kuddle
+
+# Kuddle builds on its own, so a Kuddle change never rebuilds or re-releases Keystone.
+on:
+  push:
+    branches: [main, kuddle]
+    paths:
+      - "kuddle/**"
+      - "core/src/Dsp.h"
+      - "core/src/Footswitch.h"
+      - "app/Resources/RobotoCondensed-Bold.ttf"
+      - ".github/workflows/kuddle.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  VERSION: "0.1.0"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create the release if it isn't there
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "kuddle-v$VERSION" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "kuddle-v$VERSION" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Kuddle $VERSION" --notes "Building..." --prerelease --latest=false
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S kuddle -B build-kuddle -A x64
+
+      - name: Build
+        run: cmake --build build-kuddle --config Release --parallel 4
+
+      - name: Engine tests and CPU benchmark
+        shell: pwsh
+        run: |
+          build-kuddle\Release\kuddle_tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item bench-kuddle.md bench-kuddle-windows.md
+
+      - name: Installer and zip
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress | Out-Null
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VERSION kuddle\installer\kuddle.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force zip | Out-Null
+          Copy-Item -Recurse build-kuddle\Kuddle_artefacts\Release\VST3\Kuddle.vst3 zip\
+          Copy-Item build-kuddle\Kuddle_artefacts\Release\Standalone\Kuddle.exe zip\
+          Copy-Item kuddle\installer\README.txt zip\
+          Compress-Archive -Path zip\* -DestinationPath "dist\Kuddle-$env:VERSION-VST3-Windows.zip" -Force
+          Get-ChildItem dist
+
+      - name: Add to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release upload "kuddle-v$env:VERSION" "dist\Kuddle-$env:VERSION-Setup.exe" "dist\Kuddle-$env:VERSION-VST3-Windows.zip" bench-kuddle-windows.md --clobber -R $env:GITHUB_REPOSITORY
+
+  # Built for the Pi too, so portability problems show up early (house rule).
+  linux-arm64:
+    needs: prepare
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libgl-dev libcurl4-openssl-dev
+
+      - name: Configure and build
+        run: |
+          cmake -S kuddle -B build-kuddle -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-kuddle
+
+      - name: Engine tests and CPU benchmark (ARM64)
+        run: |
+          ./build-kuddle/kuddle_tests
+          cp bench-kuddle.md bench-kuddle-linux-arm64.md
+
+      - name: Add to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -C build-kuddle/Kuddle_artefacts/Release/VST3 -czf "Kuddle-$VERSION-VST3-linux-arm64.tar.gz" Kuddle.vst3
+          gh release upload "kuddle-v$VERSION" "Kuddle-$VERSION-VST3-linux-arm64.tar.gz" bench-kuddle-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
+
+  notes:
+    needs: [windows, linux-arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "kuddle-v$VERSION" -R "$GITHUB_REPOSITORY" -p "bench-kuddle-*.md" -D bench
+          {
+            sed -n "/^## $VERSION/,/^## /p" kuddle/docs/release-notes.md | sed '$d'
+            echo
+            echo "### Measured CPU"
+            for f in bench/*.md; do echo; echo "**$(basename "$f" .md | sed 's/bench-kuddle-//')**"; tail -n +5 "$f"; done
+          } > notes.md
+          gh release edit "kuddle-v$VERSION" -R "$GITHUB_REPOSITORY" --notes-file notes.md

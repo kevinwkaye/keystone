@@ -3,6 +3,10 @@ name: Build Keystone
 on:
   push:
     branches: [main]
+    # Kuddle has its own build (kuddle.yml)
+    paths-ignore:
+      - "kuddle/**"
+      - ".github/workflows/kuddle.yml"
   workflow_dispatch:
 
 permissions:
