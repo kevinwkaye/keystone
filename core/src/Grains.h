@@ -1,12 +1,12 @@
 #pragma once
-// Speckle-style grains as ear candy: pitched up an octave, an octave and a fifth, two
+// Grains as ear candy: Sparkle (below) or one of Speckle's eleven effects (SpeckleFx.h),: pitched up an octave, an octave and a fifth, two
 // octaves, or a scatter of those, high-passed so the sparkle lands in the open 1 to 4 kHz
 // space. Mono-friendly movement from timing and pitch variation, not stereo spread.
 //
 // Lessons applied: band-limited polyphase read head for pitch-ups (Backtrack), grains
 // only spawn from audio that has sound in it, judged against the playing level (Speckle).
 
-#include "Modules.h"
+#include "SpeckleFx.h"
 
 namespace ks
 {
@@ -35,7 +35,8 @@ public:
                             : std::exp (-3.5f * (t - a) / (1 - a)) * (0.5f + 0.5f * std::cos (kPi * (t - a) / (1 - a)));
             smooth[i] = 0.5f - 0.5f * std::cos (kTwoPi * t);
         }
-        hp1.reset(); hp2.reset(); shelf.reset();
+        hp1.reset(); hp2.reset(); shelf.reset(); ceil1.reset(); ceil2.reset();
+        speckle.prepare (sr);
         mixS.setTime (0.05f, sr);
         reset();
     }
@@ -47,6 +48,10 @@ public:
         wp = 0; levelAcc = 0; levelCount = 0; untilNext = 0; fbSample = 0;
         mixS.reset (0);
         activity = 0;
+        speckle.reset();
+        std::fill (std::begin (spIn), std::end (spIn), 0.0f);
+        std::fill (std::begin (spOut), std::end (spOut), 0.0f);
+        spIdx = 0; spTail = 0;
     }
 
     void update (const Vals& v, float bloomZone2, bool bloomActive, bool light)
@@ -72,6 +77,19 @@ public:
         feedback = V (v, P::GrFeedback);
         bellShape = Vi (v, P::GrShape) == 0;
         dirty = Vi (v, P::GrSource) == 1;
+        effect = Vi (v, P::GrEffect);
+        sp.effect = std::max (0, effect - 1);
+        sp.variant = Vi (v, P::GrVariant);
+        sp.activity = V (v, P::GrActivity);
+        sp.repeats = V (v, P::GrRepeats);
+        sp.shape = V (v, P::GrContour);
+        static const float ratios[3] = { 2.0f, 3.0f, 4.0f };
+        sp.scatter = pitchMode == 3;
+        sp.ratio = ratios[std::max (0, std::min (2, pitchMode))];
+        sp.scatterAmount = scatter;
+        sp.beatSamples = clampf (V (v, P::DlTime), 150.0f, 1500.0f) * 0.001f * sr;
+        const float ce = V (v, P::GrCeiling);
+        if (ce != lastCeil) { ceil1.lowPass (ce, 0.5412f, sr); ceil2.lowPass (ce, 1.3066f, sr); lastCeil = ce; }
         const float hp = V (v, P::GrHighPass), br = V (v, P::GrBright);
         if (hp != lastHp) { hp1.highPass (hp, 0.5412f, sr); hp2.highPass (hp, 1.3066f, sr); lastHp = hp; }
         if (br != lastBright) { shelf.highShelf (3000.0f, br, sr, 0.8f); lastBright = br; }
@@ -97,6 +115,24 @@ public:
         }
 
         const float m = mixS.next();
+        if (effect > 0)
+        {
+            // Speckle effects, a block at a time (32 samples, under a millisecond late)
+            fbSample = 0;
+            if (m < 1.0e-4f && spTail < 1.0e-5f) { activity *= 0.999f; anyVoice = false; return 0.0f; }
+            const float y0 = spOut[spIdx];
+            spIn[spIdx] = source;
+            if (++spIdx >= SpeckleFx::kBlock)
+            {
+                speckle.process (spIn, spOut, SpeckleFx::kBlock, sp);
+                spIdx = 0;
+                activity += (std::min (1.0f, (float) speckle.grainCount() / 24.0f) - activity) * 0.05f;
+            }
+            const float y = ceil2.process (ceil1.process (shelf.process (hp2.process (hp1.process (y0)))));
+            spTail = std::max (std::fabs (y), spTail * 0.9999f);
+            anyVoice = spTail > 1.0e-5f;
+            return y * m;
+        }
         if (m < 1.0e-4f && ! anyVoice) { fbSample = 0; activity *= 0.999f; return 0.0f; }
 
         if (--untilNext <= 0 && m > 1.0e-4f) spawn (playLevel);
@@ -118,7 +154,7 @@ public:
         }
         activity += ((float) count / (float) maxVoices - activity) * 0.001f;
         float y = sum * norm;
-        y = shelf.process (hp2.process (hp1.process (y)));
+        y = ceil2.process (ceil1.process (shelf.process (hp2.process (hp1.process (y)))));
         // feedback back into the buffer, gently limited so cascades never run away
         fbSample = std::tanh (y * feedback * 1.2f) * 0.8f;
         return y * m;
@@ -230,8 +266,12 @@ private:
     int pitchMode = 1;
     float scatter = 0.4f, sizeS = 3840, density = 12, densityScale = 1, spray = 0.3f, reverseProb = 0.2f, feedback = 0.25f;
     float norm = 1, fbSample = 0, activity = 0;
-    float lastHp = -1, lastBright = -99;
-    Biquad hp1, hp2, shelf;
+    float lastHp = -1, lastBright = -99, lastCeil = -1;
+    Biquad hp1, hp2, shelf, ceil1, ceil2;
+    int effect = 0, spIdx = 0;
+    float spIn[SpeckleFx::kBlock] {}, spOut[SpeckleFx::kBlock] {}, spTail = 0;
+    SpeckleFx speckle;
+    SpeckleFx::Settings sp;
     Smoothed mixS;
     Rng rng;
 };

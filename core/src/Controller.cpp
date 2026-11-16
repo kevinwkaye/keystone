@@ -451,6 +451,7 @@ std::string Controller::schemaJson() const
             st = bar + 1;
         }
         jp["choices"] = arr;
+        if (*showIf ((P) i)) jp["showIf"] = showIf ((P) i);
         j["params"].push_back (jp);
     }
     int count = 0;

@@ -115,25 +115,60 @@ struct ParamInfo
     P(DimMode,        "dim.mode",        "Mode",          "dim",     "Mode",           Choice, 0,    3,    1,    "",   "1|2|3|4", None) \
     P(DimMix,         "dim.mix",         "Mix",           "dim",     "Mix",            Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(GrOn,           "grains.on",       "On",            "grains",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
+    P(GrEffect,       "grains.effect",   "Effect",        "grains",  "Effect",         Choice, 0,    11,   0,    "",   "Sparkle|Mosaic|Seq|Glide|Haze|Tunnel|Strum|Blocks|Interrupt|Arp|Pattern|Warp", None) \
+    P(GrVariant,      "grains.variant",  "Variation",     "grains",  "Effect",         Choice, 0,    3,    0,    "",   "A|B|C|D", None) \
     P(GrPitch,        "grains.pitch",    "Pitch",         "grains",  "Pitch",          Choice, 0,    3,    1,    "",   "Octave|Oct + 5th|2 octaves|Scatter", None) \
     P(GrScatter,      "grains.scatter",  "Movement",      "grains",  "Pitch",          Slider, 0,    1,    0.4f, "%",  "Steady|Scattered", None) \
+    P(GrActivity,     "grains.activity", "Activity",      "grains",  "Movement",       Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(GrRepeats,      "grains.repeats",  "Repeats",       "grains",  "Movement",       Flip,   0,    1,    0.45f,"%",  "",   None) \
+    P(GrContour,      "grains.contour",  "Shape",         "grains",  "Movement",       Flip,   0,    1,    0.55f,"%",  "",   None) \
     P(GrSize,         "grains.size",     "Size",          "grains",  "Grains",         Flip,   20,   300,  80,   "ms", "",   Log) \
     P(GrDensity,      "grains.density",  "Density",       "grains",  "Grains",         Flip,   1,    40,   12,   "/s", "",   Log) \
     P(GrSpray,        "grains.spray",    "Spray",         "grains",  "Grains",         Flip,   0,    1,    0.3f, "%",  "",   None) \
     P(GrReverse,      "grains.reverse",  "Reverse",       "grains",  "Grains",         Flip,   0,    1,    0.2f, "%",  "",   None) \
     P(GrFeedback,     "grains.feedback", "Feedback",      "grains",  "Grains",         Flip,   0,    0.9f, 0.25f,"%",  "",   None) \
-    P(GrShape,        "grains.shape",    "Shape",         "grains",  "Grains",         Choice, 0,    1,    0,    "",   "Bell|Smooth", None) \
+    P(GrShape,        "grains.shape",    "Envelope",      "grains",  "Grains",         Choice, 0,    1,    0,    "",   "Bell|Smooth", None) \
     P(GrHighPass,     "grains.hp",       "High-pass",     "grains",  "Placement",      Flip,   300,  4000, 1000, "Hz", "",   Log) \
+    P(GrCeiling,      "grains.ceiling",  "Ceiling",       "grains",  "Placement",      Flip,   3000, 14000,6000, "Hz", "",   Log) \
     P(GrBright,       "grains.bright",   "Brightness",    "grains",  "Placement",      Flip,   -6,   6,    2,    "dB", "",   None) \
     P(GrMix,          "grains.mix",      "Mix",           "grains",  "Placement",      Flip,   0,    1,    0.35f,"%",  "",   None) \
     P(GrSource,       "grains.source",   "Source",        "grains",  "Source",         Choice, 0,    1,    0,    "",   "Clean|Dirty", None) \
     P(BloomGrains,    "bloom.grains",    "Bloom reach",   "grains",  "Bloom reach",    Slider, 0,    1,    1,    "%",  "None|Full", None) \
     P(DlOn,           "delay.on",        "On",            "delay",   "",               Toggle, 0,    1,    0,    "",   "",   None) \
-    P(DlTime,         "delay.time",      "Time",          "delay",   "Delay",          Flip,   40,   1500, 420,  "ms", "",   Log) \
-    P(DlFeedback,     "delay.feedback",  "Repeats",       "delay",   "Delay",          Flip,   0,    0.95f,0.35f,"%",  "",   None) \
-    P(DlTone,         "delay.tone",      "Darkness",      "delay",   "Delay",          Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(DlMod,          "delay.mod",       "Wobble",        "delay",   "Delay",          Flip,   0,    1,    0.2f, "%",  "",   None) \
-    P(DlMix,          "delay.mix",       "Mix",           "delay",   "Delay",          Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(DlType,         "delay.type",      "Type",          "delay",   "Type",           Choice, 0,    11,   0,    "",   "Digital|Bucket|Tape|Dual|Pattern|Reverse|Ice|Swell|Trem|Filter|Lo-fi|Galaxy", None) \
+    P(DlSync,         "delay.sync",      "Time",          "delay",   "Time",           Choice, 0,    3,    0,    "",   "Free|1/4|1/8.|1/8", None) \
+    P(DlTime,         "delay.time",      "Time",          "delay",   "Time",           Flip,   40,   1500, 420,  "ms", "",   Log) \
+    P(DlFeedback,     "delay.feedback",  "Repeats",       "delay",   "Repeats",        Flip,   0,    0.95f,0.35f,"%",  "",   None) \
+    P(DlMix,          "delay.mix",       "Mix",           "delay",   "Repeats",        Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(DlTone,         "delay.tone",      "Filter",        "delay",   "Repeats",        Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(DlGrit,         "delay.grit",      "Grit",          "delay",   "Repeats",        Flip,   0,    1,    0.2f, "%",  "",   None) \
+    P(DlSmear,        "delay.smear",     "Smear",         "delay",   "Repeats",        Flip,   0,    1,    0.2f, "%",  "",   None) \
+    P(DlLowCut,       "delay.lowcut",    "Low cut",       "delay",   "Repeats",        Flip,   20,   500,  140,  "Hz", "",   Log) \
+    P(DlModSpeed,     "delay.modSpeed",  "Mod speed",     "delay",   "Repeats",        Flip,   0.1f, 8,    0.6f, "Hz", "",   Log) \
+    P(DlMod,          "delay.mod",       "Mod depth",     "delay",   "Repeats",        Flip,   0,    1,    0.2f, "%",  "",   None) \
+    P(DlDuck,         "delay.duck",      "Duck",          "delay",   "Repeats",        Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(DlTapeMachine,  "delay.tapeMachine","Machine",      "delay",   "Tape machine",   Choice, 0,    2,    0,    "",   "Fixed|Multi|Single", None) \
+    P(DlTapeMode,     "delay.tapeMode",  "Heads",         "delay",   "Tape machine",   Choice, 0,    2,    0,    "",   "A|B|C", None) \
+    P(DlTapeAge,      "delay.tapeAge",   "Tape age",      "delay",   "Tape machine",   Flip,   0,    1,    0.4f, "%",  "",   None) \
+    P(DlWow,          "delay.wow",       "Wow and flutter","delay",  "Tape machine",   Flip,   0,    1,    0.35f,"%",  "",   None) \
+    P(DlCrinkle,      "delay.crinkle",   "Crinkle",       "delay",   "Tape machine",   Flip,   0,    1,    0.1f, "%",  "",   None) \
+    P(DlBias,         "delay.bias",      "Bias",          "delay",   "Tape machine",   Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(DlSpring,       "delay.spring",    "Spring",        "delay",   "Tape machine",   Flip,   0,    1,    0.2f, "%",  "",   None) \
+    P(DlBoost,        "delay.boost",     "Boost",         "delay",   "Tape machine",   Flip,   -6,   6,    0,    "dB", "",   None) \
+    P(DlDualRatio,    "delay.dualRatio", "Second head",   "delay",   "Dual",           Choice, 0,    3,    1,    "",   "Half|Two thirds|Three quarters|Dotted", None) \
+    P(DlDualSeries,   "delay.dualSeries","Routing",       "delay",   "Dual",           Choice, 0,    1,    0,    "",   "Side by side|One into the other", None) \
+    P(DlPattern,      "delay.pattern",   "Pattern",       "delay",   "Pattern",        Choice, 0,    3,    0,    "",   "Gallop|Triplet|Shuffle|Cascade", None) \
+    P(DlIceInterval,  "delay.iceInterval","Interval",     "delay",   "Ice",            Choice, 0,    2,    0,    "",   "Octave|Fifth|Oct + 5th", None) \
+    P(DlIceBlend,     "delay.iceBlend",  "Blend",         "delay",   "Ice",            Flip,   0,    1,    0.6f, "%",  "",   None) \
+    P(DlSwellRise,    "delay.swellRise", "Rise",          "delay",   "Swell",          Flip,   50,   2000, 400,  "ms", "",   Log) \
+    P(DlTremSpeed,    "delay.tremSpeed", "Speed",         "delay",   "Trem",           Flip,   0.5f, 12,   4,    "Hz", "",   Log) \
+    P(DlTremDepth,    "delay.tremDepth", "Depth",         "delay",   "Trem",           Flip,   0,    1,    0.6f, "%",  "",   None) \
+    P(DlTremShape,    "delay.tremShape", "Wave",          "delay",   "Trem",           Choice, 0,    1,    0,    "",   "Smooth|Choppy", None) \
+    P(DlFiltSpeed,    "delay.filtSpeed", "Sweep speed",   "delay",   "Filter",         Flip,   0.05f,6,    0.4f, "Hz", "",   Log) \
+    P(DlFiltRes,      "delay.filtRes",   "Resonance",     "delay",   "Filter",         Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(DlLofiBits,     "delay.lofiBits",  "Bits",          "delay",   "Lo-fi",          Flip,   4,    16,   8,    "",   "",   None) \
+    P(DlLofiRate,     "delay.lofiRate",  "Sample rate",   "delay",   "Lo-fi",          Flip,   2000, 24000,8000, "Hz", "",   Log) \
+    P(DlHold,         "delay.hold",      "Hold the repeats","delay", "Hold",           Toggle, 0,    1,    0,    "",   "",   None) \
     P(RvOn,           "reverb.on",       "On",            "reverb",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(RvSize,         "reverb.size",     "Size",          "reverb",  "Space",          Flip,   0,    1,    0.6f, "%",  "",   None) \
     P(RvDecay,        "reverb.decay",    "Decay",         "reverb",  "Space",          Flip,   0.3f, 20,   3,    "s",  "",   Log) \
@@ -179,6 +214,10 @@ inline const ParamInfo* paramTable()
 inline const ParamInfo& info (P p) { return paramTable()[(int) p]; }
 
 int findParam (const char* id);   // -1 if unknown
+
+// When a control only applies to some types: "delay.type=2", "grains.effect!=0",
+// "delay.type=3|4". Empty when always shown.
+const char* showIf (P p);
 
 // Module list in signal order, with titles and the band they sit in.
 struct ModuleInfo

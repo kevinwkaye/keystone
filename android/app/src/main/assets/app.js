@@ -137,12 +137,13 @@ var KS = (function () {
     if (/gate$/.test(id) && v <= -89) return 'Off';
     switch (p.unit) {
       case '%': return trim(v * 100, 0) + '%';
-      case 'Hz': return v >= 1000 ? trim(v / 1000, 1) + 'k' : trim(v, 0);
+      case 'Hz': return v >= 1000 ? trim(v / 1000, 1) + 'k' : v < 10 ? trim(v, v < 1 ? 2 : 1) + 'Hz' : trim(v, 0);
       case 'ms': return trim(v, 0) + 'ms';
       case 's': return trim(v, v < 10 ? 1 : 0) + 's';
       case 'dB': return (v > 0.05 ? '+' : '') + trim(v, Math.abs(v) < 10 ? 1 : 0);
       case '/s': return trim(v, 0) + '/s';
     }
+    if (id === 'delay.lofiBits') return trim(v, 0) + ' bits';
     return trim(v, Math.abs(v) < 10 ? 1 : 0);
   }
   // slider position 0..1 <-> value, log where the parameter says so
@@ -150,6 +151,7 @@ var KS = (function () {
   function fromPos(p, x) { x = Math.max(0, Math.min(1, x)); return p.log ? p.min * Math.pow(p.max / p.min, x) : p.min + (p.max - p.min) * x; }
   function stepOf(p) {
     if (p.unit === '%') return 0.01;
+    if (p.id === 'delay.lofiBits') return 1;
     if (p.log) return null;
     var span = p.max - p.min;
     return span <= 1 ? 0.01 : span <= 20 ? 0.1 : 1;
@@ -387,8 +389,8 @@ var KS = (function () {
       case 'lowcomp': return on('lowcomp.slap') ? 'Slap mode on' : 'Light, slap mode ready';
       case 'drive': return 'Edge and Drive voices, ' + (Math.round(val('drive.source')) === 0 && S.capture ? 'capture' : 'model');
       case 'dim': return 'Mode ' + fmt('dim.mode') + ', mono safe';
-      case 'grains': return fmt('grains.pitch') + ', high-pass ' + fmt('grains.hp');
-      case 'delay': return fmt('delay.time') + ', ' + fmt('delay.feedback') + ' repeats';
+      case 'grains': return (Math.round(val('grains.effect')) ? fmt('grains.effect') + ' ' + fmt('grains.variant') : 'Sparkle') + ', ' + fmt('grains.pitch') + ', ' + fmt('grains.hp') + ' to ' + fmt('grains.ceiling');
+      case 'delay': return fmt('delay.type') + ', ' + (Math.round(val('delay.sync')) ? fmt('delay.sync') : fmt('delay.time')) + ', ' + fmt('delay.feedback') + ' repeats';
       case 'reverb': return fmt('reverb.decay') + ', shimmer ' + fmt('reverb.shimmer');
       case 'preamp': return 'Blend ' + Math.round(val('preamp.blend') * 100) + '% Cut, mid ' + fmt('preamp.midFreq');
     }
@@ -411,10 +413,62 @@ var KS = (function () {
   }
 
   // ---- generic module page, laid out like the canvas's Drive and Grains pages
+  // "delay.type=2", "delay.type=7|11", "grains.effect!=0"
+  function visible(p) {
+    if (!p.showIf) return true;
+    var m = /^([\w.]+)(!?=)(.+)$/.exec(p.showIf);
+    if (!m) return true;
+    var cur = Math.round(val(m[1])), hit = m[3].split('|').some(function (x) { return +x === cur; });
+    return m[2] === '=' ? hit : !hit;
+  }
   function paramsOf(mod) {
     var list = [];
-    S.schema.params.forEach(function (p) { if (p.module === mod && !p.hidden) list.push(p); });
+    S.schema.params.forEach(function (p) { if (p.module === mod && !p.hidden && visible(p)) list.push(p); });
     return list;
+  }
+
+  // one line under a choice, saying what it does
+  var DELAY_TYPES = [
+    'Digital: clean, exact repeats.',
+    'Bucket: warm analogue repeats that darken as the time gets longer.',
+    'Tape: a tape echo with three machines. Fixed and Multi heads change tape speed, Single slides the record head.',
+    'Dual: two delays, side by side or one into the other.',
+    'Pattern: rhythmic taps across the beat.',
+    'Reverse: every repeat plays backwards.',
+    'Ice: repeats climb in pitch, glassy and bright.',
+    'Swell: notes fade in, so only the repeats bloom.',
+    'Trem: tremolo on the repeats.',
+    'Filter: a slow sweeping filter on the repeats.',
+    'Lo-fi: crushed bits and a low sample rate.',
+    'Galaxy: swelling, smeared repeats that turn into a wash.'];
+  var TAPE_MODES = [
+    ['Fixed A: one head.', 'Fixed B: two heads, half and full time.', 'Fixed C: all three heads, an echo machine.'],
+    ['Multi A: heads 1 and 2 together.', 'Multi B: heads 2 and 3 together.', 'Multi C: heads 1 and 3 together.'],
+    ['Single A: one sliding head.', 'Single B: the sliding head and a half-time head.', 'Single C: the sliding head and a three-quarter head.']];
+  var GRAIN_FX = [
+    ['Sparkle: pitched grains with their own size, density and spray.'],
+    ['normal and double speed loops', 'normal and half speed', 'all double speed', 'half, normal, double and quad'],
+    ['filtered, shuffled slices', 'normal and half speed bounce', 'overlapping layers with sweeps', 'crushed layers'],
+    ['half to normal', 'double to half', 'normal to double', 'both directions at once'],
+    ['a soft cloud of grains drifting out of what you just played', 'many random grains', 'normal and double speed grains', 'normal and half speed grains'],
+    ['a drone that stretches and squeezes', 'a drone with sweeps', 'a resonant band-pass drone', 'a drone that tightens after each note'],
+    ['the last note, repeated', 'overlapping copies that phase', 'cascading recent notes', 'cascades with double speed grains'],
+    ['rearranged with bursts of runs', 'rearranged and pitch shifted', 'soft, filtered glitches', 'pitch shifted and crushed'],
+    ['rearranged interruptions', 'pitch shifted', 'filter sweeps and echoes', 'crushed and drastic'],
+    ['basic arpeggios of your notes', 'pitched patterns', 'a random filter per note', 'crushed'],
+    ['classic, even repeats', 'dotted', 'off-beat', 'triplet bursts'],
+    ['an envelope filter on each tap', 'resonant band-pass taps', 'octave and fifth shifted taps', 'taps that fade into grains']];
+  function describe(id) {
+    if (id === 'delay.type') return DELAY_TYPES[Math.round(val(id))] || '';
+    if (id === 'delay.tapeMode') return (TAPE_MODES[Math.round(val('delay.tapeMachine'))] || [])[Math.round(val(id))] || '';
+    if (id === 'grains.variant' || (id === 'grains.effect' && Math.round(val(id)) === 0)) {
+      var e = Math.round(val('grains.effect')), v = Math.round(val('grains.variant'));
+      if (e === 0) return GRAIN_FX[0][0];
+      var name = S.params['grains.effect'].choices[e];
+      return name + ' ' + 'ABCD'[v] + ': ' + (GRAIN_FX[e] || [])[v] + '.';
+    }
+    if (id === 'grains.pitch') return 'Every effect plays pitched up, always in key, so it never lands on the bass, guitars or keys.';
+    return '';
   }
   function renderParams(list) {
     var sections = [], by = {};
@@ -428,12 +482,12 @@ var KS = (function () {
       var flips = ps.filter(function (p) { return p.kind === 'flip'; });
       ps.forEach(function (p) {
         if (p.kind === 'choice') {
-          var cols = Math.min(4, p.choices.length), cur = Math.round(val(p.id));
+          var cols = p.choices.length > 6 ? 3 : Math.min(4, p.choices.length), cur = Math.round(val(p.id));
           var showLabel = ps.length > 1 && p.label !== sec;
           body += (showLabel ? '<div class="small">' + esc(p.label) + '</div>' : '') +
             '<div class="seg" style="grid-template-columns:repeat(' + cols + ',minmax(0,1fr))">' + p.choices.map(function (c, i) {
               return '<button type="button" class="' + (i === cur ? 'on' : '') + '" data-set="' + p.id + '" data-v="' + i + '">' + esc(c) + '</button>';
-            }).join('') + '</div>';
+            }).join('') + '</div>' + (describe(p.id) ? '<div class="small">' + esc(describe(p.id)) + '</div>' : '');
         } else if (p.kind === 'toggle') {
           body += '<label class="switch" style="background:#262626">' + esc(p.label) + '<input type="checkbox" data-toggle="' + p.id + '"' + (on(p.id) ? ' checked' : '') + '></label>';
         } else if (p.kind === 'slider') {

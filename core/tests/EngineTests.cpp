@@ -256,6 +256,201 @@ static void testGrains()
     }
 }
 
+
+// ---------------------------------------------------------------------------------------
+// Delay: every type sits near the same level, stays finite, decays, and survives Bloom.
+static const char* kDelayNames[12] = { "Digital", "Bucket", "Tape", "Dual", "Pattern", "Reverse", "Ice", "Swell", "Trem", "Filter", "Lo-fi", "Galaxy" };
+
+static std::vector<float> bassLine (double seconds, double amp)
+{
+    std::vector<float> in;
+    const double notes[4] = { 82.4, 110.0, 98.0, 73.4 };
+    int k = 0;
+    while (in.size() < (size_t) (seconds * kSr)) { auto n = pluck (notes[k++ % 4], 0.5, amp, 0.6); in.insert (in.end(), n.begin(), n.end()); }
+    in.resize ((size_t) (seconds * kSr));
+    return in;
+}
+
+static std::vector<float> wetOf (const std::function<void (Engine&)>& setup, const std::vector<float>& in)
+{
+    Engine e, dry;
+    e.prepare (kSr, 64);
+    dry.prepare (kSr, 64);
+    neutral (e);
+    neutral (dry);
+    setup (e);
+    auto out = render (e, in), ref = render (dry, in);
+    for (size_t i = 0; i < out.size(); ++i) out[i] -= ref[i];
+    return out;
+}
+
+static void testDelayTypes()
+{
+    std::printf ("Delay types\n");
+    auto in = bassLine (4.0, 0.5);
+    in.resize (in.size() + (size_t) (5 * kSr), 0.0f);
+    double ref = 0;
+    for (int t = 0; t < 12; ++t)
+    {
+        auto wet = wetOf ([t] (Engine& e)
+                          {
+                              e.setParam (P::DlOn, 1);
+                              e.setParam (P::DlType, (float) t);
+                              e.setParam (P::DlMix, 0.5f);
+                              e.setParam (P::DlFeedback, 0.5f);
+                              e.setParam (P::DlTime, 330);
+                          }, in);
+        double peak = 0;
+        bool finite = true;
+        for (float s : wet) { peak = std::max (peak, (double) std::fabs (s)); finite = finite && std::isfinite (s); }
+        const size_t a = (size_t) (1.0 * kSr), playEnd = (size_t) (4.0 * kSr);
+        const double lvl = 20 * std::log10 (rms (wet.data() + a, playEnd - a) + 1e-12);
+        const double late = 20 * std::log10 (rms (wet.data() + wet.size() - (size_t) kSr, (size_t) kSr) + 1e-12);
+        if (t == 0) ref = lvl;
+        CHECK (finite && peak < 0.99, "%-8s finite, wet peak %.1f dBFS", kDelayNames[t], 20 * std::log10 (peak + 1e-12));
+        CHECK (std::fabs (lvl - ref) < 6.0, "%-8s level %.1f dB against Digital (mark within 6)", kDelayNames[t], lvl - ref);
+        CHECK (late < lvl - 25, "%-8s tail falls away: %.1f dB below playing level 4 s later (mark 25)", kDelayNames[t], lvl - late);
+    }
+}
+
+static void testTapeMachines()
+{
+    std::printf ("Tape machines\n");
+    auto in = bassLine (3.0, 0.5);
+    in.resize (in.size() + (size_t) (2 * kSr), 0.0f);
+    const char* machines[3] = { "Fixed", "Multi", "Single" };
+    double ref = 0;
+    for (int m = 0; m < 3; ++m)
+        for (int md = 0; md < 3; ++md)
+        {
+            auto wet = wetOf ([m, md] (Engine& e)
+                              {
+                                  e.setParam (P::DlOn, 1);
+                                  e.setParam (P::DlType, 2);
+                                  e.setParam (P::DlTapeMachine, (float) m);
+                                  e.setParam (P::DlTapeMode, (float) md);
+                                  e.setParam (P::DlCrinkle, 0.8f);
+                                  e.setParam (P::DlSpring, 0.6f);
+                                  e.setParam (P::DlMix, 0.5f);
+                              }, in);
+            bool finite = true;
+            for (float s : wet) finite = finite && std::isfinite (s);
+            const double lvl = 20 * std::log10 (rms (wet.data() + (size_t) kSr, (size_t) (2 * kSr)) + 1e-12);
+            if (m == 0 && md == 0) ref = lvl;
+            CHECK (finite && std::fabs (lvl - ref) < 6.0, "%s %c: level %.1f dB against Fixed A", machines[m], 'A' + md, lvl - ref);
+        }
+}
+
+static void testDelayLimits()
+{
+    std::printf ("Delay at the edge: Bloom, full repeats and Hold\n");
+    auto in = bassLine (2.0, 0.9);
+    in.resize (in.size() + (size_t) (12 * kSr), 0.0f);
+    double worst = 0;
+    bool finite = true;
+    for (int t = 0; t < 12; ++t)
+    {
+        Engine e;
+        e.prepare (kSr, 64);
+        neutral (e);
+        e.setParam (P::DlOn, 1);
+        e.setParam (P::DlType, (float) t);
+        e.setParam (P::DlFeedback, 0.95f);
+        e.setParam (P::DlGrit, 1.0f);
+        e.setParam (P::DlMix, 1.0f);
+        e.setParam (P::BloomWash, 1.0f);
+        e.setBloom (1.0f);
+        auto out = render (e, in);
+        for (float s : out) { worst = std::max (worst, (double) std::fabs (s)); finite = finite && std::isfinite (s); }
+    }
+    CHECK (finite && worst < 0.99, "all twelve types at full repeats and Bloom: peak %.1f dBFS (mark under 0)", 20 * std::log10 (worst));
+
+    // Hold keeps the repeats going without new input getting in
+    Engine e;
+    e.prepare (kSr, 64);
+    neutral (e);
+    e.setParam (P::DlOn, 1);
+    e.setParam (P::DlMix, 1.0f);
+    e.setParam (P::DlTone, 0.0f);
+    e.setParam (P::DlLowCut, 20.0f);
+    render (e, bassLine (2.0, 0.5));
+    e.setParam (P::DlHold, 1);
+    std::vector<float> sil ((size_t) (6 * kSr), 0.0f);
+    auto held = render (e, sil);
+    const double heldLvl = 20 * std::log10 (rms (held.data() + held.size() - (size_t) kSr, (size_t) kSr) + 1e-12);
+    double pk = 0;
+    for (float s : held) pk = std::max (pk, (double) std::fabs (s));
+    CHECK (heldLvl > -45 && pk < 0.99, "Hold: repeats still at %.1f dBFS after 6 s, peak %.1f dBFS", heldLvl, 20 * std::log10 (pk + 1e-12));
+
+    // switching type while repeats ring: no worse a step than either type makes on its own
+    auto tone = sine (220, 1.6, 0.3);
+    auto runWith = [&] (int first, int second)
+    {
+        Engine c;
+        c.prepare (kSr, 64);
+        neutral (c);
+        c.setParam (P::DlOn, 1);
+        c.setParam (P::DlMix, 1.0f);
+        c.setParam (P::DlFeedback, 0.7f);
+        c.setParam (P::DlType, (float) first);
+        const size_t at = (size_t) (1.0 * kSr);
+        auto y1 = render (c, std::vector<float> (tone.begin(), tone.begin() + (long) at));
+        c.setParam (P::DlType, (float) second);
+        auto y2 = render (c, std::vector<float> (tone.begin() + (long) at, tone.end()));
+        double w = 0;
+        size_t wi = 0;
+        for (size_t i = 1; i + 1 < y2.size(); ++i) { const double d = std::fabs (y2[i + 1] - 2 * y2[i] + y2[i - 1]); if (d > w) { w = d; wi = i; } }
+        if (getenv ("KS_DEBUG")) std::printf ("      %d -> %d worst %.5f at %.1f ms\n", first, second, w, wi * 1000.0 / kSr);
+        return w;
+    };
+    double worstRatio = 0;
+    int worstType = 0;
+    const double steadyDigital = runWith (0, 0);
+    for (int t = 1; t < 12; ++t)
+    {
+        if (t == 10) continue;   // Lo-fi: its own staircase is the sound
+        const double ref = std::max (steadyDigital, runWith (t, t));
+        const double r = runWith (0, t) / ref;
+        if (r > worstRatio) { worstRatio = r; worstType = t; }
+    }
+    CHECK (worstRatio < 2.0, "changing type mid-repeats: worst step %.2f times what the types make anyway (into %s, mark 2)", worstRatio, kDelayNames[worstType]);
+}
+
+// Grain effects: all eleven Speckle effects make sound and live up top
+static void testGrainEffects()
+{
+    std::printf ("Grain effects, up top\n");
+    const char* names[12] = { "Sparkle", "Mosaic", "Seq", "Glide", "Haze", "Tunnel", "Strum", "Blocks", "Interrupt", "Arp", "Pattern", "Warp" };
+    auto in = bassLine (6.0, 0.5);
+    for (int fx = 0; fx < 12; ++fx)
+    {
+        for (int var = 0; var < (fx == 0 ? 1 : 4); var += 3)
+        {
+            auto wet = wetOf ([fx, var] (Engine& e)
+                              {
+                                  e.setParam (P::GrOn, 1);
+                                  e.setParam (P::GrEffect, (float) fx);
+                                  e.setParam (P::GrVariant, (float) var);
+                                  e.setParam (P::GrMix, 1.0f);
+                              }, in);
+            bool finite = true;
+            double pk = 0;
+            for (float s : wet) { finite = finite && std::isfinite (s); pk = std::max (pk, (double) std::fabs (s)); }
+            const size_t a = (size_t) (1.5 * kSr), n = wet.size() - a;
+            const double lvl = 20 * std::log10 (rms (wet.data() + a, n) / rms (in.data() + a, n) + 1e-12);
+            // how much of the wet sits under 250 Hz, where the bass lives
+            Biquad lp1, lp2;
+            lp1.lowPass (250, 0.541f, (float) kSr);
+            lp2.lowPass (250, 1.307f, (float) kSr);
+            std::vector<float> lo (wet.size());
+            for (size_t i = 0; i < wet.size(); ++i) lo[i] = lp2.process (lp1.process (wet[i]));
+            const double low = 20 * std::log10 (rms (lo.data() + a, n) / (rms (wet.data() + a, n) + 1e-12) + 1e-12);
+            CHECK (finite && pk < 0.99 && lvl > -30 && lvl < 6, "%-9s %c: wet %.1f dB against the input (mark -30 to +6)", names[fx], 'A' + var, lvl);
+            CHECK (low < -30, "%-9s %c: %.1f dB of it under 250 Hz (mark -30)", names[fx], 'A' + var, low);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------
 static void testBloomSafety()
 {
@@ -508,7 +703,9 @@ static void bench (const char* capture)
     struct C { const char* name; std::function<void (Engine&)> f; const char* cap; };
     std::vector<C> cases = { { "Song default, modelled drive", [] (Engine& e) { e.setParam (P::DriveSource, 1); }, nullptr },
                              { "Everything on, Bloom at 80%", everything, nullptr },
-                             { "Everything on, light effects", everythingLight, nullptr } };
+                             { "Everything on, light effects", everythingLight, nullptr },
+                             { "Everything on, tape delay and Haze grains", [&] (Engine& e) { everything (e); e.setParam (P::DlType, 2); e.setParam (P::DlTapeMode, 2); e.setParam (P::GrEffect, 4); }, nullptr },
+                             { "Everything on, Galaxy delay and Arp grains", [&] (Engine& e) { everything (e); e.setParam (P::DlType, 11); e.setParam (P::GrEffect, 9); e.setParam (P::GrPitch, 3); }, nullptr } };
     if (capture && Engine::namAvailable() && std::filesystem::exists (capture))
     {
         cases.insert (cases.begin(), { "Song default, NAM capture (A1 standard)", defaults, capture });
@@ -552,6 +749,10 @@ int main (int argc, char** argv)
         testDrone();
         testFilterDynamics();
         testGrains();
+        testDelayTypes();
+        testTapeMachines();
+        testDelayLimits();
+        testGrainEffects();
         testBloomSafety();
         testClicks();
         testSteadyDrive();
