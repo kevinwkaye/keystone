@@ -64,7 +64,8 @@ struct ParamInfo
     /* ---- High band ---- */ \
     P(DriveOn,        "drive.on",        "On",            "drive",   "",               Toggle, 0,    1,    1,    "",   "",   None) \
     P(DriveVoice,     "drive.voice",     "Voice",         "drive",   "Editing voice",  Choice, 0,    1,    0,    "",   "Edge|Drive", None) \
-    P(DriveSource,    "drive.source",    "Source",        "drive",   "Source",         Choice, 0,    1,    0,    "",   "Capture|Model", None) \
+    P(DriveSource,    "drive.source",    "Drive source",  "drive",   "Source",         Choice, 0,    1,    0,    "",   "Capture|Model", None) \
+    P(EdgeSource,     "drive.edge.source","Edge source",  "drive",   "Source",         Choice, 0,    1,    1,    "",   "Capture|Model", None) \
     P(EdgeGain,       "drive.edge.gain", "Gain",          "drive",   "Voice settings", Flip,   0,    10,   3,    "",   "",   None) \
     P(EdgeTone,       "drive.edge.tone", "Tone",          "drive",   "Voice settings", Flip,   0,    10,   6.5f, "",   "",   None) \
     P(EdgeLevel,      "drive.edge.level","Level",         "drive",   "Voice settings", Flip,   -12,  12,   0,    "dB", "",   None) \

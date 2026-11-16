@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: "0.2.1"
+  VERSION: "0.2.2"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.
@@ -35,6 +35,11 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --parallel 4
+
+      - name: Build the AVX2 version of the app
+        run: |
+          cmake -S . -B build-avx2 -A x64 -DKEYSTONE_AVX2=ON -DKEYSTONE_BUILD_TESTS=OFF "-DFETCHCONTENT_BASE_DIR=${{ github.workspace }}/build/_deps" -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+          cmake --build build-avx2 --config Release --parallel 4 --target Keystone
 
       - name: Engine tests and CPU benchmark
         shell: pwsh
@@ -64,7 +69,7 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress | Out-Null
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VERSION "/DSourceDir=..\build\app\Keystone_artefacts\Release" installer\keystone.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VERSION "/DSourceDir=..\build\app\Keystone_artefacts\Release" "/DAvx2Dir=..\build-avx2\app\Keystone_artefacts\Release" installer\keystone.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem dist
 

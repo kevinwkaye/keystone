@@ -72,7 +72,10 @@ public:
         sr = sr_;
         for (auto& vc : voices) vc.prepare (sr);
         dryDelay.prepare (kLatency + 4);
-        capDelay.prepare (kLatency + 4);
+        capDelayA.prepare (kLatency + 4);
+        capDelayB.prepare (kLatency + 4);
+        capIn.assign ((size_t) maxBlock, 0.0f);
+        capOut.assign ((size_t) maxBlock, 0.0f);
         namIn.assign ((size_t) maxBlock, 0.0f);
         namOut.assign ((size_t) maxBlock, 0.0f);
         onS.setTime (0.015f, sr);
@@ -85,7 +88,8 @@ public:
     void reset()
     {
         for (auto& vc : voices) vc.reset();
-        dryDelay.reset(); capDelay.reset();
+        dryDelay.reset(); capDelayA.reset(); capDelayB.reset();
+        capRunning = false; capWarm = 0;
         onS.reset (0); xf = 0; xfTarget = 0;
         trim[0] = trim[1] = trimTarget[0] = trimTarget[1] = 1.0f;
         trimSeeded[0] = trimSeeded[1] = false;
@@ -98,21 +102,25 @@ public:
     {
         on = Vb (v, P::DriveOn);
         onS.set (on ? 1.0f : 0.0f);
-        useCapture = Vi (v, P::DriveSource) == 0 && haveCapture;
+        // each voice has its own source: a capture saved at high gain can't play a light
+        // Edge, so Edge defaults to the model and Drive to the capture
+        capVoice[0] = Vi (v, P::EdgeSource) == 0 && haveCapture;
+        capVoice[1] = Vi (v, P::DriveSource) == 0 && haveCapture;
+        useCapture = capVoice[0] || capVoice[1];
         float target = (float) Vi (v, P::DriveVoice);
         if (Vi (v, P::DriveMorph) == 1 && bloomActive) target = bloom;
         xfTarget = target;
         xfStep = 1.0f / std::max (1.0f, V (v, P::DriveFade) * 0.001f * sr);
         autoMatch = Vi (v, P::DriveMatch) == 1;
         voices[0].update (sr, V (v, P::EdgeGain), V (v, P::EdgeTone), V (v, P::EdgeLevel), V (v, P::EdgeLowCut),
-                          V (v, P::EdgePresence), V (v, P::EdgeGate), Vi (v, P::EdgeMode), useCapture);
+                          V (v, P::EdgePresence), V (v, P::EdgeGate), Vi (v, P::EdgeMode), capVoice[0]);
         voices[1].update (sr, V (v, P::DriveGain), V (v, P::DriveTone), V (v, P::DriveLevel), V (v, P::DriveLowCut),
-                          V (v, P::DrivePresence), V (v, P::DriveGate), Vi (v, P::DriveMode), useCapture);
+                          V (v, P::DrivePresence), V (v, P::DriveGate), Vi (v, P::DriveMode), capVoice[1]);
         for (int k = 0; k < 2; ++k)
             if (! trimSeeded[k])
             {
                 // a starting guess so the first switch-on is near the right level
-                trim[k] = trimTarget[k] = useCapture ? 1.0f : 1.0f / std::sqrt (voices[k].gain);
+                trim[k] = trimTarget[k] = capVoice[k] ? 1.0f : 1.0f / std::sqrt (voices[k].gain);
                 trimSeeded[k] = true;
             }
         lowInto = V (v, P::DriveLowInto);
@@ -149,60 +157,87 @@ public:
         for (int i = 0; i < n; ++i) namIn[(size_t) i] = high[i] + lowInto * low[i];
 
 #ifdef KEYSTONE_WITH_NAM
-        const bool cap = useCapture && capture != nullptr;
+        const bool haveCap = capture != nullptr;
 #else
-        const bool cap = false;
+        const bool haveCap = false;
         (void) capture;
 #endif
-        if (cap)
+        const bool cv[2] = { capVoice[0] && haveCap, capVoice[1] && haveCap };
+        // The capture only runs while a voice that uses it can be heard or is coming in,
+        // so a capture on Drive costs nothing while you play Edge. Starting it again, it
+        // runs silently for 90 ms first so its memory is full of real playing, not old
+        // sound, and the switch waits for that.
+        auto heardOrWanted = [&] (int k)
+        {
+            if (! cv[k]) return false;
+            const float wNow = smoothstep (xf);
+            return k == 1 ? (wNow > 0.001f || xfTarget > 0.001f) : (wNow < 0.999f || xfTarget < 0.999f);
+        };
+        const bool needCap = heardOrWanted (0) || heardOrWanted (1);
+        if (needCap && ! capRunning) { capRunning = true; capWarm = (int) (0.09f * sr); warmIn = warmOut[0] = warmOut[1] = 0; }
+        if (! needCap) capRunning = false;
+
+        if (capRunning)
         {
 #ifdef KEYSTONE_WITH_NAM
-            // one capture: the voices' input stages are interpolated into it, their
-            // output shaping crossfaded after it
+            // what goes into the capture: the input stages of the voices that use it
             float xfs = xf;
             for (int i = 0; i < n; ++i)
             {
-                xfs = stepXf (xfs);
+                if (capWarm <= 0) xfs = stepXf (xfs);
                 const float w = smoothstep (xfs);
                 const float x = namIn[(size_t) i];
-                const float a = voices[0].preCapture (x), b = voices[1].preCapture (x);
-                namOut[(size_t) i] = a + (b - a) * w;
-                voices[0].measureIn (x); voices[1].measureIn (x);
+                float in;
+                if (cv[0] && cv[1]) { const float a = voices[0].preCapture (x), b = voices[1].preCapture (x); in = a + (b - a) * w; }
+                else in = voices[cv[1] ? 1 : 0].preCapture (x);
+                capIn[(size_t) i] = in;
             }
-            float* ins[1] = { namOut.data() };
-            float* outs[1] = { namIn.data() };   // reuse as output
+            float* ins[1] = { capIn.data() };
+            float* outs[1] = { capOut.data() };
             capture->process (ins, outs, n);
-            for (int i = 0; i < n; ++i)
-            {
-                xf = stepXf (xf);
-                glideTrims();
-                const float w = smoothstep (xf);
-                const float y = namIn[(size_t) i];
-                float a = voices[0].postCapture (y) * trim[0];
-                float b = voices[1].postCapture (y) * trim[1];
-                if (w < 0.999f) voices[0].measureOut (a);
-                if (w > 0.001f) voices[1].measureOut (b);
-                capDelay.push (a + (b - a) * w);
-                namOut[(size_t) i] = capDelay.at (kLatency);
-            }
 #endif
         }
-        else
+        for (int i = 0; i < n; ++i)
         {
-            for (int i = 0; i < n; ++i)
+            // hold the switch while the capture warms up
+            const bool warming = capWarm > 0;
+            if (warming) --capWarm;
+            else xf = stepXf (xf);
+            glideTrims();
+            const float w = smoothstep (xf);
+            const float x = namIn[(size_t) i];
+            // the capture voice's output, delayed to line up with the oversampled model
+            float capY = 0;
+            if (capRunning) capY = capOut[(size_t) i];
+            float capA = 0, capB = 0;
+            if (capRunning)
             {
-                xf = stepXf (xf);
-                glideTrims();
-                const float w = smoothstep (xf);
-                const float x = namIn[(size_t) i];
-                float a = 0, b = 0;
-                if (w < 0.999f) { a = voices[0].model (x) * trim[0]; voices[0].measureOut (a); }
-                else voices[0].idleModel (x);
-                if (w > 0.001f) { b = voices[1].model (x) * trim[1]; voices[1].measureOut (b); }
-                else voices[1].idleModel (x);
-                voices[0].measureIn (x); voices[1].measureIn (x);
-                namOut[(size_t) i] = a + (b - a) * w;
+                if (cv[0]) capA = voices[0].postCapture (capY);
+                if (cv[1]) capB = voices[1].postCapture (capY);
             }
+            capDelayA.push (capA);
+            capDelayB.push (capB);
+            if (warming)
+            {
+                // while it warms, measure the capture so it comes in at the right level
+                warmIn += (double) x * x;
+                warmOut[0] += (double) capA * capA;
+                warmOut[1] += (double) capB * capB;
+                if (capWarm == 0)
+                {
+                    for (int k = 0; k < 2; ++k)
+                        if (cv[k] && autoMatch && warmIn > 1.0e-4 * sr * 0.09 && warmOut[k] > 1.0e-12)
+                            trim[k] = trimTarget[k] = clampf ((float) std::sqrt (warmIn / warmOut[k]) * voices[k].levelGain, 0.06f, 16.0f);
+                    warmIn = warmOut[0] = warmOut[1] = 0;
+                }
+            }
+            float a = 0, b = 0;
+            if (w < 0.999f) { a = (cv[0] ? capDelayA.at (kLatency) : voices[0].model (x)) * trim[0]; voices[0].measureOut (a); }
+            else if (! cv[0]) voices[0].idleModel (x);
+            if (w > 0.001f) { b = (cv[1] ? capDelayB.at (kLatency) : voices[1].model (x)) * trim[1]; voices[1].measureOut (b); }
+            else if (! cv[1]) voices[1].idleModel (x);
+            voices[0].measureIn (x); voices[1].measureIn (x);
+            namOut[(size_t) i] = a + (b - a) * w;
         }
         // high-pass the wet when low end was fed in, so the lows are never doubled
         for (int i = 0; i < n; ++i)
@@ -346,7 +381,10 @@ private:
     float lowInto = 0.35f, lastSplit = -1;
     Biquad lowIntoHp1, lowIntoHp2;
     Smoothed onS, lowIntoHpMix;
-    DelayLine dryDelay, capDelay;
-    std::vector<float> namIn, namOut;
+    DelayLine dryDelay, capDelayA, capDelayB;
+    std::vector<float> namIn, namOut, capIn, capOut;
+    bool capVoice[2] { false, true }, capRunning = false;
+    int capWarm = 0;
+    double warmIn = 0, warmOut[2] { 0, 0 };
 };
 } // namespace ks

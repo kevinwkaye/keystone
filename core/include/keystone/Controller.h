@@ -18,7 +18,7 @@ class Controller
 {
 public:
     static constexpr int kMaxSongs = 15;
-    static constexpr const char* kVersion = "0.2.1";
+    static constexpr const char* kVersion = "0.2.2";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);

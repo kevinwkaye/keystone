@@ -3,10 +3,14 @@
 ; firewall so the phone can find it on the hotspot.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.1"
+  #define AppVersion "0.2.2"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\build\app\Keystone_artefacts\Release"
+#endif
+
+#ifndef Avx2Dir
+  #define Avx2Dir ""
 #endif
 
 [Setup]
@@ -35,7 +39,13 @@ Name: "lid"; Description: "Keep playing with the lid closed (sets the lid to Do 
 Name: "power"; Description: "Keep USB audio and Wi-Fi at full power (avoids dropouts and link lag)"; Flags: checkedonce
 
 [Files]
+; the AVX2 build is about twice as quick with NAM captures, on processors that can run it
+#if Avx2Dir != ""
+Source: "{#Avx2Dir}\Keystone.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: HasAvx2
+Source: "{#SourceDir}\Keystone.exe"; DestDir: "{app}"; Flags: ignoreversion; Check: not HasAvx2
+#else
 Source: "{#SourceDir}\Keystone.exe"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "..\tools\Set up footswitch.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\tools\Set up footswitch.bat"; DestDir: "{app}\Tools"; Flags: ignoreversion
@@ -72,6 +82,14 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/im Keystone.exe /f"; Flags: runhid
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Keystone"""; Flags: runhidden; RunOnceId: "DelFirewall"
 
 [Code]
+function IsProcessorFeaturePresent(Feature: Cardinal): BOOL; external 'IsProcessorFeaturePresent@kernel32.dll stdcall';
+
+// PF_AVX2_INSTRUCTIONS_AVAILABLE is 40. Haswell and later have FMA alongside AVX2.
+function HasAvx2: Boolean;
+begin
+  Result := IsProcessorFeaturePresent(40);
+end;
+
 // stop a running Keystone so its file can be replaced
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var

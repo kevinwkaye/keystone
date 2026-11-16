@@ -388,7 +388,11 @@ var KS = (function () {
     switch (m.id) {
       case 'split': return 'Crossover ' + fmt('split.freq') + ' Hz, tight shelf';
       case 'lowcomp': return on('lowcomp.slap') ? 'Slap mode on' : 'Light, slap mode ready';
-      case 'drive': return 'Edge and Drive voices, ' + (Math.round(val('drive.source')) === 0 && S.capture ? 'capture' : 'model');
+      case 'drive': {
+        var e = Math.round(val('drive.edge.source')) === 0 && S.capture ? 'capture' : 'model';
+        var d = Math.round(val('drive.source')) === 0 && S.capture ? 'capture' : 'model';
+        return 'Edge on the ' + e + ', Drive on the ' + d;
+      }
       case 'dim': return 'Mode ' + fmt('dim.mode') + ', mono safe';
       case 'grains': return (Math.round(val('grains.effect')) ? fmt('grains.effect') + ' ' + fmt('grains.variant') : 'Sparkle') + ', ' + fmt('grains.pitch') + ', ' + fmt('grains.hp') + ' to ' + fmt('grains.ceiling');
       case 'delay': return fmt('delay.type') + ', ' + (Math.round(val('delay.sync')) ? fmt('delay.sync') : fmt('delay.time')) + ', ' + fmt('delay.feedback') + ' repeats';
@@ -530,7 +534,8 @@ var KS = (function () {
       var voice = Math.round(val('drive.voice'));
       var pfx = voice ? 'drive.drive.' : 'drive.edge.';
       list = list.filter(function (p) { return !/^drive\.(edge|drive)\./.test(p.id) || p.id.indexOf(pfx) === 0; });
-      var src = Math.round(val('drive.source'));
+      var srcId = voice ? 'drive.source' : 'drive.edge.source';   // each voice picks its own source
+      var src = Math.round(val(srcId));
       var capName = S.capture ? S.capture : (S.namAvailable ? 'No capture loaded' : 'Captures not supported');
       var capSub = S.capture ? 'NAM, loaded from your captures' : 'Put .nam files in Documents\\Keystone\\Captures';
       // source section: the capture row sits above Capture / Model
@@ -538,8 +543,9 @@ var KS = (function () {
         (S.showCaptures ? '<div class="group">' + (S.captures.length ? S.captures.map(function (f) {
           return '<button type="button" class="row" data-capture="' + esc(f) + '" style="min-height:48px;background:#262626"><span class="t" style="font-size:16px">' + esc(f.replace(/\.nam$/i, '')) + '</span><span class="r" style="color:#5DCAA5">' + (f === S.captureFile ? 'LOADED' : '') + '</span></button>';
         }).join('') : '<span class="small">No .nam files found in Documents\\Keystone\\Captures on the laptop.</span>') + '</div>' : '') +
-        '<div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))"><button type="button" class="' + (src === 0 ? 'on' : '') + '" data-set="drive.source" data-v="0">Capture</button><button type="button" class="' + (src === 1 ? 'on' : '') + '" data-set="drive.source" data-v="1">Model</button></div></section>';
-      var rest = list.filter(function (p) { return p.id !== 'drive.source'; });
+        '<div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))"><button type="button" class="' + (src === 0 ? 'on' : '') + '" data-set="' + srcId + '" data-v="0">Capture</button><button type="button" class="' + (src === 1 ? 'on' : '') + '" data-set="' + srcId + '" data-v="1">Model</button></div>' +
+        '<span class="small">' + (voice ? 'Drive' : 'Edge') + ' plays through ' + (src === 0 ? 'the capture.' : 'the model.') + (src === 0 && !voice ? ' A capture saved at high gain stays heavy, even on Edge.' : '') + '</span></section>';
+      var rest = list.filter(function (p) { return p.id !== 'drive.source' && p.id !== 'drive.edge.source'; });
       var html = renderParams(rest);
       // put Source after "Editing voice", as on the canvas
       var cut = html.indexOf('</section>') + '</section>'.length;

@@ -824,6 +824,34 @@ static void testCapture (const char* path)
     bool finite = true;
     for (float s : out) finite = finite && std::isfinite (s);
     CHECK (finite && rms (out.data(), out.size()) > 1e-4, "capture plays through the drive stage");
+
+    // Edge on the model, Drive on the capture: tap to Drive and back, no clicks, both heard
+    Engine c;
+    c.prepare (kSr, 64);
+    neutral (c);
+    c.setParam (P::DriveOn, 1);
+    c.setParam (P::SplitLowLevel, -40);   // listen to the high band only
+    c.loadCapture (path, err);
+    auto tone = sine (220, 9.0, 0.3);
+    const size_t third = tone.size() / 3;
+    auto y1 = render (c, std::vector<float> (tone.begin(), tone.begin() + (long) third));
+    c.setParam (P::DriveVoice, 1);
+    auto y2 = render (c, std::vector<float> (tone.begin() + (long) third, tone.begin() + (long) (2 * third)));
+    c.setParam (P::DriveVoice, 0);
+    auto y3 = render (c, std::vector<float> (tone.begin() + (long) (2 * third), tone.end()));
+    auto worstStep = [] (const std::vector<float>& y, size_t from, size_t to)
+    {
+        double w = 0;
+        for (size_t i = from + 1; i + 1 < to; ++i) w = std::max (w, (double) std::fabs (y[i + 1] - 2 * y[i] + y[i - 1]));
+        return w;
+    };
+    const double steadyEdge = worstStep (y1, y1.size() / 2, y1.size());
+    const double steadyDrive = worstStep (y2, y2.size() / 2, y2.size());
+    const double sw1 = worstStep (y2, 0, (size_t) (0.3 * kSr)), sw2 = worstStep (y3, 0, (size_t) (0.3 * kSr));
+    const double ref = std::max (steadyEdge, steadyDrive);
+    CHECK (sw1 < 1.6 * ref && sw2 < 1.6 * ref, "Edge (model) to Drive (capture) and back: switch steps %.2f and %.2f times the steady (mark 1.6)", sw1 / ref, sw2 / ref);
+    const double l1 = rms (y1.data() + y1.size() / 2, y1.size() / 2), l2 = rms (y2.data() + y2.size() / 2, y2.size() / 2);
+    CHECK (std::fabs (20 * std::log10 (l2 / l1)) < 3.0, "after a few seconds, Drive on the capture sits %.1f dB from Edge (mark within 3)", 20 * std::log10 (l2 / l1));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -872,7 +900,8 @@ static void bench (const char* capture)
                              { "Everything on, Galaxy delay and Arp grains", [&] (Engine& e) { everything (e); e.setParam (P::DlType, 11); e.setParam (P::GrEffect, 9); e.setParam (P::GrPitch, 3); }, nullptr } };
     if (capture && Engine::namAvailable() && std::filesystem::exists (capture))
     {
-        cases.insert (cases.begin(), { "Song default, NAM capture (A1 standard)", defaults, capture });
+        cases.insert (cases.begin(), { "Song default (Edge on the model), capture loaded", defaults, capture });
+        cases.insert (cases.begin() + 1, { "Drive voice on the NAM capture (A1 standard)", [] (Engine& e) { e.setParam (P::DriveVoice, 1); }, capture });
         cases.push_back ({ "Everything on with the NAM capture", [&] (Engine& e) { everything (e); e.setParam (P::DriveSource, 0); }, capture });
     }
     for (auto& c : cases)
