@@ -50,9 +50,12 @@ bool AudioHost::tryOpen()
 #if JUCE_WINDOWS
     // Exclusive talks to the interface directly; Shared goes through Windows' own mixer,
     // which copes better with some USB interfaces that drop data in exclusive mode
-    const bool shared = (int) std::lround (engine.getParam (ks::P::OutMode)) == 1;
-    const StringArray typeOrder = shared ? StringArray { "Windows Audio (Low Latency Mode)", "Windows Audio", "Windows Audio (Exclusive Mode)" }
-                                         : StringArray { "Windows Audio (Exclusive Mode)", "Windows Audio (Low Latency Mode)", "Windows Audio" };
+    // ASIO goes through an ASIO driver (ASIO4ALL, or the interface's own), which many USB
+    // interfaces need for clean low latency on Windows
+    const int mode = (int) std::lround (engine.getParam (ks::P::OutMode));
+    const StringArray typeOrder = mode == 2 ? StringArray { "ASIO", "Windows Audio (Exclusive Mode)", "Windows Audio (Low Latency Mode)", "Windows Audio" }
+                                : mode == 1 ? StringArray { "Windows Audio (Low Latency Mode)", "Windows Audio", "Windows Audio (Exclusive Mode)" }
+                                            : StringArray { "Windows Audio (Exclusive Mode)", "Windows Audio (Low Latency Mode)", "Windows Audio" };
 #elif JUCE_LINUX
     const StringArray typeOrder { "ALSA", "JACK" };
 #else
@@ -69,7 +72,19 @@ bool AudioHost::tryOpen()
         String in, out;
         for (const auto& n : ins) if (in.isEmpty() && nameMatches (n, wantDevice)) in = n;
         for (const auto& n : outs) if (out.isEmpty() && nameMatches (n, wantDevice)) out = n;
-        const bool found = in.isNotEmpty() && out.isNotEmpty();
+        bool found = in.isNotEmpty() && out.isNotEmpty();
+        const bool asio = typeName == "ASIO";
+        if (asio)
+        {
+            // one ASIO driver does input and output: the interface's own if it has one,
+            // else a universal one (ASIO4ALL, FlexASIO)
+            in.clear();
+            for (auto* want : { "UM2", "USB Audio CODEC", "Behringer", "ASIO4ALL", "FlexASIO" })
+                for (const auto& n : outs) if (in.isEmpty() && n.containsIgnoreCase (want)) in = n;
+            if (in.isEmpty() && outs.size() > 0) in = outs[0];
+            out = in;
+            found = in.isNotEmpty();
+        }
         if (in.isEmpty() && ins.size() > 0) in = ins[std::max (0, type->getDefaultDeviceIndex (true))];
         if (out.isEmpty() && outs.size() > 0) out = outs[std::max (0, type->getDefaultDeviceIndex (false))];
         if (in.isEmpty() || out.isEmpty()) { lastError = "no input or output device"; continue; }
@@ -98,6 +113,25 @@ bool AudioHost::tryOpen()
             dev = deviceManager.getCurrentAudioDevice();
         }
         if (err.isNotEmpty() || dev == nullptr) { lastError = typeName + ": " + err; continue; }
+        if (asio)
+        {
+            // a universal driver lists every device's channels: use the interface's pair
+            const auto inNames = dev->getInputChannelNames(), outNames = dev->getOutputChannelNames();
+            Logger::writeToLog ("Audio: ASIO inputs: " + inNames.joinIntoString (", ") + ". Outputs: " + outNames.joinIntoString (", "));
+            auto pick = [] (const StringArray& names)
+            {
+                BigInteger bits;
+                for (int i = 0; i < names.size(); ++i)
+                    if (nameMatches (names[i], {}) && bits.countNumberOfSetBits() < 2) bits.setBit (i);
+                if (bits.isZero()) bits.setRange (0, std::min (2, names.size()), true);
+                return bits;
+            };
+            setup.inputChannels = pick (inNames);
+            setup.outputChannels = pick (outNames);
+            err = deviceManager.setAudioDeviceSetup (setup, true);
+            dev = deviceManager.getCurrentAudioDevice();
+            if (err.isNotEmpty() || dev == nullptr) { lastError = typeName + ": " + err; continue; }
+        }
 
         // the size asked for, or the nearest the device offers at or above it
         int best = dev->getCurrentBufferSizeSamples();

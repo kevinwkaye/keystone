@@ -197,6 +197,7 @@ public:
         sr = sr_;
         mixS.setTime (0.02f, sr);
         levelEnv.set (0.01f, 1.5f, sr);
+        play.prepare (sr);
         reset();
     }
     void reset() { fuzz.reset(); toneLp.reset(); dc.prepare (sr); dc.reset(); hold = 0; held = 0; mixS.reset (0); levelEnv.reset(); }
@@ -216,13 +217,17 @@ public:
         // play softly or hard, the fuzz hits the same: the input is brought up to a
         // working level first (up to +26 dB), so Fuzz sets the character, not your touch
         const float lv = levelEnv.process (x);
+        play.process (x);
         const float norm = clampf (0.2f / std::max (lv, 1.0e-4f), 1.0f, 20.0f);
+        // between notes the fuzz shuts, so the lift never turns hiss into fizz
+        const float open = smoothstep ((lv - play.quietThreshold()) / std::max (1.0e-6f, 2.0f * play.quietThreshold()));
+        gateG += (open - gateG) * (open > gateG ? 0.01f : 0.0015f);
         float y = fuzz.process (x * norm * gain + 0.15f) - 0.1489f;   // tanh(0.15): asymmetric, DC removed
         y = dc.process (y);
         if (++hold >= holdN) { hold = 0; held = std::round (y * q) / q; }
         // and the fuzz comes out at about the level you went in, so switching it on
         // doesn't jump in volume
-        y = toneLp.lp (held) * lv * 0.8f;
+        y = toneLp.lp (held) * lv * 0.8f * gateG;
         const float m = mixS.next();
         return (x * (1.0f - m) + y * m) * level;
     }
@@ -236,6 +241,8 @@ private:
     DcBlock dc;
     Smoothed mixS;
     Follower levelEnv;
+    PlayLevel play;
+    float gateG = 0;
 };
 
 // ---------------------------------------------------------------------------------------

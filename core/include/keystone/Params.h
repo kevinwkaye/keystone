@@ -206,7 +206,7 @@ struct ParamInfo
     P(OutQuality,     "output.quality",  "Effects quality","output", "Setup",          Choice, 0,    2,    0,    "",   "Auto|Full|Light", Global) \
     P(OutBuffer,      "output.buffer",   "Audio buffer",  "output",  "Setup",          Choice, 0,    4,    0,    "",   "Auto|3 ms|4 ms|6 ms|10 ms", Global) \
     P(OutBufferStep,  "output.bufferAuto","Buffer learnt", "output", "Setup",          Choice, 0,    3,    0,    "",   "3 ms|4 ms|6 ms|10 ms", Global | Hidden) \
-    P(OutMode,        "output.mode",     "Audio mode",    "output",  "Setup",          Choice, 0,    1,    0,    "",   "Exclusive|Shared", Global) \
+    P(OutMode,        "output.mode",     "Audio mode",    "output",  "Setup",          Choice, 0,    2,    0,    "",   "Exclusive|Shared|ASIO", Global) \
     P(OutInput,       "output.input",    "Bass input",    "output",  "Setup",          Choice, 0,    2,    0,    "",   "Auto|Input 1|Input 2", Global) \
     P(TunerMute,      "tuner.mute",      "Mute output while tuning","tuner","Tuner",   Toggle, 0,    1,    1,    "",   "",   Global | Hidden) \
     P(TunerRef,       "tuner.ref",       "Reference A",   "tuner",   "Tuner",          Flip,   430,  450,  440,  "Hz", "",   Global | Hidden) \

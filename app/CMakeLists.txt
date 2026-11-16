@@ -31,6 +31,19 @@ target_sources(Keystone PRIVATE
 
 target_include_directories(Keystone PRIVATE src ${PROJECT_SOURCE_DIR}/core/src)
 
+# ASIO on Windows (Steinberg's ASIO SDK, used under its GPLv3 option), so interfaces whose
+# Windows driver drops data in WASAPI can run through ASIO4ALL or their own ASIO driver.
+if(WIN32)
+    FetchContent_Declare(asiosdk
+        GIT_REPOSITORY https://github.com/jcelerier/asio-2.git
+        GIT_TAG 1bc070d1c7b8f0bf92f9d3b7c72e5880a7dcffdb)
+    FetchContent_GetProperties(asiosdk)
+    if(NOT asiosdk_POPULATED)
+        FetchContent_Populate(asiosdk)
+    endif()
+    target_include_directories(Keystone PRIVATE ${asiosdk_SOURCE_DIR}/common)
+endif()
+
 target_compile_definitions(Keystone PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
@@ -38,7 +51,7 @@ target_compile_definitions(Keystone PRIVATE
     JUCE_REPORT_APP_USAGE=0
     JUCE_WASAPI=1
     JUCE_DIRECTSOUND=0
-    JUCE_ASIO=0
+    JUCE_ASIO=$<IF:$<BOOL:${WIN32}>,1,0>
     JUCE_ALSA=1
     JUCE_JACK=0
     JUCE_USE_WINRT_MIDI=0
