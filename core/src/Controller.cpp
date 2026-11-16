@@ -57,6 +57,63 @@ static std::map<std::string, float> defaults()
     return m;
 }
 
+
+// ---------------------------------------------------------------------------------------
+// The band's setlist, from Kevin's notes on how he works the pedals (Nov 2026). A starting
+// point to tune at rehearsal: every entry is the defaults plus a few changes.
+// ---------------------------------------------------------------------------------------
+using Overrides = std::vector<std::pair<const char*, float>>;
+
+static const Overrides kClean = { { "drive.on", 0 }, { "drive.voice", 0 }, { "fs.aCycle", 1 } };
+// the Blumes capture on the Drive voice
+static const Overrides kBlumes = { { "drive.on", 1 }, { "drive.voice", 1 }, { "fs.aCycle", 3 } };
+// the Blumes with the preamp pushed: more valve gain and grit, and more Cut so it carries
+static const Overrides kPushed = { { "drive.on", 1 }, { "drive.voice", 1 }, { "fs.aCycle", 3 },
+                                   { "preamp.gain", 0.6f }, { "preamp.drive", 0.45f }, { "preamp.blend", 0.5f } };
+// Speckle as sparkle: Haze, an octave up, sitting back
+static const Overrides kSparkle = { { "grains.on", 1 }, { "grains.effect", 3 }, { "grains.pitch", 1 }, { "grains.mix", 0.35f } };
+
+static std::vector<std::pair<std::string, std::map<std::string, float>>> bandEntries()
+{
+    std::vector<std::pair<std::string, std::map<std::string, float>>> out;
+    auto add = [&] (const std::string& name, std::initializer_list<const Overrides*> sets, const Overrides& extra = {})
+    {
+        auto v = defaults();
+        for (const auto* set : sets) for (const auto& [id, x] : *set) v[id] = x;
+        for (const auto& [id, x] : extra) v[id] = x;
+        out.emplace_back (name, v);
+    };
+    const float grit = 0, groove = 1, glow = 2;
+    // a part's name starts with "/" here, so the list can say which entries are parts
+    add ("The Comedian and the Boxer", { &kClean }, { { "bank.start", groove } });                 // tap A: filter for the solo
+    add ("When the Circus Comes to Town", { &kPushed }, { { "bank.start", grit } });               // heavy start
+    add ("/Verse", { &kClean }, { { "bank.start", glow }, { "reverb.on", 1 }, { "reverb.type", 2 }, { "reverb.mix", 0.25f },
+                                  { "reverb.decay", 2.8f }, { "bloom.tails", 1 } });
+    add ("/Chorus", { &kBlumes }, { { "bank.start", grit } });
+    add ("/Clean", { &kClean }, { { "bank.start", grit } });
+    add ("/Bridge", { &kClean, &kSparkle }, { { "bank.start", glow }, { "bitrot.on", 1 } });
+    add ("/Ending", { &kPushed }, { { "bank.start", grit } });
+    add ("DWHALTS", { &kClean }, { { "bank.start", grit }, { "drive.voice", 1 }, { "fs.aCycle", 3 } });   // tap A: Drive in the choruses
+    add ("I'm Not a Robot", { &kClean }, { { "bank.start", groove } });                             // tap A: filter for the middle 8
+    add ("Maps", { &kClean }, { { "bank.start", grit } });
+    add ("Notes", { &kClean }, { { "bank.start", grit } });
+    add ("They'll Believe Me", { &kClean }, { { "bank.start", grit } });
+    add ("Influencer", { &kBlumes }, { { "bank.start", grit } });                                   // tap A: clean for the verses
+    add ("Sluts", { &kBlumes }, { { "bank.start", grit }, { "bitrot.on", 1 }, { "preamp.gain", 0.55f } });
+    add ("/Middle 32", { &kClean, &kSparkle }, { { "bank.start", glow }, { "grains.mix", 0.55f }, { "grains.activity", 0.7f },
+                                                 { "reverb.on", 1 }, { "reverb.type", 5 }, { "reverb.decay", 8 }, { "reverb.mix", 0.45f },
+                                                 { "delay.on", 1 }, { "delay.type", 2 }, { "delay.feedback", 0.6f }, { "delay.mix", 0.35f },
+                                                 { "bloom.tails", 1 } });
+    add ("/Back in", { &kBlumes }, { { "bank.start", grit }, { "bitrot.on", 1 }, { "preamp.gain", 0.55f } });
+    add ("Action Films", { &kClean, &kSparkle }, { { "bank.start", glow }, { "delay.on", 1 }, { "delay.mix", 0.25f },
+                                                   { "reverb.on", 1 }, { "reverb.type", 1 }, { "reverb.mix", 0.25f }, { "bloom.tails", 1 } });
+    add ("/Chorus", { &kPushed }, { { "bank.start", grit } });
+    add ("/Down", { &kClean, &kSparkle }, { { "bank.start", glow }, { "delay.on", 1 }, { "delay.mix", 0.25f },
+                                            { "reverb.on", 1 }, { "reverb.type", 1 }, { "reverb.mix", 0.25f }, { "bloom.tails", 1 } });
+    add ("/Ending", { &kPushed }, { { "bank.start", grit }, { "bitrot.on", 1 }, { "reverb.on", 1 }, { "reverb.type", 1 }, { "reverb.mix", 0.2f } });
+    return out;
+}
+
 Controller::Controller (Engine& e, std::string data, std::string caps)
     : s (std::make_unique<State>()), engine (e), dataDir (std::move (data)), capturesDir (std::move (caps))
 {
@@ -135,12 +192,12 @@ void Controller::load()
         }
         s->current = std::clamp (sl.value ("current", 0), 0, std::max (0, (int) s->songs.size() - 1));
     }
-    if (s->songs.empty())
+    // first run, or still the untouched starter list from before 0.3.4: the band's setlist
     {
-        // first run: the songs from the analysis, all on the same clean starting point
-        for (auto* n : { "New choon", "I'm Not a Robot", "When the Circus Comes to Town", "The Comedian and the Boxer" })
-            s->songs.push_back ({ n, false, defaults() });
-        s->current = 0;
+        static const std::vector<std::string> starter { "New choon", "I'm Not a Robot", "When the Circus Comes to Town", "The Comedian and the Boxer" };
+        bool isStarter = s->songs.size() == starter.size();
+        for (size_t k = 0; isStarter && k < starter.size(); ++k) isStarter = s->songs[k].name == starter[k] && ! s->songs[k].part;
+        if (s->songs.empty() || isStarter) useBandSetlist (! s->songs.empty());
     }
 
     // global settings
@@ -172,6 +229,28 @@ void Controller::load()
         spaceOk = useSpace (s->spaceFile, err);
     if (! spaceOk && ! spaces.empty()) useSpace (spaces.front(), err);
     applySong (s->current);
+}
+
+void Controller::useBandSetlist (bool backup)
+{
+    if (backup)
+    {
+        // keep what was there, next to the setlist, in case it mattered
+        std::error_code ec;
+        fs::copy_file (toPath (dataDir) / "setlist.json", toPath (dataDir) / "setlist before the band setlist.json",
+                       fs::copy_options::overwrite_existing, ec);
+    }
+    s->songs.clear();
+    for (auto& [name, v] : bandEntries())
+    {
+        Song song;
+        song.part = name[0] == '/';
+        song.name = song.part ? name.substr (1) : name;
+        song.values = v;
+        s->songs.push_back (song);
+    }
+    s->current = 0;
+    saveSetlist();
 }
 
 void Controller::saveSetlist() const
@@ -371,6 +450,12 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
         }
         queueToast ("SAVED");
     }
+    else if (op == "band")
+    {
+        useBandSetlist (true);
+        applySong (0);
+        queueToast ("BAND SETLIST");
+    }
     else if (op == "revert")
     {
         applySong (s->current);
@@ -432,12 +517,18 @@ void Controller::onFootswitch (int sw, int ev)
         {
             if (sw == 0)
             {
+                // per song: Edge and Drive, Off Edge Drive, Off and Edge, or Off and Drive
                 const bool on = value (P::DriveOn) > 0.5f;
                 const int voice = (int) std::lround (value (P::DriveVoice));
-                const bool withOff = std::lround (value (P::FsACycle)) == 1;
-                if (! on) { setValue (P::DriveVoice, 0); setValue (P::DriveOn, 1); }
+                const int cycle = (int) std::lround (value (P::FsACycle));
+                if (cycle >= 2)
+                {
+                    if (on) setValue (P::DriveOn, 0);
+                    else { setValue (P::DriveVoice, cycle == 2 ? 0.0f : 1.0f); setValue (P::DriveOn, 1); }
+                }
+                else if (! on) { setValue (P::DriveVoice, 0); setValue (P::DriveOn, 1); }
                 else if (voice == 0) setValue (P::DriveVoice, 1);
-                else if (withOff) { setValue (P::DriveOn, 0); setValue (P::DriveVoice, 0); }
+                else if (cycle == 1) { setValue (P::DriveOn, 0); setValue (P::DriveVoice, 0); }
                 else setValue (P::DriveVoice, 0);
             }
             else if (sw == 1) toggle (P::BitrotOn);

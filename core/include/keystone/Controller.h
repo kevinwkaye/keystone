@@ -20,7 +20,7 @@ public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
-    static constexpr const char* kVersion = "0.3.3";
+    static constexpr const char* kVersion = "0.3.4";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -90,6 +90,7 @@ private:
     void handleMessageInner (const std::string& line, const std::function<void (const std::string&)>& reply);
     void applySong (int i, bool keepGoing = false);   // keepGoing: a part of the same song
     void saveSetlist() const;
+    void useBandSetlist (bool backup);   // the band's songs, built in
     void saveSettings() const;
     void queue (const std::string& msg);
     void queueState();

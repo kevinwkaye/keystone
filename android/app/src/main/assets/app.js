@@ -716,6 +716,8 @@ var KS = (function () {
       '<div class="group" id="rows">' + rows + '</div>' +
       '<div class="pair"><button type="button" class="wide" data-act="add"' + (fullSongs ? ' disabled style="opacity:0.4"' : '') + '>Add song</button><button type="button" class="wide blue" data-act="save">Save edits</button></div>' +
       '<div class="small">Save writes your current changes into the loaded song or part. Changing song without saving puts it back as it was.</div>' +
+      (S.confirmBand ? '<div class="acts" style="grid-template-columns:2fr 1fr 1fr"><span class="small" style="align-self:center">Replace this setlist with the band\'s? Keystone keeps a copy of this one.</span><button type="button" class="del" data-act="bandYes">Replace</button><button type="button" data-act="bandNo">Keep</button></div>'
+        : '<button type="button" class="wide" data-act="band">Load the band setlist</button>') +
       '<div class="small">Parts split a song, for a big change in the middle: hold B and everything changes at once, with the delay and reverb tails ringing over and a held drone carrying on. Add part copies the song\'s settings as a starting point.</div>' +
       nav('play') + '</section>';
   }
@@ -864,6 +866,9 @@ var KS = (function () {
       case 'rename': S.renameRow = i2; S.openRow = -1; render(); var r = document.getElementById('renameText'); if (r) { r.focus(); r.select(); } break;
       case 'renameSave': var rt = document.getElementById('renameText'); if (rt && rt.value.trim()) send({ t: 'setlist', op: 'rename', i: i2, name: rt.value.trim() }); S.renameRow = -1; render(); break;
       case 'copy': send({ t: 'setlist', op: 'copy', i: i2 }); S.openRow = -1; break;
+      case 'band': S.confirmBand = true; render(); break;
+      case 'bandYes': send({ t: 'setlist', op: 'band' }); S.confirmBand = false; break;
+      case 'bandNo': S.confirmBand = false; render(); break;
       case 'addPart': send({ t: 'setlist', op: 'addPart', i: i2 }); S.openRow = -1; break;
       case 'part': send({ t: 'setlist', op: 'part', i: i2 }); S.openRow = -1; break;
       case 'up': if (i2 > 0) { send({ t: 'setlist', op: 'move', i: i2, to: i2 - 1 }); S.openRow = i2 - 1; } break;

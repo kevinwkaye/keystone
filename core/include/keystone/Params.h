@@ -246,7 +246,7 @@ struct ParamInfo
     P(OutInput,       "output.input",    "Bass input",    "output",  "Setup",          Choice, 0,    2,    0,    "",   "Auto|Input 1|Input 2", Global) \
     P(TunerMute,      "tuner.mute",      "Mute output while tuning","tuner","Tuner",   Toggle, 0,    1,    1,    "",   "",   Global | Hidden) \
     P(TunerRef,       "tuner.ref",       "Reference A",   "tuner",   "Tuner",          Flip,   430,  450,  440,  "Hz", "",   Global | Hidden) \
-    P(FsACycle,       "fs.aCycle",       "Footswitch A",  "footswitches","Footswitch A", Choice, 0, 1,    0,    "",   "Edge and Drive|Off, Edge, Drive", Global)
+    P(FsACycle,       "fs.aCycle",       "Tap A in Grit", "footswitches","This song",  Choice, 0,    3,    0,    "",   "Edge and Drive|Off, Edge, Drive|Off and Edge|Off and Drive", None)
 // clang-format on
 
 enum class P : int

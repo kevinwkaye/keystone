@@ -8,7 +8,7 @@ Four footswitches and one pedal, in three banks. Hold A to step Grit, Groove, Gl
 
 | | Grit | Groove | Glow |
 |---|---|---|---|
-| Tap A | Edge / Drive (option: Off, Edge, Drive) | Auto filter | Speckle |
+| Tap A | Edge / Drive, set per song: Edge and Drive, Off Edge Drive, Off and Edge, or Off and Drive | Auto filter | Speckle |
 | Tap B | Bitrot | Dimension | Delay |
 | Tap C | Growl/Cut flip (Preamp, Flip to) | Wah on or off | Reverb |
 | Pedal | Dirt blend | Wah, or volume with the wah off | Bloom |

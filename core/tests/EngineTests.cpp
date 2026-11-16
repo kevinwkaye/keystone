@@ -1052,8 +1052,11 @@ static void testController()
     Controller c (e, dir.string(), (dir / "caps").string());
     int keeps = 0;
     c.onKeep = [&] (const std::string& j) { keeps += j.find ("\"plugin\":\"Keystone\"") != std::string::npos; };
+    // four plain songs, so the footswitch checks below have a known list
+    std::filesystem::create_directories (dir);
+    std::ofstream (dir / "setlist.json") << R"({"version":6,"current":0,"songs":[{"name":"New choon","values":{}},{"name":"Robot","values":{}},{"name":"Circus","values":{}},{"name":"Comedian","values":{}}]})";
     c.load();
-    CHECK (c.songCount() == 4 && c.songName (0) == "New choon", "first run seeds the four songs");
+    CHECK (c.songCount() == 4 && c.songName (0) == "New choon", "a setlist of your own loads as it is");
     double t = 0;
     auto tap = [&] (int sw) { c.footswitchPress (sw, t); t += 0.1; c.footswitchRelease (sw, t); t += 0.5; };
     auto hold = [&] (int sw) { c.footswitchPress (sw, t); for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); } c.footswitchRelease (sw, t); t += 0.5; };
@@ -1161,6 +1164,52 @@ static void testController()
     c2.load();
     CHECK (c2.songCount() == 15 && c2.songName (0) == "Encore" && c2.isPart (1) && c2.songName (1) == "Drop" && c2.songName (2) == "New choon",
            "setlist and its parts survive a restart");
+    std::filesystem::remove_all (dir);
+}
+
+static void testBandSetlist()
+{
+    std::printf ("The band's setlist\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_band";
+    std::filesystem::remove_all (dir);
+    {
+        Engine e; e.prepare (kSr, 64);
+        Controller c (e, dir.string(), (dir / "caps").string());
+        c.load();
+        CHECK (c.songCount() == 20 && c.songsOnly() == 10 && c.songName (0) == "The Comedian and the Boxer", "first run: ten songs, twenty songs and parts");
+        CHECK (c.bank() == 1 && c.value (P::DriveOn) == 0, "The Comedian and the Boxer: clean, opens in Groove for the filter");
+        double t = 0;
+        auto hold = [&] (int sw) { c.footswitchPress (sw, t); for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); } c.footswitchRelease (sw, t); t += 0.5; };
+        auto tap = [&] (int sw) { c.footswitchPress (sw, t); t += 0.1; c.footswitchRelease (sw, t); t += 0.5; };
+        hold (1);
+        CHECK (c.songName (1) == "When the Circus Comes to Town" && c.value (P::DriveVoice) == 1 && c.value (P::PreGain) > 0.55f, "Circus starts heavy: the Blumes and the preamp pushed");
+        hold (1);
+        CHECK (c.isPart (2) && c.currentSong() == 2 && c.value (P::DriveOn) == 0 && c.value (P::RvOn) == 1 && c.bank() == 2, "Circus verse: clean with reverb, in Glow");
+        hold (1); hold (1); hold (1);
+        CHECK (c.songName (5) == "Bridge" && c.value (P::BitrotOn) == 1 && c.value (P::GrOn) == 1, "Circus bridge: Bitrot and Speckle sparkle");
+        hold (1);
+        CHECK (c.songName (6) == "Ending" && c.value (P::PreGain) > 0.55f && c.value (P::DriveOn) == 1, "Circus ending: Blumes and preamp");
+        hold (1);
+        CHECK (c.songName (7) == "DWHALTS" && c.value (P::DriveOn) == 0, "DWHALTS opens clean");
+        tap (0);
+        CHECK (c.value (P::DriveOn) == 1 && c.value (P::DriveVoice) == 1, "DWHALTS, tap A: straight to Drive for the chorus");
+        tap (0);
+        CHECK (c.value (P::DriveOn) == 0, "tap A again: clean");
+        std::filesystem::path f;
+        int songNo = 0;
+        for (int i = 0; i < c.songCount(); ++i) if (c.songName (i) == "Middle 32") { c.selectSong (i); songNo = c.songNumber (i); }
+        CHECK (songNo == 9 && c.value (P::DriveOn) == 0 && c.value (P::RvOn) == 1 && c.value (P::DlOn) == 1 && c.bank() == 2, "Sluts middle 32: ambient, in Glow");
+    }
+    // the untouched starter list from before 0.3.4 is swapped for the band's, with a backup
+    std::filesystem::remove_all (dir);
+    std::filesystem::create_directories (dir);
+    std::ofstream (dir / "setlist.json") << R"({"version":6,"current":0,"songs":[{"name":"New choon","values":{}},{"name":"I'm Not a Robot","values":{}},{"name":"When the Circus Comes to Town","values":{}},{"name":"The Comedian and the Boxer","values":{}}]})";
+    {
+        Engine e; e.prepare (kSr, 64);
+        Controller c (e, dir.string(), (dir / "caps").string());
+        c.load();
+        CHECK (c.songCount() == 20 && std::filesystem::exists (dir / "setlist before the band setlist.json"), "the starter list becomes the band's setlist, the old one kept");
+    }
     std::filesystem::remove_all (dir);
 }
 
@@ -1318,6 +1367,7 @@ int main (int argc, char** argv)
         testPedalJobs();
         testPartTails();
         testController();
+        testBandSetlist();
         testCapture (capture);
     }
     bench (capture);
