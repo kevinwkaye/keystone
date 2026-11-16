@@ -43,19 +43,59 @@ struct Controller::State
     std::string captureFile, spaceFile;
     double lastDTap = -10;
     int bank = 0;
+    // the two rigs: songs and current are the playing rig's list, other the resting one's
+    int rig = 0;
+    std::vector<Song> other;
+    int otherCurrent = 0;
     bool droneHeld = false;
     bool dTapCaptured = false;
 };
 
 static bool isGlobal (int i) { return (paramTable()[i].flags & Global) != 0; }
+static bool isKuddle (int i) { return (paramTable()[i].flags & Kuddle) != 0; }
 
+// a Keystone song's values: everything but the globals and Kuddle's
 static std::map<std::string, float> defaults()
 {
     std::map<std::string, float> m;
     for (int i = 0; i < kNumParams; ++i)
-        if (! isGlobal (i)) m[paramTable()[i].id] = paramTable()[i].def;
+        if (! isGlobal (i) && ! isKuddle (i)) m[paramTable()[i].id] = paramTable()[i].def;
     return m;
 }
+
+// a Kuddle preset's values (the Melt position is the pedal's, not saved)
+static std::map<std::string, float> kuddleDefaults()
+{
+    std::map<std::string, float> m;
+    for (int i = 0; i < kNumParams; ++i)
+        if (isKuddle (i) && (P) i != P::KMelt) m[paramTable()[i].id] = paramTable()[i].def;
+    return m;
+}
+
+static std::map<std::string, float> defaultsFor (int rig) { return rig == 1 ? kuddleDefaults() : defaults(); }
+
+// Kuddle's starters, as in the plugin: Voodoo (the defaults), Khruangbin, Dub
+static std::vector<std::pair<std::string, std::map<std::string, float>>> kuddleStarters()
+{
+    auto make = [] (std::initializer_list<std::pair<const char*, float>> changes)
+    {
+        auto v = kuddleDefaults();
+        for (const auto& [id, x] : changes) v[std::string ("kuddle.") + id] = x;
+        return v;
+    };
+    return {
+        { "Voodoo", make ({}) },
+        { "Khruangbin", make ({ { "foam", 0.65f }, { "thump", 0.7f }, { "wahOn", 0 }, { "diDrive", 0.2f }, { "diAir", 0.1f },
+                                { "optoSqueeze", 0.55f }, { "optoBlend", 0.9f }, { "tapePush", 0.45f }, { "tapeWow", 0.2f }, { "tapeBump", 0.6f },
+                                { "bass", 3 }, { "mids", -1 }, { "midsHz", 500 }, { "treble", 2400 },
+                                { "roomOn", 1 }, { "roomType", 0 }, { "roomMix", 0.18f }, { "roomSize", 0.25f } }) },
+        { "Dub", make ({ { "foam", 0.75f }, { "thump", 0.8f }, { "wahOn", 0 }, { "diDrive", 0.25f }, { "diAir", 0 }, { "optoSqueeze", 0.6f },
+                         { "tapePush", 0.55f }, { "tapeBump", 0.8f }, { "bass", 5 }, { "bassHz", 70 }, { "mids", -3 }, { "midsHz", 700 }, { "treble", 1600 },
+                         { "roomOn", 1 }, { "roomType", 1 }, { "roomMix", 0.25f }, { "roomDecay", 1.4f } }) },
+    };
+}
+
+static const char* listFile (int rig) { return rig == 1 ? "kuddle.json" : "setlist.json"; }
 
 
 // ---------------------------------------------------------------------------------------
@@ -69,7 +109,7 @@ static const Overrides kClean = { { "drive.on", 0 }, { "drive.voice", 0 }, { "fs
 static const Overrides kBlumes = { { "drive.on", 1 }, { "drive.voice", 1 }, { "fs.aCycle", 3 } };
 // the Blumes with the preamp pushed: more valve gain and grit, and more Cut so it carries
 static const Overrides kPushed = { { "drive.on", 1 }, { "drive.voice", 1 }, { "fs.aCycle", 3 },
-                                   { "preamp.gain", 0.6f }, { "preamp.drive", 0.45f }, { "preamp.blend", 0.5f } };
+                                   { "preamp.gain", 0.6f }, { "preamp.drive", 0.45f }, { "preamp.blend", 0.65f } };
 // Speckle as sparkle: Haze, an octave up, sitting back
 static const Overrides kSparkle = { { "grains.on", 1 }, { "grains.effect", 3 }, { "grains.pitch", 1 }, { "grains.mix", 0.35f } };
 
@@ -172,6 +212,17 @@ void Controller::load()
                 song.values["filter.low"] = 200.0f;
                 song.values["bloom.autocap"] = 0.0f;
             }
+            // setlist version 7: quieter Bitrot, a shorter drone trail, a Blumes that cuts through
+            if (sl.value ("version", 1) < 7)
+            {
+                auto was = [&] (const char* id, float x) { return std::fabs (song.values[id] - x) < 1.0e-3f; };
+                if (was ("bitrot.vol", 0.7f)) song.values["bitrot.vol"] = 0.4f;
+                if (was ("drone.release", 4.0f)) song.values["drone.release"] = 2.0f;
+                if (was ("drive.drive.presence", 2.0f)) song.values["drive.drive.presence"] = 4.0f;
+                if (was ("drive.drive.lowcut", 70.0f)) song.values["drive.drive.lowcut"] = 110.0f;
+                if (was ("drive.drive.level", 0.0f)) song.values["drive.drive.level"] = 1.5f;
+                if (was ("preamp.blend", 0.5f) && was ("preamp.gain", 0.6f)) song.values["preamp.blend"] = 0.65f;
+            }
             // setlist version 5: Bitrot's place is a three-way choice, after the preamp by default
             if (sl.value ("version", 1) < 5) song.values["bitrot.place"] = song.values.count ("bitrot.first") && song.values["bitrot.first"] > 0.5f ? 0.0f : 2.0f;
             // setlist version 4: the drone sits further back
@@ -200,7 +251,32 @@ void Controller::load()
         if (s->songs.empty() || isStarter) useBandSetlist (! s->songs.empty());
     }
 
+    // Kuddle's presets, the starters on a first run
+    {
+        s->other.clear();
+        const auto kj = readJson (toPath (dataDir) / listFile (1));
+        if (kj.is_object() && kj.contains ("songs") && kj["songs"].is_array())
+            for (const auto& js : kj["songs"])
+            {
+                Song song { js.value ("name", std::string ("Preset")), false, kuddleDefaults() };
+                if (js.contains ("values") && js["values"].is_object())
+                    for (auto it = js["values"].begin(); it != js["values"].end(); ++it)
+                        if (it.value().is_number() && song.values.count (it.key())) song.values[it.key()] = it.value().get<float>();
+                s->other.push_back (song);
+                if ((int) s->other.size() >= kMaxSongs) break;
+            }
+        if (s->other.empty()) for (auto& [n, v] : kuddleStarters()) s->other.push_back ({ n, false, v });
+        s->otherCurrent = kj.is_object() ? std::clamp (kj.value ("current", 0), 0, (int) s->other.size() - 1) : 0;
+        // Kuddle's sound is loaded too, so a switch is instant
+        for (const auto& [id, v] : s->other[(size_t) s->otherCurrent].values)
+        {
+            const int p = findParam (id.c_str());
+            if (p >= 0) engine.setParam ((P) p, v);
+        }
+    }
+
     // global settings
+    int startRig = 0;
     const auto st = readJson (toPath (dataDir) / "settings.json");
     if (st.is_object())
     {
@@ -211,6 +287,7 @@ void Controller::load()
                 if (i >= 0 && isGlobal (i) && it.value().is_number()) engine.setParam ((P) i, it.value().get<float>());
             }
         s->captureFile = st.value ("capture", std::string());
+        startRig = st.value ("rig", 0) == 1 ? 1 : 0;
         s->spaceFile = st.value ("space", std::string());
     }
 
@@ -229,6 +306,7 @@ void Controller::load()
         spaceOk = useSpace (s->spaceFile, err);
     if (! spaceOk && ! spaces.empty()) useSpace (spaces.front(), err);
     applySong (s->current);
+    if (startRig == 1) setRig (1, false);   // the last rig used
 }
 
 void Controller::useBandSetlist (bool backup)
@@ -256,7 +334,7 @@ void Controller::useBandSetlist (bool backup)
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 6;
+    j["version"] = 7;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)
@@ -267,7 +345,7 @@ void Controller::saveSetlist() const
         js["values"] = song.values;
         j["songs"].push_back (js);
     }
-    writeJsonAtomic (toPath (dataDir) / "setlist.json", j);
+    writeJsonAtomic (toPath (dataDir) / listFile (s->rig), j);
 }
 
 void Controller::saveSettings() const
@@ -279,6 +357,7 @@ void Controller::saveSettings() const
     j["globals"] = g;
     j["capture"] = s->captureFile;
     j["space"] = s->spaceFile;
+    j["rig"] = s->rig;
     writeJsonAtomic (toPath (dataDir) / "settings.json", j);
 }
 
@@ -301,6 +380,23 @@ int Controller::songNumber (int i) const
 int Controller::songsOnly() const { return songNumber (songCount() - 1); }
 
 int Controller::bank() const { return s->bank; }
+int Controller::rig() const { return s->rig; }
+
+void Controller::setRig (int r, bool announce)
+{
+    r = r == 1 ? 1 : 0;
+    if (r == s->rig) return;
+    saveSetlist();                           // the resting rig's list as it was
+    std::swap (s->songs, s->other);
+    std::swap (s->current, s->otherCurrent);
+    s->rig = r;
+    engine.setRig (r);
+    engine.setSqueeze (false);
+    if (r == 1) { engine.action (Action::DroneClear); s->droneHeld = false; }   // a held drone trails off
+    if (r == 0) engine.setPedalBank (s->bank);
+    saveSettings();
+    if (announce) { queueState(); queueToast (r == 1 ? "KUDDLE" : "KEYSTONE"); }
+}
 
 void Controller::setBank (int b)
 {
@@ -324,6 +420,7 @@ void Controller::applySong (int i, bool keepGoing)
         const int p = findParam (id.c_str());
         if (p >= 0) engine.setParam ((P) p, v);
     }
+    if (s->rig == 1) return;   // Kuddle: no banks, no drone
     engine.resetPedalJobs();
     s->bank = std::clamp ((int) std::lround (engine.getParam (P::BankStart)), 0, 2);
     engine.setPedalBank (s->bank);
@@ -387,7 +484,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     if (op == "add")
     {
         if (full (true)) return;
-        Song ns { name.empty() ? "Song " + std::to_string (songsOnly() + 1) : name, false, defaults() };
+        Song ns { name.empty() ? (s->rig == 1 ? "Preset " : "Song ") + std::to_string (songsOnly() + 1) : name, false, defaultsFor (s->rig) };
         songs.push_back (ns);
         applySong (n);
     }
@@ -399,7 +496,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
         songs.insert (songs.begin() + i + 1, c);
         if (s->current > i) ++s->current;
     }
-    else if (op == "addPart" && valid (i))
+    else if (op == "addPart" && valid (i) && s->rig == 0)
     {
         // a new part at the end of i's song, starting from i's saved settings
         if (full (false)) return;
@@ -412,7 +509,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
         songs.insert (songs.begin() + end + 1, c);
         if (s->current > end) ++s->current;
     }
-    else if (op == "part" && valid (i) && i > 0)
+    else if (op == "part" && valid (i) && i > 0 && s->rig == 0)
     {
         // make a song a part of the one above, or a part its own song again
         if (! songs[(size_t) i].part) songs[(size_t) i].part = true;
@@ -450,7 +547,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
         }
         queueToast ("SAVED");
     }
-    else if (op == "band")
+    else if (op == "band" && s->rig == 0)
     {
         useBandSetlist (true);
         applySong (0);
@@ -488,6 +585,29 @@ void Controller::onFootswitch (int sw, int ev)
     const bool tuning = tunerOn();
     if (ev == E::ComboHoldCD) { keep(); return; }
     auto toggle = [&] (P p) { setValue (p, value (p) > 0.5f ? 0.0f : 1.0f); };
+    // A and B stomped together: next song or part (next preset in Kuddle), the moment both are down
+    if (ev == E::ComboAB) { if (! tuning) stepSong (1); return; }
+    if (s->rig == 1)
+    {
+        // Kuddle: tap A Mute, B Auto wah, C Room, D Tape. Hold A previous preset, B next,
+        // C tuner, D squeeze while held. No banks.
+        if (ev == E::Tap)
+        {
+            if (tuning) { engine.action (Action::TunerOff); queueState(); return; }
+            static const P taps[] = { P::KMuteOn, P::KWahOn, P::KRoomOn, P::KTapeOn };
+            if (sw >= 0 && sw < 4) toggle (taps[sw]);
+        }
+        else if (ev == E::HoldStart)
+        {
+            if (sw == 2) { engine.action (Action::TunerToggle); queueState(); }
+            else if (tuning) return;
+            else if (sw == 0) stepSong (-1);
+            else if (sw == 1) stepSong (1);
+            else if (sw == 3) { engine.setSqueeze (true); queueToast ("SQUEEZE"); }
+        }
+        else if (ev == E::HoldEnd && sw == 3) engine.setSqueeze (false);
+        return;
+    }
     if (ev == E::Tap)
     {
         if (tuning) { engine.action (Action::TunerOff); queueState(); return; }   // any tap leaves the tuner
@@ -569,6 +689,7 @@ void Controller::keep()
     json e;
     e["plugin"] = "Keystone";
     e["version"] = kVersion;
+    e["rig"] = s->rig == 1 ? "Kuddle" : "Keystone";
     e["preset"] = songName (s->current);
     e["song"] = songNumber (s->current);
     e["part"] = isPart (s->current);
@@ -722,6 +843,7 @@ std::string Controller::stateJson() const
     for (const auto& song : s->songs) { j["songs"].push_back (song.name); j["parts"].push_back (song.part); }
     j["current"] = s->current;
     j["bank"] = s->bank;
+    j["rig"] = s->rig;
     j["maxEntries"] = kMaxEntries;
     j["edited"] = edited();
     j["maxSongs"] = kMaxSongs;
@@ -759,6 +881,9 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
         j["jobOn"] = act[m.pedalTarget];
     }
     j["wait"] = m.waiting;
+    j["rig"] = m.rig;
+    j["melt"] = std::round (m.melt * 1000) / 1000;
+    j["sq"] = std::round (m.kuddleSqueezeDb * 10) / 10;
     j["pedal"] = std::round (m.pedal * 1000) / 1000;
     j["drone"] = m.droneLayers;
     j["swell"] = m.droneSwelling;
@@ -812,7 +937,12 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     else if (t == "songStep") stepSong (m.value ("d", 1));
     else if (t == "setlist") setlistOp (m.value ("op", std::string()), m.value ("i", s->current), m.value ("to", -1), m.value ("name", std::string()));
     else if (t == "bloom") engine.setBloom (m.value ("v", 0.0f));
-    else if (t == "pedal") engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));   // the phone's bar
+    else if (t == "pedal")   // the phone's bar
+    {
+        if (s->rig == 1) engine.setMelt (m.value ("v", 0.0f));
+        else engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));
+    }
+    else if (t == "rig") setRig (m.value ("r", 1 - s->rig));
     else if (t == "bank") setBank (m.value ("i", 0));
     else if (t == "tuner")
     {

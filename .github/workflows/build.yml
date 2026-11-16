@@ -3,17 +3,19 @@ name: Build Keystone
 on:
   push:
     branches: [main]
-    # Kuddle has its own build (kuddle.yml)
-    paths-ignore:
-      - "kuddle/**"
-      - ".github/workflows/kuddle.yml"
+    # Kuddle's plugin has its own build (kuddle.yml); its engine is part of Keystone now
+    paths:
+      - "**"
+      - "!kuddle/**"
+      - "kuddle/engine/**"
+      - "!.github/workflows/kuddle.yml"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
-  VERSION: "0.3.4"
+  VERSION: "0.4.0"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.

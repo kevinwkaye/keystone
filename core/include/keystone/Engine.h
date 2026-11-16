@@ -37,6 +37,9 @@ struct Meters
     float dirt = 1, wah = 0.5f, volume = 1;
     bool dirtActive = false, wahActive = false, volumeActive = false, bloomActive = false;
     bool waiting = false;                        // the pedal hasn't caught up with its job yet
+    int rig = 0;                                 // 0 Keystone, 1 Kuddle
+    float melt = 0;                              // Kuddle's pedal
+    float kuddleSqueezeDb = 0;                   // the Opto's gain reduction
     float cpuLoad = 0;                           // filled by the host
     bool light = false;                          // effects in light mode right now
 };
@@ -81,6 +84,14 @@ public:
     void resetPedalJobs();                // new song or part: every job back to its saved sound
     void setJob (PedalJob job, float v);  // the phone's bar: set a job directly
     void setBloom (float pos01) { setJob (PedalJob::Bloom, pos01); }
+
+    // ---- the two rigs: Keystone (band) and Kuddle (home), both loaded ----
+    // Switching crossfades in 50 ms. Keystone stops hearing the bass while Kuddle plays,
+    // so its delay and reverb tails ring out; Kuddle only runs while it's heard.
+    void setRig (int r);
+    int rig() const { return rigNow.load(); }
+    void setMelt (float pos01);            // Kuddle's pedal, from the phone
+    void setSqueeze (bool on) { squeezeHeld.store (on); }   // Kuddle: hold D
     float bloom() const { return job[3].value.load(); }
     void action (Action a);
     void setLightMode (bool light) { lightRequest.store (light); }
@@ -118,6 +129,9 @@ private:
     std::array<JobState, 4> job;
     std::atomic<int> pedalBank { 0 }, lastTarget { -1 };
     std::atomic<float> lastPedal { -1.0f }, cpuLoad { 0.0f };
+    std::atomic<int> rigNow { 0 };
+    std::atomic<float> meltPos { 0.0f };
+    std::atomic<bool> squeezeHeld { false };
     int pedalTarget() const;
     std::atomic<bool> lightRequest { false };
 };

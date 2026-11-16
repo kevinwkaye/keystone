@@ -9,6 +9,7 @@
 #include "Grains.h"
 #include "Valve.h"
 #include "Modules.h"
+#include "KuddleEngine.h"
 
 #include <chrono>
 #include <filesystem>
@@ -77,6 +78,13 @@ struct Engine::Impl
 
     // tails ring over a part change: a short window in which delay and reverb switched
     // off keep their tails instead of fading them out
+    // Kuddle
+    kud::Engine kuddle;
+    std::vector<float> kudL, kudR;
+    Smoothed rigMix, ksIn;
+    bool kuddleRunning = false;
+    std::atomic<float> kudGr { 0 };
+
     std::atomic<int> spillRequests { 0 };
     int spillSeen = 0;
     int64_t spillLeft = 0;
@@ -143,6 +151,12 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.iron.prepare (s);
     d.filter.prepare (s);
     d.wah.prepare (s);
+    d.kuddle.prepare (s, d.maxBlock);
+    d.kudL.assign ((size_t) d.maxBlock, 0.0f);
+    d.kudR.assign ((size_t) d.maxBlock, 0.0f);
+    d.rigMix.setTime (0.05f, s); d.rigMix.reset (rigNow.load() == 1 ? 1.0f : 0.0f);
+    d.ksIn.setTime (0.05f, s); d.ksIn.reset (rigNow.load() == 1 ? 0.0f : 1.0f);
+    d.kuddleRunning = false;
     d.dim.prepare (s);
     d.grains.prepare (s);
     d.delay.prepare (s);
@@ -210,9 +224,13 @@ int Engine::pedalTarget() const
     }
 }
 
+void Engine::setRig (int r) { rigNow.store (r == 1 ? 1 : 0); }
+void Engine::setMelt (float pos) { meltPos.store (clampf (pos, 0.0f, 1.0f)); }
+
 void Engine::setPedal (float pos)
 {
     pos = clampf (pos, 0.0f, 1.0f);
+    if (rigNow.load() == 1) { meltPos.store (pos); lastPedal.store (pos); return; }   // Kuddle: the Melt sweep
     const int t = pedalTarget();
     auto& j = job[(size_t) t];
     const float last = lastPedal.load();
@@ -293,6 +311,9 @@ Meters Engine::meters() const
     m.wah = job[1].value.load(); m.wahActive = job[1].active.load();
     m.volume = job[2].value.load(); m.volumeActive = job[2].active.load();
     m.bloomActive = job[3].active.load();
+    m.rig = rigNow.load();
+    m.melt = meltPos.load();
+    m.kuddleSqueezeDb = d.kudGr.load();
     {
         const auto& j = job[(size_t) m.pedalTarget];
         m.waiting = (m.pedalTarget == 2 || j.active.load()) && ! j.caught.load();
@@ -431,9 +452,12 @@ void Engine::process (const float* in, float* out, int numSamples)
         // ---- split ----
         for (int i = 0; i < n; ++i)
         {
-            const float s = d.dc.process (x[i]);
+            // the tuner and the input meter hear the bass whichever rig is playing; Keystone's
+            // chain stops hearing it while Kuddle plays, so its tails ring out
+            const float raw = d.dc.process (x[i]);
+            const float s = raw * d.ksIn.next();
             d.cleanBuf[(size_t) i] = s;
-            d.inPk = std::max (d.inPk * 0.9995f, std::fabs (s));
+            d.inPk = std::max (d.inPk * 0.9995f, std::fabs (raw));
             d.play.process (s);
             float lo, hi;
             d.split.split (s, lo, hi);
@@ -444,7 +468,7 @@ void Engine::process (const float* in, float* out, int numSamples)
             d.fullBuf[(size_t) i] = full;
             d.droneBuf[(size_t) i] = d.drone.process (s);
             // tuner feed
-            const float t = d.tunerLp2.process (d.tunerLp1.process (s));
+            const float t = d.tunerLp2.process (d.tunerLp1.process (raw));
             if (++d.decim >= 4)
             {
                 d.decim = 0;
@@ -533,8 +557,49 @@ void Engine::process (const float* in, float* out, int numSamples)
             if (std::fabs (o) > 0.99f) d.clipped.store (true);
             o = d.limiter.process (o, limitOn);
             y[i] = o;
-            const float ao = std::fabs (o);
-            d.outPk = std::max (d.outPk * 0.9995f, ao);
+        }
+
+        // ---- Kuddle: runs while it's heard, crossfaded with Keystone ----
+        const bool kudWanted = rigNow.load() == 1;
+        d.rigMix.set (kudWanted ? 1.0f : 0.0f);
+        d.ksIn.set (kudWanted ? 0.0f : 1.0f);
+        const bool kudHeard = kudWanted || d.rigMix.current() > 1.0e-4f;
+        if (kudHeard)
+        {
+            if (! d.kuddleRunning) { d.kuddle.reset(); d.kuddleRunning = true; }
+            kud::Params kp;
+            kp.inGainDb = V (v, P::KInGain); kp.gateDb = V (v, P::KGate);
+            kp.muteOn = Vb (v, P::KMuteOn); kp.foam = V (v, P::KFoam); kp.thump = V (v, P::KThump); kp.strings = Vi (v, P::KStrings);
+            kp.wahOn = Vb (v, P::KWahOn); kp.wahManual = Vi (v, P::KWahMode) == 1; kp.wahSense = V (v, P::KWahSense); kp.wahRange = Vi (v, P::KWahRange);
+            kp.wahSpeed = V (v, P::KWahSpeed); kp.wahPeak = V (v, P::KWahPeak); kp.wahPos = V (v, P::KWahPos);
+            kp.diDrive = V (v, P::KDiDrive); kp.diAir = V (v, P::KDiAir); kp.diSag = V (v, P::KDiSag); kp.diLowCut = V (v, P::KDiLowCut);
+            kp.optoOn = Vb (v, P::KOptoOn); kp.optoSqueeze = V (v, P::KOptoSqueeze); kp.optoFast = Vi (v, P::KOptoSpeed) == 1;
+            kp.optoBlend = V (v, P::KOptoBlend); kp.optoHoldDb = V (v, P::KOptoHold); kp.squeeze = squeezeHeld.load();
+            kp.tapeOn = Vb (v, P::KTapeOn); kp.tapePush = V (v, P::KTapePush); kp.tapeWow = V (v, P::KTapeWow);
+            kp.tapeFlutter = V (v, P::KTapeFlutter); kp.tapeBump = V (v, P::KTapeBump); kp.tapeHiss = V (v, P::KTapeHiss);
+            kp.toneOn = Vb (v, P::KToneOn); kp.bassDb = V (v, P::KBass); kp.bassHz = V (v, P::KBassHz); kp.midsDb = V (v, P::KMids);
+            kp.midsHz = V (v, P::KMidsHz); kp.trebleKHz = V (v, P::KTreble) * 0.001f;
+            kp.roomOn = Vb (v, P::KRoomOn); kp.roomType = Vi (v, P::KRoomType); kp.roomSize = V (v, P::KRoomSize);
+            kp.roomDecay = V (v, P::KRoomDecay); kp.roomPreMs = V (v, P::KRoomPre); kp.roomMix = V (v, P::KRoomMix);
+            kp.melt = meltPos.load(); kp.meltWorksWah = Vb (v, P::KMeltWah);
+            kp.reachMute = V (v, P::KReachMute); kp.reachTape = V (v, P::KReachTape); kp.reachTreble = V (v, P::KReachTreble); kp.reachRoom = V (v, P::KReachRoom);
+            kp.outDb = V (v, P::KOutput);
+            kp.mute = tuning && Vb (v, P::TunerMute);
+            d.kuddle.setParams (kp);
+            d.kuddle.process (x, d.kudL.data(), d.kudR.data(), n);
+            d.kudGr.store (d.kuddle.optoReductionDb());
+            for (int i = 0; i < n; ++i)
+            {
+                const float k = d.rigMix.next();
+                // Keystone's input has already faded, so what's left of it is its tails
+                y[i] += 0.5f * (d.kudL[(size_t) i] + d.kudR[(size_t) i]) * k;   // mono out
+            }
+        }
+        else d.kuddleRunning = false;
+        for (int i = 0; i < n; ++i)
+        {
+            const float o = y[i];
+            d.outPk = std::max (d.outPk * 0.9995f, std::fabs (o));
             d.outMs += (o * o - d.outMs) * 0.0005f;
         }
         d.inPeak.store (d.inPk);

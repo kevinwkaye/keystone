@@ -23,6 +23,7 @@ enum Flags : uint8_t
     Log = 1,      // log scale (frequencies, times)
     Global = 2,   // not stored in song presets
     Hidden = 4,   // not shown on Tone pages
+    Kuddle = 8,   // belongs to Kuddle, the home rig: saved in Kuddle's presets, not Keystone's songs
 };
 
 struct ParamInfo
@@ -57,7 +58,7 @@ struct ParamInfo
     P(DroneLevel,     "drone.level",     "Level",         "drone",   "Drone",          Flip,   0,    1,    0.4f, "%",  "",   None) \
     P(DroneSustain,   "drone.sustain",   "Sustain",       "drone",   "Drone",          Flip,   0,    1,    1,    "%",  "",   None) \
     P(DroneSwell,     "drone.swell",     "Swell",         "drone",   "Drone",          Flip,   0.05f,4,    1.2f, "s",  "",   Log) \
-    P(DroneRelease,   "drone.release",   "Trail off",     "drone",   "Drone",          Flip,   0.5f, 10,   4,    "s",  "",   Log) \
+    P(DroneRelease,   "drone.release",   "Trail off",     "drone",   "Drone",          Flip,   0.5f, 10,   2,    "s",  "",   Log) \
     P(DroneDuck,      "drone.duck",      "Duck",          "drone",   "Movement",       Flip,   0,    1,    0.6f, "%",  "",   None) \
     P(DroneTone,      "drone.tone",      "Tone",          "drone",   "Movement",       Flip,   100,  2000, 450,  "Hz", "",   Log) \
     P(DroneSend,      "drone.send",      "To reverb",     "drone",   "Movement",       Flip,   0,    1,    0,    "%",  "",   None) \
@@ -78,9 +79,9 @@ struct ParamInfo
     P(EdgeMode,       "drive.edge.mode", "Clipping",      "drive",   "Clipping (model only)", Choice, 0, 2, 1,  "",   "LED|Clean|Silicon", None) \
     P(DriveGain,      "drive.drive.gain","Gain",          "drive",   "Voice settings", Flip,   0,    10,   6.5f, "",   "",   None) \
     P(DriveTone,      "drive.drive.tone","Tone",          "drive",   "Voice settings", Flip,   0,    10,   6.5f, "",   "",   None) \
-    P(DriveLevel,     "drive.drive.level","Level",        "drive",   "Voice settings", Flip,   -12,  12,   0,    "dB", "",   None) \
-    P(DriveLowCut,    "drive.drive.lowcut","Low cut",     "drive",   "Voice settings", Flip,   20,   300,  70,  "Hz", "",   Log) \
-    P(DrivePresence,  "drive.drive.presence","Presence",  "drive",   "Voice settings", Flip,   -6,   6,    2,    "dB", "",   None) \
+    P(DriveLevel,     "drive.drive.level","Level",        "drive",   "Voice settings", Flip,   -12,  12,   1.5f,   "dB", "",   None) \
+    P(DriveLowCut,    "drive.drive.lowcut","Low cut",     "drive",   "Voice settings", Flip,   20,   300,  110, "Hz", "",   Log) \
+    P(DrivePresence,  "drive.drive.presence","Presence",  "drive",   "Voice settings", Flip,   -6,   6,    4,    "dB", "",   None) \
     P(DriveGate,      "drive.drive.gate","Gate",          "drive",   "Voice settings", Flip,   -90,  -30,  -60,  "dB", "",   None) \
     P(DriveMode,      "drive.drive.mode","Clipping",      "drive",   "Clipping (model only)", Choice, 0, 2, 0,  "",   "LED|Clean|Silicon", None) \
     P(DriveFade,      "drive.fade",      "Switch fade",   "drive",   "Behaviour",      Flip,   5,    50,   15,   "ms", "",   None) \
@@ -92,7 +93,7 @@ struct ParamInfo
     P(BitrotSub,      "bitrot.sub",      "Sub",           "bitrot",  "Voices",         Flip,   0,    1,    0.6f, "%",  "",   None) \
     P(BitrotOsc,      "bitrot.osc",      "Oscillator",    "bitrot",  "Voices",         Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(BitrotClean,    "bitrot.clean",    "Clean bass",    "bitrot",  "Voices",         Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(BitrotVol,      "bitrot.vol",      "Level",         "bitrot",  "Voices",         Flip,   0,    1,    0.7f, "%",  "",   None) \
+    P(BitrotVol,      "bitrot.vol",      "Level",         "bitrot",  "Voices",         Flip,   0,    1,    0.4f, "%",  "",   None) \
     P(BitrotSubInt,   "bitrot.subInt",   "Divide by",     "bitrot",  "Sub",            Choice, 0,    7,    0,    "",   "2|3|4|5|6|7|8|9", None) \
     P(BitrotSubRoot,  "bitrot.subRoot",  "Divides",       "bitrot",  "Sub",            Choice, 0,    1,    0,    "",   "Square|Oscillator", None) \
     P(BitrotSubMix,   "bitrot.subMix",   "Sub blend",     "bitrot",  "Sub",            Choice, 0,    1,    0,    "",   "Sum and difference|Plain divide", None) \
@@ -246,6 +247,54 @@ struct ParamInfo
     P(OutInput,       "output.input",    "Bass input",    "output",  "Setup",          Choice, 0,    2,    0,    "",   "Auto|Input 1|Input 2", Global) \
     P(TunerMute,      "tuner.mute",      "Mute output while tuning","tuner","Tuner",   Toggle, 0,    1,    1,    "",   "",   Global | Hidden) \
     P(TunerRef,       "tuner.ref",       "Reference A",   "tuner",   "Tuner",          Flip,   430,  450,  440,  "Hz", "",   Global | Hidden) \
+    /* ---- Kuddle, the home rig ---- */ \
+    P(KMelt,          "kuddle.melt",     "Melt",          "k.melt",  "Melt",           Slider, 0,    1,    0,    "%",  "Open|Melted", Kuddle | Hidden) \
+    P(KMeltWah,       "kuddle.meltWah",  "Pedal works the wah in manual", "k.melt", "Melt", Toggle, 0, 1, 1,   "",   "",   Kuddle) \
+    P(KReachMute,     "kuddle.reachMute","Mute",          "k.melt",  "Reach",          Flip,   0,    1,    0.6f, "%",  "",   Kuddle) \
+    P(KReachTape,     "kuddle.reachTape","Tape push",     "k.melt",  "Reach",          Flip,   0,    1,    0.5f, "%",  "",   Kuddle) \
+    P(KReachTreble,   "kuddle.reachTreble","Treble roll-off","k.melt","Reach",         Flip,   0,    1,    0.7f, "%",  "",   Kuddle) \
+    P(KReachRoom,     "kuddle.reachRoom","Room",          "k.melt",  "Reach",          Flip,   0,    1,    0,    "%",  "",   Kuddle) \
+    P(KInGain,        "kuddle.inGain",   "Gain",          "k.input", "Input",          Flip,   -12,  12,   0,    "dB", "",   Kuddle) \
+    P(KGate,          "kuddle.gate",     "Gate",          "k.input", "Input",          Flip,   -90,  -40,  -70,  "dB", "",   Kuddle) \
+    P(KMuteOn,        "kuddle.muteOn",   "On",            "k.mute",  "",               Toggle, 0,    1,    1,    "",   "",   Kuddle) \
+    P(KFoam,          "kuddle.foam",     "Foam",          "k.mute",  "Mute",           Flip,   0,    1,    0.4f, "%",  "",   Kuddle) \
+    P(KThump,         "kuddle.thump",    "Thump",         "k.mute",  "Mute",           Flip,   0,    1,    0.55f,"%",  "",   Kuddle) \
+    P(KStrings,       "kuddle.strings",  "Strings",       "k.mute",  "Mute",           Choice, 0,    2,    2,    "",   "New|Worn|Old", Kuddle) \
+    P(KWahOn,         "kuddle.wahOn",    "On",            "k.wah",   "",               Toggle, 0,    1,    1,    "",   "",   Kuddle) \
+    P(KWahMode,       "kuddle.wahMode",  "Mode",          "k.wah",   "Mode",           Choice, 0,    1,    0,    "",   "Auto|Manual", Kuddle) \
+    P(KWahRange,      "kuddle.wahRange", "Range",         "k.wah",   "Mode",           Choice, 0,    1,    0,    "",   "Low|Mid", Kuddle) \
+    P(KWahSense,      "kuddle.wahSense", "Sense",         "k.wah",   "Sweep",          Flip,   0,    1,    0.55f,"%",  "",   Kuddle) \
+    P(KWahSpeed,      "kuddle.wahSpeed", "Speed",         "k.wah",   "Sweep",          Flip,   0,    1,    0.3f, "%",  "",   Kuddle) \
+    P(KWahPeak,       "kuddle.wahPeak",  "Peak",          "k.wah",   "Sweep",          Flip,   0,    1,    0.4f, "%",  "",   Kuddle) \
+    P(KWahPos,        "kuddle.wahPos",   "Position",      "k.wah",   "Sweep",          Flip,   0,    1,    0.5f, "%",  "",   Kuddle) \
+    P(KDiDrive,       "kuddle.diDrive",  "Drive",         "k.di",    "Valve DI",       Flip,   0,    1,    0.3f, "%",  "",   Kuddle) \
+    P(KDiAir,         "kuddle.diAir",    "Air",           "k.di",    "Valve DI",       Flip,   0,    1,    0.2f, "%",  "",   Kuddle) \
+    P(KDiSag,         "kuddle.diSag",    "Sag",           "k.di",    "Valve DI",       Flip,   0,    1,    0.35f,"%",  "",   Kuddle) \
+    P(KDiLowCut,      "kuddle.diLowCut", "Low cut",       "k.di",    "Valve DI",       Flip,   20,   120,  30,   "Hz", "",   Kuddle) \
+    P(KOptoOn,        "kuddle.optoOn",   "On",            "k.opto",  "",               Toggle, 0,    1,    1,    "",   "",   Kuddle) \
+    P(KOptoSqueeze,   "kuddle.optoSqueeze","Squeeze",     "k.opto",  "Opto",           Flip,   0,    1,    0.45f,"%",  "",   Kuddle) \
+    P(KOptoSpeed,     "kuddle.optoSpeed","Speed",         "k.opto",  "Opto",           Choice, 0,    1,    0,    "",   "Slow|Fast", Kuddle) \
+    P(KOptoBlend,     "kuddle.optoBlend","Blend",         "k.opto",  "Opto",           Flip,   0,    1,    0.8f, "%",  "",   Kuddle) \
+    P(KOptoHold,      "kuddle.optoHold", "Hold D",        "k.opto",  "Opto",           Flip,   0,    12,   6,    "dB", "",   Kuddle) \
+    P(KTapeOn,        "kuddle.tapeOn",   "On",            "k.tape",  "",               Toggle, 0,    1,    1,    "",   "",   Kuddle) \
+    P(KTapePush,      "kuddle.tapePush", "Push",          "k.tape",  "Tape",           Flip,   0,    1,    0.35f,"%",  "",   Kuddle) \
+    P(KTapeWow,       "kuddle.tapeWow",  "Wow",           "k.tape",  "Tape",           Flip,   0,    1,    0.1f, "%",  "",   Kuddle) \
+    P(KTapeFlutter,   "kuddle.tapeFlutter","Flutter",     "k.tape",  "Tape",           Flip,   0,    1,    0.15f,"%",  "",   Kuddle) \
+    P(KTapeBump,      "kuddle.tapeBump", "Bump",          "k.tape",  "Tape",           Flip,   0,    1,    0.4f, "%",  "",   Kuddle) \
+    P(KTapeHiss,      "kuddle.tapeHiss", "Hiss",          "k.tape",  "Tape",           Flip,   0,    1,    0,    "%",  "",   Kuddle) \
+    P(KToneOn,        "kuddle.toneOn",   "On",            "k.tone",  "",               Toggle, 0,    1,    1,    "",   "",   Kuddle) \
+    P(KBass,          "kuddle.bass",     "Bass",          "k.tone",  "Tone",           Flip,   -12,  12,   2,    "dB", "",   Kuddle) \
+    P(KBassHz,        "kuddle.bassHz",   "Bass at",       "k.tone",  "Tone",           Flip,   40,   200,  80,   "Hz", "",   Kuddle | Log) \
+    P(KMids,          "kuddle.mids",     "Mids",          "k.tone",  "Tone",           Flip,   -12,  12,   1,    "dB", "",   Kuddle) \
+    P(KMidsHz,        "kuddle.midsHz",   "Mids at",       "k.tone",  "Tone",           Flip,   200,  1500, 400,  "Hz", "",   Kuddle | Log) \
+    P(KTreble,        "kuddle.treble",   "Treble",        "k.tone",  "Tone",           Flip,   1000, 12000,3200, "Hz", "",   Kuddle | Log) \
+    P(KRoomOn,        "kuddle.roomOn",   "On",            "k.room",  "",               Toggle, 0,    1,    0,    "",   "",   Kuddle) \
+    P(KRoomType,      "kuddle.roomType", "Type",          "k.room",  "Room",           Choice, 0,    1,    0,    "",   "Dark room|Spring", Kuddle) \
+    P(KRoomSize,      "kuddle.roomSize", "Size",          "k.room",  "Room",           Flip,   0,    1,    0.3f, "%",  "",   Kuddle) \
+    P(KRoomDecay,     "kuddle.roomDecay","Decay",         "k.room",  "Room",           Flip,   0.2f, 3,    0.8f, "s",  "",   Kuddle) \
+    P(KRoomPre,       "kuddle.roomPre",  "Pre-delay",     "k.room",  "Room",           Flip,   0,    60,   10,   "ms", "",   Kuddle) \
+    P(KRoomMix,       "kuddle.roomMix",  "Mix",           "k.room",  "Room",           Flip,   0,    1,    0.2f, "%",  "",   Kuddle) \
+    P(KOutput,        "kuddle.output",   "Level",         "k.output","Output",         Flip,   -24,  12,   -3,   "dB", "",   Kuddle) \
     P(FsACycle,       "fs.aCycle",       "Tap A in Grit", "footswitches","This song",  Choice, 0,    3,    0,    "",   "Edge and Drive|Off, Edge, Drive|Off and Edge|Off and Drive", None)
 // clang-format on
 

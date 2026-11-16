@@ -66,6 +66,7 @@ public class MainActivity extends Activity {
         link = new Link(this, new Link.Listener() {
             @Override
             public void onLine(String line) {
+                Widgets.onLine(MainActivity.this, line);
                 synchronized (inbox) {
                     inbox.add(line);
                     if (flushQueued) return;
@@ -76,6 +77,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onStatus(String status, String detail) {
+                Widgets.setLinked(MainActivity.this, "connected".equals(status));
                 ui.post(() -> deliverStatus(JSONObject.quote(status) + "," + JSONObject.quote(detail)));
             }
         });
@@ -112,6 +114,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         link.stop();
+        Widgets.setLinked(this, false);
         web.destroy();
         super.onDestroy();
     }

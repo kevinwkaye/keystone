@@ -150,3 +150,22 @@ input[type=range] { width: 100%; accent-color: var(--blue); height: 32px; }
 /* setlist parts */
 .srow.part { margin-left: 28px; }
 .partmark { height: 42px; flex: none; border-left: 2px solid var(--dim); border-bottom: 2px solid var(--dim); border-radius: 0 0 0 8px; margin: -14px 0 14px 12px; width: 18px; }
+
+/* rig switch: tap the name */
+.brand.rig { border: none; background: var(--card); border-radius: 12px; padding: 6px 12px 6px 6px; color: inherit; text-align: left; }
+.brand .swap { font-size: 11px; letter-spacing: 0.1em; padding: 2px 8px; border-radius: 999px; background: var(--flip); color: var(--muted); }
+
+/* stomp tiles open their page; the corner button switches */
+.stomp { position: relative; cursor: pointer; }
+.stomp .tog { position: absolute; right: 10px; bottom: 10px; min-width: 52px; height: 34px; padding: 0 10px; border-radius: 17px; border: 1px solid #3A3A3A; background: #1E1E1E; color: #8A847A; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; }
+.stomp .tog.lit { color: #0E0E10; }
+
+/* Kuddle: Flip Fella recoloured brown and orange, flip cards stay black */
+body.kuddle { --bg: #24180F; --card: #33231A; --btn: #3F2B1F; --flip: #141110; --text: #F6EBDD; --muted: #C9AE92; --dim: #8A6A50; --blue: #F28C28; --green: #F28C28; }
+body.kuddle .stomp { border-color: #4A3426; }
+body.kuddle .stomp .tog { background: #24180F; border-color: #6E5240; color: #8A6A50; }
+body.kuddle .stomp .tog.lit { color: #1A110B; }
+body.kuddle nav.nav button.on { background: #4A3426; }
+body.kuddle .flip.blue { color: #1A110B; }
+body.kuddle .pill.lit { background: #F28C28; border-color: #F28C28; color: #1A110B; }
+body.kuddle .pill { background: #24180F; border-color: #6E5240; color: #8A6A50; }

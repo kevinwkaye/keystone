@@ -1111,10 +1111,21 @@ static void testController()
     for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
     c.footswitchRelease (2, t); c.footswitchRelease (3, t);
     CHECK (keeps == 1 && ! c.tunerOn() && c.value (P::CompSlap) == 1, "hold C and D: Keep, nothing else fires");
-    // A then B quickly is two presses, not a combo (back in Grit)
+    // A and B stomped together: next song, the moment both are down, no taps fire
     t += 1;
-    c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02); c.footswitchRelease (0, t + 0.1); c.footswitchRelease (1, t + 0.12);
-    CHECK (c.value (P::DriveVoice) == 1 && c.value (P::BitrotOn) == 1, "A and B together stay two taps");
+    {
+        const int before = c.currentSong();
+        const float dv = c.value (P::DriveVoice), br = c.value (P::BitrotOn);
+        c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02);
+        CHECK (c.currentSong() == before + 1, "A and B together: next song straight away");
+        c.footswitchRelease (0, t + 0.1); c.footswitchRelease (1, t + 0.12);
+        c.selectSong (before);
+        CHECK (c.value (P::DriveVoice) == dv && c.value (P::BitrotOn) == br, "and neither tap fires");
+        t += 1;
+        c.footswitchPress (1, t); t += 0.32; c.tick (t); c.footswitchRelease (1, t); t += 0.5;
+        CHECK (c.currentSong() == before + 1, "hold B counts from 0.3 s now");
+        c.selectSong (before);
+    }
 
     // setlist
     auto msg = [&] (const std::string& m) { c.handleMessage (m, [] (const std::string&) {}); };
@@ -1164,6 +1175,95 @@ static void testController()
     c2.load();
     CHECK (c2.songCount() == 15 && c2.songName (0) == "Encore" && c2.isPart (1) && c2.songName (1) == "Drop" && c2.songName (2) == "New choon",
            "setlist and its parts survive a restart");
+    std::filesystem::remove_all (dir);
+}
+
+static void testKuddle()
+{
+    std::printf ("Kuddle, the home rig\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_kuddle";
+    std::filesystem::remove_all (dir);
+    auto in = bassLine (2.0, 0.5);
+    {
+        Engine e; e.prepare (kSr, 64);
+        Controller c (e, dir.string(), (dir / "caps").string());
+        c.load();
+        CHECK (c.rig() == 0, "first run starts in Keystone");
+        auto ks = render (e, in);
+        c.setRig (1);
+        CHECK (c.rig() == 1 && c.songCount() == 3 && c.songName (0) == "Voodoo" && c.songName (2) == "Dub", "switch: Kuddle with Voodoo, Khruangbin and Dub");
+        auto kd = render (e, in);
+        const double kdDb = 20 * std::log10 (rms (kd.data() + kd.size() / 4, kd.size() * 3 / 4) + 1e-12);
+        CHECK (kdDb > -40 && maxDiff (ks, kd) > 0.02, "Kuddle plays, and sounds different (%.1f dBFS)", kdDb);
+        double t = 0;
+        auto tap = [&] (int sw) { c.footswitchPress (sw, t); t += 0.1; c.footswitchRelease (sw, t); t += 0.5; };
+        auto hold = [&] (int sw) { c.footswitchPress (sw, t); for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); } c.footswitchRelease (sw, t); t += 0.5; };
+        tap (0); tap (1); tap (2); tap (3);
+        CHECK (c.value (P::KMuteOn) == 0 && c.value (P::KWahOn) == 0 && c.value (P::KRoomOn) == 1 && c.value (P::KTapeOn) == 0,
+               "Kuddle taps: A Mute, B Auto wah, C Room, D Tape");
+        hold (1);
+        CHECK (c.currentSong() == 1 && c.value (P::KRoomOn) == 1 && c.value (P::KWahOn) == 0, "hold B: Khruangbin (room on, wah off)");
+        hold (0);
+        CHECK (c.currentSong() == 0, "hold A: back to Voodoo");
+        c.footswitchPress (3, t); for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); }
+        render (e, in);
+        CHECK (e.meters().kuddleSqueezeDb > 0.5f, "hold D: the Opto squeezes (%.1f dB)", e.meters().kuddleSqueezeDb);
+        c.footswitchRelease (3, t); t += 0.5;
+        e.setPedal (0.8f);
+        CHECK (std::fabs (e.meters().melt - 0.8f) < 1e-6 && ! e.meters().bloomActive, "in Kuddle the pedal is Melt, Bloom left alone");
+        c.setRig (0);
+        CHECK (c.rig() == 0 && c.songName (0) == "The Comedian and the Boxer", "back to Keystone and its own setlist");
+    }
+    {
+        Engine e; e.prepare (kSr, 64);
+        Controller c (e, dir.string(), (dir / "caps").string());
+        c.setRig (0);
+        c.load();
+        CHECK (c.rig() == 0, "the last rig used comes back at start");
+        c.setRig (1);
+        Engine e2; e2.prepare (kSr, 64);
+        Controller c2 (e2, dir.string(), (dir / "caps").string());
+        c2.load();
+        CHECK (c2.rig() == 1 && c2.songName (0) == "Voodoo", "Kuddle comes back too, with its presets");
+    }
+    // Keystone's tails ring out over a switch to Kuddle
+    {
+        Engine e; e.prepare (kSr, 64);
+        neutral (e); e.setParam (P::DroneOn, 0);
+        e.setParam (P::DlOn, 1); e.setParam (P::DlMix, 0.5f); e.setParam (P::DlFeedback, 0.6f); e.setParam (P::DlTime, 300);
+        e.setParam (P::KOutput, -60);   // Kuddle near silent, so only the tail is measured
+        render (e, pluck (82.4, 0.5, 0.8, 0.3));
+        e.setRig (1);
+        std::vector<float> sil ((size_t) (0.8 * kSr), 0.0f);
+        auto tl = render (e, sil);
+        const double tail = 20 * std::log10 (rms (tl.data() + (size_t) (0.2 * kSr), (size_t) (0.4 * kSr)) + 1e-12);
+        CHECK (tail > -50, "the delay tail rings on after switching to Kuddle (%.1f dBFS)", tail);
+        e.setParam (P::KOutput, -3);
+        auto kd = render (e, in);
+        Engine ref; ref.prepare (kSr, 64); ref.setRig (1); neutral (ref);
+        // the bass no longer reaches Keystone: after the tail, only Kuddle plays
+        CHECK (e.meters().rig == 1, "Kuddle is the rig playing");
+    }
+    std::filesystem::remove_all (dir);
+}
+
+static void testNewDefaults()
+{
+    std::printf ("0.4 defaults, and old songs moved across\n");
+    CHECK (info (P::DroneRelease).def == 2.0f && info (P::BitrotVol).def == 0.4f, "drone trails off over 2 s, Bitrot at 40%%");
+    CHECK (info (P::DrivePresence).def == 4.0f && info (P::DriveLowCut).def == 110.0f && info (P::DriveLevel).def == 1.5f,
+           "the Drive voice cuts through: presence +4 dB, low cut 110 Hz, level +1.5 dB");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_v7";
+    std::filesystem::remove_all (dir);
+    std::filesystem::create_directories (dir);
+    std::ofstream (dir / "setlist.json") << R"({"version":6,"current":0,"songs":[{"name":"Old","values":{"bitrot.vol":0.7,"drone.release":4,"drive.drive.presence":2,"drive.drive.lowcut":70,"drive.drive.level":0}},{"name":"Tweaked","values":{"bitrot.vol":0.55,"drone.release":6}}]})";
+    Engine e; e.prepare (kSr, 64);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    c.load();
+    CHECK (std::fabs (c.value (P::BitrotVol) - 0.4f) < 1e-4 && c.value (P::DroneRelease) == 2.0f && c.value (P::DrivePresence) == 4.0f,
+           "a song on the old defaults moves to the new ones");
+    c.selectSong (1);
+    CHECK (std::fabs (c.value (P::BitrotVol) - 0.55f) < 1e-4 && c.value (P::DroneRelease) == 6.0f, "a song you'd changed keeps your settings");
     std::filesystem::remove_all (dir);
 }
 
@@ -1368,6 +1468,8 @@ int main (int argc, char** argv)
         testPartTails();
         testController();
         testBandSetlist();
+        testKuddle();
+        testNewDefaults();
         testCapture (capture);
     }
     bench (capture);

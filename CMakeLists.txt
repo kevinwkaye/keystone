@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Keystone VERSION 0.3.4 LANGUAGES C CXX)
+project(Keystone VERSION 0.4.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,7 +50,7 @@ add_library(keystone_core STATIC
     core/src/Params.cpp
     core/src/Analysis.cpp
     core/src/Controller.cpp)
-target_include_directories(keystone_core PUBLIC core/include PRIVATE core/src)
+target_include_directories(keystone_core PUBLIC core/include PRIVATE core/src kuddle/engine)
 if(KEYSTONE_WITH_NAM)
     # NAM registers its model types from static initialisers, which a static library
     # would drop at link time, so its objects are linked straight into each program.

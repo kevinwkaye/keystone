@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Keystone</string>
+    <string name="widget_whats_on">Keystone: song, bank and what\'s switched on</string>
+    <string name="widget_input">Keystone: input level, and the tuner while you tune</string>
 </resources>

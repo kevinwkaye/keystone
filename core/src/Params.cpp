@@ -68,6 +68,17 @@ const ModuleInfo* moduleTable (int& count)
         { "bloom", "Bloom sweep", "Control", "Grains then wash, per song" },
         { "footswitches", "Footswitches", "Control", "Tap and hold jobs" },
         { "output", "Output", "Control", "Level, limiter, amp or PA" },
+        // Kuddle, the home rig, in playing order
+        { "k.input", "Input", "Kuddle", "Gain and gate" },
+        { "k.mute", "Mute", "Kuddle", "Flatwound and foam feel" },
+        { "k.wah", "Auto wah", "Kuddle", "Warm and vocal, lows kept dry" },
+        { "k.di", "Valve DI", "Kuddle", "Always on" },
+        { "k.opto", "Opto", "Kuddle", "Slow, smooth squeeze" },
+        { "k.tape", "Tape", "Kuddle", "Push, wow, flutter, bump" },
+        { "k.tone", "Tone", "Kuddle", "Bass, mids, treble roll-off" },
+        { "k.room", "Room", "Kuddle", "Small dark room or spring" },
+        { "k.melt", "Melt sweep", "Kuddle", "The pedal: open to melted" },
+        { "k.output", "Output", "Kuddle", "Level" },
     };
     count = (int) (sizeof (mods) / sizeof (mods[0]));
     return mods;

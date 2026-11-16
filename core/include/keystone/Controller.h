@@ -20,7 +20,7 @@ public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
-    static constexpr const char* kVersion = "0.3.4";
+    static constexpr const char* kVersion = "0.4.0";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -70,6 +70,10 @@ public:
     // banks: what taps A to C and the pedal do. 0 Grit, 1 Groove, 2 Glow
     int bank() const;
     void setBank (int b);
+
+    // rigs: 0 Keystone (band), 1 Kuddle (home). Each keeps its own list and settings.
+    int rig() const;
+    void setRig (int r, bool announce = true);
 
     // for tests
     void setValue (P p, float v, bool broadcast = true);

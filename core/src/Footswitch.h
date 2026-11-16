@@ -16,9 +16,11 @@ public:
     std::function<void (int sw, Event)> onEvent;
 
     static constexpr double kHoldSeconds = 0.45, kComboWindow = 0.12, kComboHoldSeconds = 1.0;
+    // how long each switch is held before it counts as a hold: B (next song) is quicker
+    std::array<double, 4> holdSeconds { kHoldSeconds, 0.3, kHoldSeconds, kHoldSeconds };
 
     // Combos a plugin doesn't use are switched off, so a quick A then B is two presses.
-    std::array<bool, 2> pairEnabled { false, true };   // Keystone: A+B off, C+D on (Keep)
+    std::array<bool, 2> pairEnabled { true, true };    // Keystone: A+B next song, C+D Keep
 
     void press (int sw, double now)
     {
@@ -63,7 +65,7 @@ public:
             }
         }
         for (int i = 0; i < 4; ++i)
-            if (down[(size_t) i] && ! held[(size_t) i] && ! combo[(size_t) i] && now - downAt[(size_t) i] >= kHoldSeconds)
+            if (down[(size_t) i] && ! held[(size_t) i] && ! combo[(size_t) i] && now - downAt[(size_t) i] >= holdSeconds[(size_t) i])
             {
                 held[(size_t) i] = true;
                 if (onEvent) onEvent (i, HoldStart);

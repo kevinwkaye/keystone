@@ -16,14 +16,15 @@ Four footswitches and one pedal, in three banks. Hold A to step Grit, Groove, Gl
 | Switch | Hold, every bank |
 |---|---|
 | A | Next bank |
-| B | Next song or part. Forwards only, stops at the last song |
+| B | Next song or part (from 0.3 s). Forwards only, stops at the last song |
 | C | Tuner |
 | D | Slap compression |
 | C + D | Keep (held 1 s) |
+| A + B | Stomped together: next song or part, the moment both are down |
 
 Tap D is the drone in every bank: tap to hold the note, tap again to let it trail off.
 
-- Taps fire on release, holds at 0.45 s, the C + D hold at 1 s. A + B is switched off as a combo, so A then B quickly is two taps.
+- Taps fire on release, holds at 0.45 s (B at 0.3 s), the C + D hold at 1 s. A and B pressed within 0.12 s of each other count as the A + B stomp, not two taps.
 - While the tuner is on, any tap leaves it and does nothing else, and hold A does nothing.
 - Changing bank never changes the sound. Only taps and the pedal do.
 - Each song (and each part) saves the bank it opens in (Footswitches, This song).
@@ -53,3 +54,18 @@ CubeSuite in Custom mode, footswitches A to D on CC 20 to 23, pedal jack as Expr
 ## Set up footswitch (0.2.1)
 
 Start menu, Keystone, **Set up footswitch** (or tools\Set up footswitch.bat). With the footswitch plugged in by USB it closes Keystone, asks you to press A, B, C and D and rock the pedal, then writes what it heard into `Flip Fella Pedals.xml` (other plugins' settings kept): controller or note, channel, latching or momentary, the pedal's controller and its heel and toe ends, so a pedal that reads backwards is fixed too. Then it starts Keystone again and leaves a record in Documents\Keystone\footswitch setup.txt. It can't change the footswitch itself: if a switch sends program changes, or latches, it says what to set in CubeSuite (Custom mode, CC 20 to 23 momentary, pedal jack as Expression Pedal on CC 11). Latching switches still tap, but can't hold.
+
+## Kuddle (0.4.0)
+
+Tap the Keystone name on the phone's Play screen to switch to Kuddle, and tap Kuddle to come back. No banks.
+
+| Switch | Tap | Hold |
+|---|---|---|
+| A | Mute | Last preset |
+| B | Auto wah | Next preset (from 0.3 s) |
+| C | Room | Tuner |
+| D | Tape push | Squeeze while held |
+| A + B | Stomped together: next preset | |
+| C + D | | Keep (held 1 s) |
+
+The pedal is Melt: heel open and clear, towards the toe the mute closes in, the tape pushes and the treble rolls off. Learn and pedal calibration are shared with Keystone.

@@ -8,7 +8,7 @@ var KS = (function () {
   var S = {
     link: 'searching', linkDetail: '',
     schema: null, params: {}, modules: [], values: {},
-    songs: [], parts: [], current: 0, edited: false, maxSongs: 15, maxEntries: 40, bank: 0,
+    songs: [], parts: [], current: 0, edited: false, maxSongs: 15, maxEntries: 40, bank: 0, rig: 0,
     tuner: false, captures: [], capture: '', captureFile: '', namAvailable: true, spaces: [], space: '', spaceFile: '',
     footswitch: '', audio: '', keeperLive: false,
     meter: {}, screen: 'play', module: null, prevScreen: 'play', tunerAuto: false,
@@ -25,6 +25,7 @@ var KS = (function () {
     var line = JSON.stringify(o);
     if (window.KeystoneNative) window.KeystoneNative.send(line);
     else if (window.KSMock) window.KSMock.send(line);
+    return true;
   }
   var pendingSet = {}, setTimer = null;
   function setParam(id, v) {          // throttled while dragging
@@ -48,7 +49,7 @@ var KS = (function () {
         queueRender(); break;
       case 'state':
         S.values = m.values; S.songs = m.songs; S.parts = m.parts || []; S.current = m.current; S.edited = m.edited;
-        S.bank = m.bank || 0; S.maxEntries = m.maxEntries || 40;
+        S.bank = m.bank || 0; S.maxEntries = m.maxEntries || 40; S.rig = m.rig || 0;
         S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile; S.spaces = m.spaces || []; S.space = m.space || ''; S.spaceFile = m.spaceFile || '';
         S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive;
         tunerState(m.tuner);
@@ -69,6 +70,7 @@ var KS = (function () {
       case 'meter':
         S.meter = m;
         if (m.bank != null && m.bank !== S.bank) { S.bank = m.bank; queueRender(true); }
+        if (m.rig != null && m.rig !== S.rig) { S.rig = m.rig; queueRender(); }
         if (m.tuner) tunerState(true); else if (S.tuner) tunerState(false);
         queueMeters(); break;
       case 'toast':
@@ -175,6 +177,18 @@ var KS = (function () {
     '<g class="eye"><circle cx="122" cy="80" r="18" fill="#FFFFFF"/><circle cx="124" cy="82" r="9" fill="#0B0B12"/></g>' +
     '<path d="M88 116 Q 100 126, 112 116" fill="none" stroke="#0B0B12" stroke-width="6" stroke-linecap="round"/></svg>';
 
+  var PEBBLE_K = '<svg class="pebble" id="pebble" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Pebble in shades and a pork pie hat">' +
+    '<path transform="translate(7 9)" d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#B8661E"/>' +
+    '<path d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#F28C28"/>' +
+    '<rect x="56" y="72" width="40" height="22" rx="8" fill="#141110"/><rect x="104" y="72" width="40" height="22" rx="8" fill="#141110"/><rect x="94" y="78" width="12" height="5" fill="#141110"/>' +
+    '<path d="M88 120 Q 100 130, 112 120" fill="none" stroke="#141110" stroke-width="6" stroke-linecap="round"/>' +
+    '<g transform="rotate(-9 100 52)"><ellipse cx="100" cy="52" rx="52" ry="9" fill="#4A2E1B"/><path d="M70 52 L74 24 Q100 17 126 24 L130 52Z" fill="#6B4429"/>' +
+    '<path d="M71.5 40 Q100 35 128.5 40 L129.5 50 Q100 46 70.5 50Z" fill="#F6EBDD"/><path d="M118 40 Q132 14 146 10 Q136 26 124 42Z" fill="#F28C28"/></g></svg>';
+  // which parameter switches a module on and off (Kuddle's are named their own way)
+  var KON = { 'k.mute': 'kuddle.muteOn', 'k.wah': 'kuddle.wahOn', 'k.opto': 'kuddle.optoOn', 'k.tape': 'kuddle.tapeOn', 'k.tone': 'kuddle.toneOn', 'k.room': 'kuddle.roomOn' };
+  function onp(mod) { return KON[mod] || (S.params[mod + '.on'] ? mod + '.on' : ''); }
+  function kud() { return S.rig === 1; }
+
   function pill() {
     var c = S.link === 'connected', w = warnings().length;
     var label = !c ? 'Searching' : w ? w + (w > 1 ? ' problems' : ' problem') : 'Connected';
@@ -260,20 +274,29 @@ var KS = (function () {
   function bankTiles(b) {
     var lit = function (id) { return on(id) ? 'ON' : 'OFF'; };
     if (b === 1) return [
-      { k: 'A', name: 'Filter', st: lit('filter.on'), id: 'filter.on' },
-      { k: 'B', name: 'Dimension', st: lit('dim.on'), id: 'dim.on' },
-      { k: 'C', name: 'Wah', st: lit('wah.on'), id: 'wah.on' }];
+      { k: 'A', name: 'Filter', st: lit('filter.on'), id: 'filter.on', mod: 'filter' },
+      { k: 'B', name: 'Dimension', st: lit('dim.on'), id: 'dim.on', mod: 'dim' },
+      { k: 'C', name: 'Wah', st: lit('wah.on'), id: 'wah.on', mod: 'wah' }];
     if (b === 2) return [
-      { k: 'A', name: 'Speckle', st: lit('grains.on'), id: 'grains.on' },
-      { k: 'B', name: 'Delay', st: lit('delay.on'), id: 'delay.on' },
-      { k: 'C', name: 'Reverb', st: lit('reverb.on'), id: 'reverb.on' }];
+      { k: 'A', name: 'Speckle', st: lit('grains.on'), id: 'grains.on', mod: 'grains' },
+      { k: 'B', name: 'Delay', st: lit('delay.on'), id: 'delay.on', mod: 'delay' },
+      { k: 'C', name: 'Reverb', st: on('reverb.on') ? fmt('reverb.type').toUpperCase() : 'OFF', id: 'reverb.on', mod: 'reverb' }];
+    if (b === 3) return [
+      { k: 'A', name: 'Mute', st: lit('kuddle.muteOn'), id: 'kuddle.muteOn', mod: 'k.mute' },
+      { k: 'B', name: 'Auto wah', st: lit('kuddle.wahOn'), id: 'kuddle.wahOn', mod: 'k.wah' },
+      { k: 'C', name: 'Room', st: lit('kuddle.roomOn'), id: 'kuddle.roomOn', mod: 'k.room' },
+      { k: 'D', name: 'Tape push', st: lit('kuddle.tapeOn'), id: 'kuddle.tapeOn', mod: 'k.tape' }];
     var voice = Math.round(val('drive.voice')), driveOn = on('drive.on');
     return [
-      { k: 'A', name: 'Drive', st: !driveOn ? 'OFF' : voice ? 'DRIVE' : 'EDGE', col: !driveOn ? '#8A847A' : voice ? '#F0997B' : '#5DCAA5', border: !driveOn ? '#262626' : voice ? '#F0997B' : '#5DCAA5' },
-      { k: 'B', name: 'Bitrot', st: lit('bitrot.on'), id: 'bitrot.on' },
-      { k: 'C', name: 'Growl/Cut', st: on('preamp.flip') ? 'FLIPPED' : 'OFF', id: 'preamp.flip' }];
+      { k: 'A', name: 'Drive', st: !driveOn ? 'OFF' : voice ? 'DRIVE' : 'EDGE', col: !driveOn ? '#8A847A' : voice ? '#F0997B' : '#5DCAA5', border: !driveOn ? '#262626' : voice ? '#F0997B' : '#5DCAA5', id: 'drive.on', mod: 'drive' },
+      { k: 'B', name: 'Bitrot', st: lit('bitrot.on'), id: 'bitrot.on', mod: 'bitrot' },
+      { k: 'C', name: 'Growl/Cut', st: on('preamp.flip') ? 'FLIPPED' : 'OFF', id: 'preamp.flip', mod: 'preamp' }];
   }
   function pedalInfo() {
+    if (kud()) {
+      var mv = S.bloomDrag != null ? S.bloomDrag : (S.meter.melt || 0);
+      return { job: 4, name: 'Melt', zones: ['Open', 'Warm', 'Melted'], v: mv, text: Math.round(mv * 100) + '%' };
+    }
     var m = S.meter, job = m.job != null ? m.job : [0, on('wah.on') ? 1 : 2, 3][S.bank];
     var zones = job === 0 ? BANKS[0].zones : job === 3 ? BANKS[2].zones : ['Heel', '', 'Toe'];
     var v = S.bloomDrag != null ? S.bloomDrag : (m.jobv != null ? m.jobv : job === 3 ? (m.bloom || 0) : 1);
@@ -289,17 +312,21 @@ var KS = (function () {
 
   // ---------------------------------------------------------------- screens
   function playScreen() {
-    var n = songsOnly(), i = S.current, head = headOf(i);
+    var n = songsOnly(), i = S.current, head = headOf(i), K = kud();
     var song = S.songs[head] || 'No songs yet', part = isPart(i) ? S.songs[i] : '';
     var layers = S.meter.drone || 0;
-    var tiles = bankTiles(S.bank).concat([{ k: 'D', name: 'Drone', st: layers ? 'HOLDING' + (layers > 1 ? ' ' + layers : '') : 'READY' }]);
-    var bc = BANKS[S.bank].col, pi = pedalInfo();
+    var tiles = K ? bankTiles(3) : bankTiles(S.bank).concat([{ k: 'D', name: 'Drone', st: layers ? 'HOLDING' : 'READY', mod: 'drone', drone: true }]);
+    var bc = K ? '#F28C28' : BANKS[S.bank].col, offCol = K ? '#8A6A50' : '#8A847A', offBorder = K ? '#4A3426' : '#262626', pi = pedalInfo();
+    // tap a tile for its page; the small button in the corner switches it
     var stomps = tiles.map(function (t) {
       var lit = t.st !== 'OFF' && t.st !== 'READY';
-      var col = t.col || (lit ? (t.k === 'D' ? '#5DCAA5' : bc) : '#8A847A'), border = t.border || (lit ? (t.k === 'D' ? '#5DCAA5' : bc) : '#262626');
-      return '<button type="button" class="stomp" data-stomp="' + t.k + '" style="border-color:' + border + '">' +
+      var hi = t.drone ? '#5DCAA5' : bc;
+      var col = t.col || (lit ? hi : offCol), border = t.border || (lit ? hi : offBorder);
+      var tog = t.drone ? '<button type="button" class="tog' + (lit ? ' lit' : '') + '" data-stomp="D" aria-label="Hold or let go of the drone" style="' + (lit ? 'background:' + hi + ';border-color:' + hi : '') + '">' + (lit ? 'LET GO' : 'HOLD') + '</button>'
+        : '<button type="button" class="tog' + (on(t.id) ? ' lit' : '') + '" data-onoff="' + t.id + '" aria-label="' + esc(t.name) + ' on or off" style="' + (on(t.id) ? 'background:' + bc + ';border-color:' + bc : '') + '">' + (on(t.id) ? 'ON' : 'OFF') + '</button>';
+      return '<div class="stomp" role="button" tabindex="0" data-module="' + t.mod + '" style="border-color:' + border + '">' +
         '<span class="head">' + flip(t.k) + '<span class="nm">' + t.name + '</span></span>' +
-        '<span class="st" style="color:' + col + '">' + t.st + '</span></button>';
+        '<span class="st" style="color:' + col + '">' + t.st + '</span>' + tog + '</div>';
     }).join('');
     var offline = S.link !== 'connected' ? '<div class="card"><span style="font-size:17px;font-weight:700">Looking for Keystone</span>' +
       '<span class="small">Turn on this phone\'s hotspot and switch on the laptop. Keystone joins the hotspot by itself and this screen connects within a few seconds. No internet or mobile data needed.</span>' +
@@ -309,20 +336,21 @@ var KS = (function () {
       '<span class="small">Type the laptop\'s address, not the phone\'s. Your hotspot settings list the laptop under Connected devices, and Keystone writes its address in Documents\\Keystone\\keystone.log.</span></div>' : '';
     var note = Date.now() < S.noteUntil ? '<div class="note"><input id="noteText" maxlength="200" placeholder="Add a note to that Keep (optional)" aria-label="Note for the last Keep"><button type="button" data-act="note">Save</button></div>' : '';
     return '<section class="screen">' +
-      '<div class="top"><div class="brand">' + PEBBLE + '<span class="title">Keystone</span></div>' + pill() + '</div>' +
+      '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to ' + (K ? 'Keystone' : 'Kuddle') + '">' + (K ? PEBBLE_K : PEBBLE) +
+      '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">' + (K ? 'Kuddle' : 'Keystone') + '</span><span class="swap">TAP FOR ' + (K ? 'KEYSTONE' : 'KUDDLE') + '</span></span></button>' + pill() + '</div>' +
       offline +
       '<div class="songbar"><button type="button" class="arrow" data-act="prev" aria-label="Previous song">' + ICON.left + '</button>' +
       '<button type="button" class="song" data-go="setlist" aria-label="Open the setlist">' + flip(n ? two(songNo(i)) : '--', 'blue') +
-      '<span style="display:flex;flex-direction:column;min-width:0"><span class="name">' + esc(song) + (part ? '<span class="partname">, ' + esc(part) + '</span>' : '') + '</span><span class="pos">Song ' + songNo(i) + ' of ' + n +
-      (S.edited ? ', <span class="edited">edited</span>' : '. Hold B for next.') + '</span></span></button>' +
+      '<span style="display:flex;flex-direction:column;min-width:0"><span class="name">' + esc(song) + (part ? '<span class="partname">, ' + esc(part) + '</span>' : '') + '</span><span class="pos">' + (K ? 'Preset ' : 'Song ') + songNo(i) + ' of ' + n +
+      (S.edited ? ', <span class="edited">edited</span>' : '. A+B for next.') + '</span></span></button>' +
       '<button type="button" class="arrow" data-act="next" aria-label="Next song">' + ICON.right + '</button></div>' +
       '<div class="card meter">' + meterSvg() + '<div class="label">Output</div></div>' +
-      bankBar() +
+      (K ? '' : bankBar()) +
       '<div class="stomps">' + stomps + '</div>' + note +
       '<div class="card bloom" id="bloom"><div class="label" style="display:flex;justify-content:space-between"><span id="pedalName">Pedal: ' + pi.name + '</span><span id="bloomPct">' + pi.text + '</span></div>' +
-      '<div class="bar"><div id="bloomBar" style="width:' + (pi.v * 100) + '%;background:' + bc + '"></div></div>' +
+      '<div class="bar"><div id="bloomBar" style="width:' + (pi.v * 100) + '%;background:' + (K ? 'linear-gradient(90deg,#F28C28,#8A3F0A)' : bc) + '"></div></div>' +
       '<div class="zones">' + pi.zones.map(function (z) { return '<span>' + z + '</span>'; }).join('') + '</div>' +
-      '<span class="small">Hold A for the next bank. Changing bank never changes the sound.</span></div>' +
+      '<span class="small">' + (K ? 'Hold A or B for the last or next preset. Hold C: tuner. Hold D: squeeze. Hold C and D: Keep.' : 'Hold A for the next bank. Changing bank never changes the sound.') + '</span></div>' +
       nav('play') + '</section>';
   }
 
@@ -350,7 +378,7 @@ var KS = (function () {
       '<text x="22" y="128" font-size="13" fill="#B9B2A6" text-anchor="middle">-20</text><text x="54" y="44" font-size="13" fill="#B9B2A6" text-anchor="middle">-10</text>' +
       '<text x="155" y="6" font-size="13" fill="#B9B2A6" text-anchor="middle" dominant-baseline="hanging">-5</text><text x="276" y="68" font-size="13" fill="#F0997B" text-anchor="middle">0</text>' +
       '<line id="needle" x1="155" y1="140" x2="' + p.x.toFixed(1) + '" y2="' + p.y.toFixed(1) + '" stroke="#F2EDE4" stroke-width="3" stroke-linecap="round"/>' +
-      '<circle cx="155" cy="140" r="9" fill="#4B57FF"/></svg>';
+      '<circle cx="155" cy="140" r="9" style="fill:var(--blue)"/></svg>';
   }
 
   function tunerView() {
@@ -391,7 +419,7 @@ var KS = (function () {
       '<line x1="70" y1="55" x2="62" y2="47" stroke="#8A847A" stroke-width="2"/><line x1="240" y1="55" x2="248" y2="47" stroke="#8A847A" stroke-width="2"/>' +
       '<text x="30" y="126" font-size="13" fill="#F0997B" text-anchor="middle">Flat</text><text x="280" y="126" font-size="13" fill="#F0997B" text-anchor="middle">Sharp</text>' +
       '<line id="tneedle" x1="155" y1="140" x2="' + p.x.toFixed(1) + '" y2="' + p.y.toFixed(1) + '" stroke="' + (inTune ? '#5DCAA5' : '#F2EDE4') + '" stroke-width="3" stroke-linecap="round"/>' +
-      '<circle cx="155" cy="140" r="9" fill="#4B57FF"/></svg>' +
+      '<circle cx="155" cy="140" r="9" style="fill:var(--blue)"/></svg>' +
       '<div class="cents" id="tcents" style="color:' + (inTune ? '#5DCAA5' : '#F2EDE4') + '">' + (valid ? (cents > 0 ? '+' : '') + Math.round(cents) + ' cents' : '--') + '</div>' +
       '<div class="small" id="tmsg">' + msg + '</div></div>' +
       '<div style="display:flex;flex-direction:column;gap:10px"><div class="label">Tuning</div><div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))">' +
@@ -423,8 +451,10 @@ var KS = (function () {
     if (id === 'footswitches') return { s: 'A to D' };
     if (id === 'output') return { s: on('output.limit') ? 'ON' : 'NO LIMIT' };
     if (id === 'split') return { s: 'ON' };
-    var p = S.params[id + '.on'];
-    return { s: p ? (on(id + '.on') ? 'ON' : 'OFF') : '' };
+    var op = onp(id);
+    if (id === 'k.di' || id === 'k.input' || id === 'k.output') return { s: 'ON' };
+    if (id === 'k.melt') return { s: 'EXP' };
+    return { s: op ? (on(op) ? 'ON' : 'OFF') : '' };
   }
   function summary(m) {
     switch (m.id) {
@@ -450,6 +480,10 @@ var KS = (function () {
   function routedModules() {
     var by = {}; S.modules.forEach(function (m) { by[m.id] = m; });
     var dimFull = Math.round(val('dim.path')) === 1, place = Math.round(val('bitrot.place'));
+    if (kud()) {
+      var kl = [['Kuddle', ['k.input', 'k.mute', 'k.wah', 'k.di', 'k.opto', 'k.tape', 'k.tone', 'k.room']], ['Control', ['k.melt', 'footswitches', 'k.output', 'output']]];
+      return kl.map(function (pg) { return [pg[0], pg[1].filter(function (id) { return by[id]; }).map(function (id) { return by[id]; })]; });
+    }
     var paths = [
       ['Split', ['split']],
       ['Bottom end dry', ['lowcomp']],
@@ -461,14 +495,14 @@ var KS = (function () {
       var list = pg[1].filter(function (id) { return by[id]; }).map(function (id) { seen[id] = 1; return by[id]; });
       if (list.length) out.push([pg[0], list]);
     });
-    var rest = S.modules.filter(function (m) { return !seen[m.id]; });   // anything new still shows
+    var rest = S.modules.filter(function (m) { return !seen[m.id] && m.id.indexOf('k.') !== 0; });   // anything new still shows
     if (rest.length) out[out.length - 1][1] = out[out.length - 1][1].concat(rest);
     return out;
   }
   function toneScreen() {
     var html = routedModules().map(function (pg) {
       return '<section class="group"><h2 class="label">' + esc(pg[0]) + '</h2>' + pg[1].map(function (m) {
-        var st = moduleState(m).s, sw = S.params[m.id + '.on'] && m.id !== 'drone' ? m.id + '.on' : m.id === 'drone' ? 'drone.on' : '';
+        var st = moduleState(m).s, sw = onp(m.id);
         var col = st === 'OFF' || st === 'NO LIMIT' ? '#8A847A' : '#5DCAA5';
         var right = sw ? '<button type="button" class="pill' + (on(sw) ? ' lit' : '') + '" data-onoff="' + sw + '" aria-label="' + esc(m.title) + ' on or off">' + (on(sw) ? 'ON' : 'OFF') + '</button>'
                        : '<span style="color:' + col + '">' + st + '</span>';
@@ -609,8 +643,8 @@ var KS = (function () {
   function moduleScreen() {
     var mod = S.module, m = S.modules.filter(function (x) { return x.id === mod; })[0] || { title: mod };
     var list = paramsOf(mod), extra = '', pre = '';
-    var hasOn = S.params[mod + '.on'];
-    var right = hasOn ? '<label class="onToggle">On<input type="checkbox" data-toggle="' + mod + '.on"' + (on(mod + '.on') ? ' checked' : '') + '></label>' : '<span style="width:44px"></span>';
+    var hasOn = onp(mod);
+    var right = hasOn ? '<label class="onToggle">On<input type="checkbox" data-toggle="' + hasOn + '"' + (on(hasOn) ? ' checked' : '') + '></label>' : '<span style="width:44px"></span>';
 
     if (mod === 'drive') {
       // the voice being edited is the voice playing; its settings show below
@@ -665,7 +699,14 @@ var KS = (function () {
     if (mod === 'delay') {
       pre = '<section class="card"><h2 class="label">Tap tempo</h2><button type="button" class="wide" data-act="tap">Tap</button></section>';
     }
-    if (mod === 'footswitches') {
+    if (mod === 'footswitches' && kud()) {
+      list = [];
+      pre = '<section class="card"><h2 class="label">Kuddle: tap and hold</h2>' + [['A', 'Mute', 'Last preset'], ['B', 'Auto wah', 'Next preset'], ['C', 'Room', 'Tuner'], ['D', 'Tape push', 'Squeeze while held']].map(function (j) {
+        return '<div style="display:flex;align-items:center;gap:12px">' + flip(j[0]).replace('class="flip "', 'class="flip" style="width:36px;height:42px;font-size:22px"') +
+          '<span style="flex:1"><span style="display:block;font-size:16px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span></div>';
+      }).join('') + '<div class="small">A and B together: next preset. Hold C and D: Keep. Learn and pedal calibration are shared with Keystone: switch to Keystone to change them.</div></section>';
+    }
+    else if (mod === 'footswitches') {
       var jobs = [['A', 'Grit: Edge / Drive. Groove: auto filter. Glow: Speckle', 'Next bank'], ['B', 'Grit: Bitrot. Groove: Dimension. Glow: delay', 'Next song or part'],
                   ['C', 'Grit: Growl/Cut flip. Groove: wah. Glow: reverb', 'Tuner'], ['D', 'Drone hold / trail off, in every bank', 'Slap']];
       pre = '<section class="card"><h2 class="label">Banks</h2>' + bankBar() +
@@ -702,8 +743,8 @@ var KS = (function () {
       else if (S.confirmDel === i) inner = '<div class="acts" style="grid-template-columns:2fr 1fr 1fr"><span class="small" style="align-self:center">Delete ' + esc(name) + '?</span><button type="button" class="del" data-act="delYes" data-i="' + i + '">Delete</button><button type="button" data-act="delNo">Keep</button></div>';
       else if (S.openRow === i) inner = '<div class="acts"><button type="button" data-act="rename" data-i="' + i + '">Rename</button><button type="button" data-act="copy" data-i="' + i + '">Copy</button>' +
         '<button type="button" data-act="up" data-i="' + i + '" aria-label="Move up">Up</button><button type="button" data-act="down" data-i="' + i + '" aria-label="Move down">Down</button>' +
-        '<button type="button" data-act="addPart" data-i="' + i + '">Add part</button>' +
-        (i > 0 ? '<button type="button" data-act="part" data-i="' + i + '">' + (pt ? 'Own song' : 'Part of above') + '</button>' : '<span></span>') +
+        (kud() ? '' : '<button type="button" data-act="addPart" data-i="' + i + '">Add part</button>') +
+        (i > 0 && !kud() ? '<button type="button" data-act="part" data-i="' + i + '">' + (pt ? 'Own song' : 'Part of above') + '</button>' : '<span></span>') +
         '<span></span><button type="button" class="del" data-act="del" data-i="' + i + '">Delete</button></div>';
       return '<div class="srow' + (cur ? ' cur' : '') + (pt ? ' part' : '') + '" data-row="' + i + '"><div class="main">' +
         '<button type="button" class="grip" data-grip="' + i + '" aria-label="Drag to reorder">' + ICON.grip + '</button>' +
@@ -712,13 +753,14 @@ var KS = (function () {
         '<button type="button" class="dots" data-menu="' + i + '" aria-label="Song options">' + ICON.dots + '</button></div>' + inner + '</div>';
     }).join('');
     var fullSongs = songsOnly() >= S.maxSongs || S.songs.length >= S.maxEntries;
-    return '<section class="screen" style="gap:14px">' + header('Setlist', { id: 'play', label: 'Play' }, '<span class="small">' + songsOnly() + ' of ' + S.maxSongs + ' songs</span>') +
+    var K = kud();
+    return '<section class="screen" style="gap:14px">' + header(K ? 'Presets' : 'Setlist', { id: 'play', label: 'Play' }, '<span class="small">' + songsOnly() + ' of ' + S.maxSongs + (K ? ' presets' : ' songs') + '</span>') +
       '<div class="group" id="rows">' + rows + '</div>' +
-      '<div class="pair"><button type="button" class="wide" data-act="add"' + (fullSongs ? ' disabled style="opacity:0.4"' : '') + '>Add song</button><button type="button" class="wide blue" data-act="save">Save edits</button></div>' +
+      '<div class="pair"><button type="button" class="wide" data-act="add"' + (fullSongs ? ' disabled style="opacity:0.4"' : '') + '>' + (K ? 'Add preset' : 'Add song') + '</button><button type="button" class="wide blue" data-act="save">Save edits</button></div>' +
       '<div class="small">Save writes your current changes into the loaded song or part. Changing song without saving puts it back as it was.</div>' +
-      (S.confirmBand ? '<div class="acts" style="grid-template-columns:2fr 1fr 1fr"><span class="small" style="align-self:center">Replace this setlist with the band\'s? Keystone keeps a copy of this one.</span><button type="button" class="del" data-act="bandYes">Replace</button><button type="button" data-act="bandNo">Keep</button></div>'
+      (K ? '' : S.confirmBand ? '<div class="acts" style="grid-template-columns:2fr 1fr 1fr"><span class="small" style="align-self:center">Replace this setlist with the band\'s? Keystone keeps a copy of this one.</span><button type="button" class="del" data-act="bandYes">Replace</button><button type="button" data-act="bandNo">Keep</button></div>'
         : '<button type="button" class="wide" data-act="band">Load the band setlist</button>') +
-      '<div class="small">Parts split a song, for a big change in the middle: hold B and everything changes at once, with the delay and reverb tails ringing over and a held drone carrying on. Add part copies the song\'s settings as a starting point.</div>' +
+      (K ? '' : '<div class="small">Parts split a song, for a big change in the middle: hold B and everything changes at once, with the delay and reverb tails ringing over and a held drone carrying on. Add part copies the song\'s settings as a starting point.</div>') +
       nav('play') + '</section>';
   }
 
@@ -739,6 +781,7 @@ var KS = (function () {
       case 'health': html = healthScreen(); break;
       default: html = playScreen();
     }
+    document.body.classList.toggle('kuddle', kud());
     var key = S.screen + (S.module || '');
     var y = window.scrollY;
     app.innerHTML = html;
@@ -818,7 +861,7 @@ var KS = (function () {
   }
 
   document.addEventListener('click', function (e) {
-    var t = e.target.closest('button, input[type=checkbox]');
+    var t = e.target.closest('button, input[type=checkbox], [data-module]');
     if (!t) return;
     var d = t.dataset;
     if (d.go) return go(d.go);
@@ -848,6 +891,7 @@ var KS = (function () {
     var i2 = d.i != null ? +d.i : -1;
     switch (d.act) {
       case 'keep': send({ t: 'keep' }); break;
+      case 'rig': if (send({ t: 'rig', r: kud() ? 0 : 1 })) { S.rig = kud() ? 0 : 1; render(); } break;
       case 'manual': var mi = document.getElementById('manualIp'); if (mi && mi.value.trim()) { S.manualIp = mi.value.trim(); if (window.KeystoneNative && KeystoneNative.connectTo) KeystoneNative.connectTo(S.manualIp); toast('TRYING'); } break;
       case 'prev': if (send({ t: 'songStep', d: -1 }) && S.songs.length) { S.current = Math.max(0, S.current - 1); render(true); } break;
       case 'next': if (send({ t: 'songStep', d: 1 }) && S.songs.length) { S.current = Math.min(S.songs.length - 1, S.current + 1); render(true); } break;
