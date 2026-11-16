@@ -189,6 +189,7 @@ var KS = (function () {
     if (!h.fs.ok) out.push('Footswitches not connected');
     if (h.laptop.recent > 0) out.push(h.laptop.recent + ' dropouts in the last minute');
     if (h.laptop.cpu > 80) out.push('Laptop CPU at ' + h.laptop.cpu + '%');
+    if (S.meter && S.meter.lat > 16) out.push('Round trip ' + S.meter.lat + ' ms: too slow to play through. ' + (Math.round(val('output.mode')) === 2 ? 'Tap ASIO panel on Health and set the buffer to 128' : 'Set the audio buffer lower'));
     if (S.healthAt && Date.now() - S.healthAt > 5000) out.push('Keystone has gone quiet: no news for ' + Math.round((Date.now() - S.healthAt) / 1000) + ' s');
     return out;
   }
@@ -228,6 +229,7 @@ var KS = (function () {
           '<span style="display:flex;flex-direction:column;flex:1;min-width:0"><span style="font-size:17px;font-weight:500">' + esc(r.n) + '</span><span class="small" style="font-size:13px">' + esc(r.d) + '</span></span>' +
           '<span style="font-size:13px;font-weight:700;color:' + col + '">' + (r.st || (r.ok ? 'OK' : 'CHECK')) + '</span></div>';
       }).join('') + '</section>' +
+      (Math.round(val('output.mode')) === 2 ? '<button type="button" class="wide" data-act="asioPanel">ASIO panel (opens on the laptop)</button>' : '') +
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
       '<div class="small">If something goes wrong on stage, a warning strip appears across the top of Play. Tap it to come here.</div>' +
       nav('play') + '</section>';
@@ -405,12 +407,12 @@ var KS = (function () {
   // the modules in the order the sound goes through them, grouped by path
   function routedModules() {
     var by = {}; S.modules.forEach(function (m) { by[m.id] = m; });
-    var dimFull = Math.round(val('dim.path')) === 1, first = on('bitrot.first');
+    var dimFull = Math.round(val('dim.path')) === 1, place = Math.round(val('bitrot.place'));
     var paths = [
       ['Split', ['split']],
       ['Bottom end dry', ['lowcomp']],
       ['Bottom end wet', dimFull ? ['drone'] : ['dim', 'drone']],
-      ['Full sound', (first ? ['bitrot', 'drive'] : ['drive', 'bitrot']).concat(['preamp', 'filter'], dimFull ? ['dim'] : [], ['grains', 'delay', 'reverb'])],
+      ['Full sound', (place === 0 ? ['bitrot', 'drive', 'preamp'] : place === 1 ? ['drive', 'bitrot', 'preamp'] : ['drive', 'preamp', 'bitrot']).concat(['filter'], dimFull ? ['dim'] : [], ['grains', 'delay', 'reverb'])],
       ['Control', ['bloom', 'footswitches', 'output']]];
     var seen = {}, out = [];
     paths.forEach(function (pg) {
@@ -789,6 +791,7 @@ var KS = (function () {
       case 'prev': if (send({ t: 'songStep', d: -1 }) && S.songs.length) { S.current = (S.current + S.songs.length - 1) % S.songs.length; render(true); } break;
       case 'next': if (send({ t: 'songStep', d: 1 }) && S.songs.length) { S.current = (S.current + 1) % S.songs.length; render(true); } break;
       case 'restartAudio': send({ t: 'restartAudio' }); break;
+      case 'asioPanel': send({ t: 'asioPanel' }); break;
       case 'light': setParam('output.quality', Math.round(val('output.quality')) === 2 ? 0 : 2); render(true); break;
       case 'note': var nt = document.getElementById('noteText'); if (nt && nt.value.trim()) send({ t: 'keepNote', text: nt.value.trim() }); S.noteUntil = 0; render(); break;
       case 'sheetClose': S.sel = null; sheetEl.hidden = true; render(true); break;

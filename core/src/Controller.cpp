@@ -112,6 +112,8 @@ void Controller::load()
                 song.values["filter.low"] = 200.0f;
                 song.values["bloom.autocap"] = 0.0f;
             }
+            // setlist version 5: Bitrot's place is a three-way choice, after the preamp by default
+            if (sl.value ("version", 1) < 5) song.values["bitrot.place"] = song.values.count ("bitrot.first") && song.values["bitrot.first"] > 0.5f ? 0.0f : 2.0f;
             // setlist version 4: the drone sits further back
             if (sl.value ("version", 1) < 4 && song.values["drone.level"] > 0.45f) song.values["drone.level"] = 0.4f;
             // setlist version 3: Speckle is the whole Speckle engine (Sparkle is gone and the
@@ -172,7 +174,7 @@ void Controller::load()
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 4;
+    j["version"] = 5;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)
@@ -661,5 +663,6 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     }
     else if (t == "state") reply (stateJson());
     else if (t == "restartAudio") { if (onRestartAudio) onRestartAudio(); queueToast ("RESTARTING AUDIO"); }
+    else if (t == "asioPanel") { if (onAsioPanel) onAsioPanel(); queueToast ("ASIO PANEL ON THE LAPTOP"); }
 }
 } // namespace ks

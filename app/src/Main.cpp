@@ -227,6 +227,7 @@ public:
 
         controller->onLog = [] (const std::string& msg) { Logger::writeToLog (String (msg)); };
         controller->onRestartAudio = [this] { Logger::writeToLog ("Audio: restart asked for"); audio->restart(); };
+        controller->onAsioPanel = [this] { MessageManager::callAsync ([this] { audio->showDriverPanel(); }); };
         link.onMessage = [this] (int client, const String& line)
         {
             try

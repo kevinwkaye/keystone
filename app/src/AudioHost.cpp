@@ -135,6 +135,11 @@ bool AudioHost::tryOpen()
 
         // the size asked for, or the nearest the device offers at or above it
         int best = dev->getCurrentBufferSizeSamples();
+        {
+            String sizes;
+            for (int b : dev->getAvailableBufferSizes()) sizes << b << " ";
+            Logger::writeToLog ("Audio: buffer sizes offered: " + sizes.trim());
+        }
         if (wantBuffer <= 0)
         {
             const int want = (int) std::lround (targetBufferMs() * 0.001 * dev->getCurrentSampleRate());
@@ -337,6 +342,15 @@ void AudioHost::timerCallback()
 
 // Auto: the buffer Keystone has learnt works on this computer (starts at 3 ms); or the
 // size chosen on the phone (Tone, Output, Setup).
+void AudioHost::showDriverPanel()
+{
+    auto* dev = deviceManager.getCurrentAudioDevice();
+    if (dev == nullptr || ! dev->hasControlPanel()) { Logger::writeToLog ("Audio: this driver has no settings panel"); return; }
+    Logger::writeToLog ("Audio: opening the driver's panel");
+    dev->showControlPanel();
+    restart();   // reopen so a new buffer size takes effect
+}
+
 int AudioHost::targetBufferMs() const
 {
     static const double stepMs[4] = { 3.0, 4.0, 6.0, 10.0 };

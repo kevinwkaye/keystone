@@ -33,6 +33,7 @@ public:
     juce::String deviceName() const;
     bool onAudioInterface() const { return onInterface.load(); }
     void restart() { needsReopen.store (true); }
+    void showDriverPanel();   // the ASIO driver's own settings window (message thread)
     // Auto buffer: called when Keystone steps the buffer up after dropouts (0 = 3 ms ... 3 = 10 ms)
     std::function<void (int)> onBufferStepLearnt;
 

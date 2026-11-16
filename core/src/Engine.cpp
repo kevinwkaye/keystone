@@ -56,7 +56,7 @@ struct Engine::Impl
 
     Smoothed lowLevel, highLevel, outLevel, tunerGate, bitrotOn, preOn, filtOn, dimOn;
     Smoothed bloomS;
-    std::vector<float> lowBuf, highBuf, cleanBuf, droneBuf, synthBuf, lowMul;
+    std::vector<float> lowBuf, highBuf, cleanBuf, droneBuf, synthBuf, lowMul, synthG;
     Smoothed bitrotClean;
 
     // tuner: input decimated by 4 into a ring, analysed on the housekeeping thread
@@ -170,6 +170,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.droneBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.synthBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.lowMul.assign ((size_t) d.maxBlock, 1.0f);
+    d.synthG.assign ((size_t) d.maxBlock, 0.0f);
     d.bitrotClean.setTime (0.03f, s); d.bitrotClean.reset (0.5f);
     d.tunerLp1.lowPass (2000, 0.54f, s);
     d.tunerLp2.lowPass (2000, 1.31f, s);
@@ -319,7 +320,8 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.dimOn.set (Vb (v, P::DimOn) ? 1.0f : 0.0f);
         const bool tuning = d.tunerOn.load();
         d.tunerGate.set (tuning && Vb (v, P::TunerMute) ? 0.0f : 1.0f);
-        const bool bitrotFirst = Vb (v, P::BitrotFirst);
+        const int bitrotPlace = Vi (v, P::BitrotPlace);
+        const bool bitrotFirst = bitrotPlace == 0;
         const bool limitOn = Vb (v, P::OutLimit);
         const bool pa = Vi (v, P::OutVoicing) == 1;
 
@@ -355,6 +357,8 @@ void Engine::process (const float* in, float* out, int numSamples)
         // high band; Clean bass sets how much of the clean signal, low band included, stays
         float* lm = d.lowMul.data();
         std::fill (lm, lm + n, 1.0f);
+        float* sg = d.synthG.data();
+        std::fill (sg, sg + n, 0.0f);
         auto runBitrot = [&]()
         {
             const bool active = Vb (v, P::BitrotOn) || d.bitrotOn.current() > 1.0e-4f;
@@ -366,8 +370,10 @@ void Engine::process (const float* in, float* out, int numSamples)
             {
                 const float g = d.bitrotOn.next();
                 const float keep = 1.0f - g * (1.0f - d.bitrotClean.next());
-                hb[i] = hb[i] * keep + sy[i] * g;
                 lm[i] = keep;
+                // after the preamp, the synth joins the full sound later, untouched by the valve
+                if (bitrotPlace == 2) { sg[i] = g; continue; }
+                hb[i] = hb[i] * keep + sy[i] * g;
             }
         };
         if (bitrotFirst) runBitrot();
@@ -381,6 +387,7 @@ void Engine::process (const float* in, float* out, int numSamples)
             float h = hb[i];
             const float pg = d.preOn.next();
             h = d.preamp.process (h, pg);   // always the same latency, on or off
+            if (sg[i] > 0.0f) h = h * lm[i] + d.synthBuf[(size_t) i] * sg[i];
             const float fg = filtHigh ? d.filtOn.next() : 0.0f;
             if (fg > 1.0e-4f) h = h + (d.filter.process (h) - h) * fg;
             const float dg = d.dimOn.next();

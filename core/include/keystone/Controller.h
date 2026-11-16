@@ -19,7 +19,7 @@ class Controller
 public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;
-    static constexpr const char* kVersion = "0.3.1";
+    static constexpr const char* kVersion = "0.3.2";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -53,6 +53,7 @@ public:
     std::function<int()> lastKeepNumber;
     std::function<void (const std::string&)> onLog;
     std::function<void()> onRestartAudio;
+    std::function<void()> onAsioPanel;   // opens the ASIO driver's own settings on the laptop
 
     // songs
     int songCount() const;
