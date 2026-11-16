@@ -69,6 +69,11 @@ nav.nav button.keep { border: 2px solid var(--green); color: var(--green); font-
 .row .t { font-size: 18px; font-weight: 500; display: block; }
 .row .s { font-size: 13px; color: var(--muted); display: block; }
 .row .r { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; }
+.row.routed { padding: 0 8px 0 0; gap: 8px; }
+.row.routed .main { flex: 1; display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 0 6px 0 14px; background: none; border: none; color: inherit; text-align: left; }
+.row.routed > span { font-size: 13px; font-weight: 700; padding: 0 8px; }
+.pill { min-width: 64px; height: 40px; border-radius: 20px; border: 1px solid #3A3A3A; background: #1E1E1E; color: #8A847A; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; }
+.pill.lit { background: #5DCAA5; border-color: #5DCAA5; color: #10231C; }
 
 /* module pages */
 .seg { display: grid; gap: 8px; }

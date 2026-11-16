@@ -54,9 +54,10 @@ struct ParamInfo
     P(CompSlap,       "lowcomp.slap",    "Slap mode",     "lowcomp", "Slap",           Toggle, 0,    1,    0,    "",   "",   None) \
     P(CompSlapAmount, "lowcomp.slapAmt", "Slap squeeze",  "lowcomp", "Slap",           Flip,   0,    1,    0.7f, "%",  "",   None) \
     P(DroneOn,        "drone.on",        "On",            "drone",   "",               Toggle, 0,    1,    1,    "",   "",   None) \
-    P(DroneLevel,     "drone.level",     "Level",         "drone",   "Drone",          Flip,   0,    1,    0.6f, "%",  "",   None) \
+    P(DroneLevel,     "drone.level",     "Level",         "drone",   "Drone",          Flip,   0,    1,    0.4f, "%",  "",   None) \
     P(DroneSustain,   "drone.sustain",   "Sustain",       "drone",   "Drone",          Flip,   0,    1,    1,    "%",  "",   None) \
     P(DroneSwell,     "drone.swell",     "Swell",         "drone",   "Drone",          Flip,   0.05f,4,    1.2f, "s",  "",   Log) \
+    P(DroneRelease,   "drone.release",   "Trail off",     "drone",   "Drone",          Flip,   0.5f, 10,   4,    "s",  "",   Log) \
     P(DroneDuck,      "drone.duck",      "Duck",          "drone",   "Movement",       Flip,   0,    1,    0.6f, "%",  "",   None) \
     P(DroneTone,      "drone.tone",      "Tone",          "drone",   "Movement",       Flip,   100,  2000, 450,  "Hz", "",   Log) \
     P(DroneSend,      "drone.send",      "To reverb",     "drone",   "Movement",       Flip,   0,    1,    0,    "%",  "",   None) \

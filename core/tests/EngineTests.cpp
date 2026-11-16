@@ -204,6 +204,38 @@ static void testDrone()
     }
     for (int s = 0; s < 4; ++s) { d.update (v, 0.25f); d.block (64); }
     CHECK (d.layerCount() == 0, "silence isn't captured as a drone");
+    // one note at a time: a second tap takes over, it never stacks; clearing trails off
+    {
+        Drone h;
+        h.prepare ((float) kSr);
+        Vals w {};
+        for (int i = 0; i < kNumParams; ++i) w[(size_t) i] = paramTable()[i].def;
+        auto a1 = pluck (55.0, 2.0, 0.5, 3.0), a2 = pluck (82.4, 2.0, 0.5, 3.0);
+        a1.insert (a1.end(), a2.begin(), a2.end());
+        const int B = 64;
+        int most = 0;
+        std::vector<float> y;
+        for (size_t i = 0; i + B <= a1.size(); i += B)
+        {
+            h.update (w, 0.25f);
+            if (i == (size_t) (0.6 * kSr) / B * B || i == (size_t) (2.6 * kSr) / B * B) h.requestCapture();
+            h.block (B);
+            h.analyse (0.25f);
+            for (int k = 0; k < B; ++k) h.process (a1[i + (size_t) k]);
+            if (i > (size_t) (3.6 * kSr)) most = std::max (most, h.layerCount());
+        }
+        h.requestClear();
+        double before = 0, after = 0;
+        for (int s2 = 0; s2 < (int) (6 * kSr) / B; ++s2)
+        {
+            h.update (w, 0.25f);
+            h.block (B);
+            h.analyse (0.25f);
+            for (int k = 0; k < B; ++k) { const float o = h.process (0.0f); if (s2 * B < (int) (0.2 * kSr)) before = std::max (before, (double) std::fabs (o)); else if (s2 * B > (int) (5.5 * kSr)) after = std::max (after, (double) std::fabs (o)); }
+        }
+        CHECK (most <= 1, "a second tap replaces the drone, never stacks (%d held)", most);
+        CHECK (before > 1.0e-3 && after < 1.0e-5, "a tap to stop trails off rather than cutting (%.4f, then %.6f)", before, after);
+    }
 }
 
 // The drone sits apart from the expression pedal: the same captured drone at heel and toe,

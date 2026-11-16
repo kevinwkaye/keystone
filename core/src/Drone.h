@@ -1,5 +1,6 @@
 #pragma once
-// Afterglow-style drone from the clean signal: tap to grab a note, tap again to stack.
+// Afterglow-style drone from the clean signal: tap D to hold the note you are playing,
+// tap again to let it trail off.
 // Each layer is rebuilt as a set of sine partials measured from the note (the Afterglow
 // lesson: under a cent of error, pure, steady level), ducks while you play and swells
 // back in the gaps, with a tone control, an octave up and its own deeper dimension.
@@ -85,7 +86,7 @@ public:
         // the drone has its own controls, apart from the expression pedal:
         // footswitch D swells it in, a double tap lets it fade out over the same swell time
         const float level = V (v, P::DroneLevel), sustain = V (v, P::DroneSustain);
-        fadeOutStep = 1.0f / (std::max (0.25f, swellSec) * sr);
+        fadeOutStep = 1.0f / (std::max (0.25f, V (v, P::DroneRelease)) * sr);
         levelS.set (on ? level : 0.0f);
         sustainV = sustain;
         octS.set (Vb (v, P::DroneOctave) ? 1.0f : 0.0f);
@@ -186,7 +187,7 @@ public:
         for (auto& l : layers)
         {
             if (! l.active) continue;
-            ++count;
+            if (! l.fadingOut) ++count;   // held notes; one trailing off does not count
             l.driftPhase += (float) numSamples / sr * 0.07f;
             for (int k = 0; k < l.n; ++k)
             {
@@ -293,12 +294,9 @@ private:
 
     void addLayer (const LayerSpec& s)
     {
-        // at most kLayers held: the oldest fades out (never cut, so no click)
-        int held = 0;
-        Layer* oldest = nullptr;
+        // one note held at a time: a new capture takes over and the old one trails off
         for (auto& l : layers)
-            if (l.active && ! l.fadingOut) { ++held; if (oldest == nullptr || l.born < oldest->born) oldest = &l; }
-        if (held >= kLayers && oldest != nullptr) oldest->fadingOut = true;
+            if (l.active && ! l.fadingOut) l.fadingOut = true;
         Layer* slot = nullptr;
         for (auto& l : layers) if (! l.active) { slot = &l; break; }
         if (slot == nullptr)   // every slot busy: reuse the quietest fading one

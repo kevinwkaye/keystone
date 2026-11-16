@@ -41,6 +41,7 @@ struct Controller::State
     std::vector<std::string> outbox;
     std::string captureFile, spaceFile;
     double lastDTap = -10;
+    bool droneHeld = false;
     bool dTapCaptured = false;
 };
 
@@ -111,6 +112,8 @@ void Controller::load()
                 song.values["filter.low"] = 200.0f;
                 song.values["bloom.autocap"] = 0.0f;
             }
+            // setlist version 4: the drone sits further back
+            if (sl.value ("version", 1) < 4 && song.values["drone.level"] > 0.45f) song.values["drone.level"] = 0.4f;
             // setlist version 3: Speckle is the whole Speckle engine (Sparkle is gone and the
             // effects moved down one), the octave up is off, and the drive has its body back
             if (sl.value ("version", 1) < 3)
@@ -169,7 +172,7 @@ void Controller::load()
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 3;
+    j["version"] = 4;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)
@@ -348,20 +351,23 @@ void Controller::onFootswitch (int sw, int ev)
             case 2: setValue (P::FiltOn, value (P::FiltOn) > 0.5f ? 0.0f : 1.0f); break;
             case 3:
             {
-                // tap to grab, tap again to stack; a quick double tap clears
+                // tap to hold the note you're playing, tap again to let it trail off
                 const double now = std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count();
-                if (now - s->lastDTap < 0.35)
+                // a held drone that has died away on its own (Sustain under full) counts as off
+                if (s->droneHeld && now - s->lastDTap > 2.0 && engine.meters().droneLayers == 0) s->droneHeld = false;
+                if (s->droneHeld)
                 {
                     engine.action (Action::DroneClear);
-                    queueToast ("DRONE CLEARED");
-                    s->lastDTap = -10;
+                    queueToast ("DRONE OFF");
+                    s->droneHeld = false;
                 }
                 else
                 {
                     engine.action (Action::DroneCapture);
                     queueToast ("DRONE");
-                    s->lastDTap = now;
+                    s->droneHeld = true;
                 }
+                s->lastDTap = now;
                 break;
             }
             default: break;

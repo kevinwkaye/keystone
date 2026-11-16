@@ -281,7 +281,7 @@ var KS = (function () {
       '<div class="stomps">' + stomps + '</div>' + note +
       '<div class="card bloom" id="bloom"><div class="label" style="display:flex;justify-content:space-between"><span>Bloom</span><span id="bloomPct">Expression ' + Math.round(bl * 100) + '%</span></div>' +
       '<div class="bar"><div id="bloomBar" style="width:' + (bl * 100) + '%"></div></div>' +
-      '<div class="zones"><span>Drone</span><span>Grains</span><span>Wash</span></div></div>' +
+      '<div class="zones"><span>Speckle</span><span>Wash</span></div></div>' +
       nav('play') + '</section>';
   }
 
@@ -402,15 +402,33 @@ var KS = (function () {
     return m.summary;
   }
 
+  // the modules in the order the sound goes through them, grouped by path
+  function routedModules() {
+    var by = {}; S.modules.forEach(function (m) { by[m.id] = m; });
+    var dimFull = Math.round(val('dim.path')) === 1, first = on('bitrot.first');
+    var paths = [
+      ['Split', ['split']],
+      ['Bottom end dry', ['lowcomp']],
+      ['Bottom end wet', dimFull ? ['drone'] : ['dim', 'drone']],
+      ['Full sound', (first ? ['bitrot', 'drive'] : ['drive', 'bitrot']).concat(['preamp', 'filter'], dimFull ? ['dim'] : [], ['grains', 'delay', 'reverb'])],
+      ['Control', ['bloom', 'footswitches', 'output']]];
+    var seen = {}, out = [];
+    paths.forEach(function (pg) {
+      var list = pg[1].filter(function (id) { return by[id]; }).map(function (id) { seen[id] = 1; return by[id]; });
+      if (list.length) out.push([pg[0], list]);
+    });
+    var rest = S.modules.filter(function (m) { return !seen[m.id]; });   // anything new still shows
+    if (rest.length) out[out.length - 1][1] = out[out.length - 1][1].concat(rest);
+    return out;
+  }
   function toneScreen() {
-    var groups = {}, order = [];
-    S.modules.forEach(function (m) { if (!groups[m.group]) { groups[m.group] = []; order.push(m.group); } groups[m.group].push(m); });
-    var html = order.map(function (g) {
-      return '<section class="group"><h2 class="label">' + esc(g) + '</h2>' + groups[g].map(function (m) {
-        var st = moduleState(m).s;
+    var html = routedModules().map(function (pg) {
+      return '<section class="group"><h2 class="label">' + esc(pg[0]) + '</h2>' + pg[1].map(function (m) {
+        var st = moduleState(m).s, sw = S.params[m.id + '.on'] && m.id !== 'drone' ? m.id + '.on' : m.id === 'drone' ? 'drone.on' : '';
         var col = st === 'OFF' || st === 'NO LIMIT' ? '#8A847A' : '#5DCAA5';
-        return '<button type="button" class="row" data-module="' + m.id + '"><span><span class="t">' + esc(m.title) + '</span><span class="s">' + esc(summary(m)) + '</span></span>' +
-          '<span class="r"><span style="color:' + col + '">' + st + '</span>' + ICON.chev + '</span></button>';
+        var right = sw ? '<button type="button" class="pill' + (on(sw) ? ' lit' : '') + '" data-onoff="' + sw + '" aria-label="' + esc(m.title) + ' on or off">' + (on(sw) ? 'ON' : 'OFF') + '</button>'
+                       : '<span style="color:' + col + '">' + st + '</span>';
+        return '<div class="row routed"><button type="button" class="main" data-module="' + m.id + '"><span><span class="t">' + esc(m.title) + '</span><span class="s">' + esc(summary(m)) + '</span></span>' + ICON.chev + '</button>' + right + '</div>';
       }).join('') + '</section>';
     }).join('');
     return '<section class="screen" style="gap:14px"><div class="top"><span class="title">Tone</span><span class="small">Song: ' + esc(S.songs[S.current] || '') + (S.edited ? ' <span class="edited">edited</span>' : '') + '</span></div>' +
@@ -579,17 +597,17 @@ var KS = (function () {
     if (mod === 'bloom') {
       var bl = S.meter.bloom || 0;
       pre = '<section class="card"><h2 class="label">Sweep now</h2><div class="bar"><div id="bloomBar" style="width:' + bl * 100 + '%"></div></div>' +
-        '<div class="zones"><span>Grains</span><span>Wash</span></div><span class="small">Heel to halfway: grains join. Halfway to toe: delay and reverb climb towards self-oscillation, held back by the feedback limiter. Grains reach is on the Grains page. The drone is not on the pedal: tap D to swell it in, double tap D to let it fade out, and set its level on the Drone page.</span></section>';
+        '<div class="zones"><span>Speckle</span><span>Wash</span></div><span class="small">The pedal only pushes effects you have switched on. Heel to halfway: Speckle comes further in. Halfway to toe: delay and reverb climb towards self-oscillation, held back by the feedback limiter. The drone is not on the pedal: tap D to hold a note, tap D again to let it trail off.</span></section>';
     }
     if (mod === 'drone') {
       pre = '<section class="card"><h2 class="label">Held notes</h2><div class="pair"><button type="button" class="wide" data-stomp="D">Capture</button><button type="button" class="wide" data-act="droneClear">Clear</button></div>' +
-        '<span class="small">Tap D to grab a note, tap again to stack up to four. Double tap D to clear.</span></section>';
+        '<span class="small">Tap D to hold the note you are playing. Tap D again and it trails off over the Trail off time.</span></section>';
     }
     if (mod === 'delay') {
       pre = '<section class="card"><h2 class="label">Tap tempo</h2><button type="button" class="wide" data-act="tap">Tap</button></section>';
     }
     if (mod === 'footswitches') {
-      var jobs = [['A', 'Edge / Drive', 'Previous song'], ['B', 'Bitrot', 'Next song'], ['C', 'Filter', 'Tuner'], ['D', 'Drone in (double tap: out)', 'Slap']];
+      var jobs = [['A', 'Edge / Drive', 'Previous song'], ['B', 'Bitrot', 'Next song'], ['C', 'Filter', 'Tuner'], ['D', 'Drone hold / trail off', 'Slap']];
       pre = '<section class="card"><h2 class="label">Tap and hold</h2>' + jobs.map(function (j, i) {
         return '<div style="display:flex;align-items:center;gap:12px">' + flip(j[0]).replace('class="flip "', 'class="flip" style="width:36px;height:42px;font-size:22px"') +
           '<span style="flex:1"><span style="display:block;font-size:17px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span>' +
@@ -743,6 +761,7 @@ var KS = (function () {
       }
       return;
     }
+    if (d.onoff) { setParam(d.onoff, on(d.onoff) ? 0 : 1); return render(true); }
     if (d.module) { S.module = d.module; return go('module'); }
     if (d.set) { setParam(d.set, +d.v); return render(true); }
     if (d.toggle) { setParam(d.toggle, t.checked ? 1 : 0); return render(true); }
