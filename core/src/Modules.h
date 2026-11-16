@@ -245,66 +245,6 @@ private:
 };
 
 // ---------------------------------------------------------------------------------------
-// Preamp: an SVT-style growl and a Darkglass-style cut side by side, time-aligned (no
-// oversampling either side), blended with one control. Small signals pass at unity.
-class Preamp
-{
-public:
-    void prepare (float sr_)
-    {
-        sr = sr_;
-        blendS.setTime (0.03f, sr);
-        reset();
-    }
-    void reset()
-    {
-        for (auto* b : { &gPeak, &gDip, &gLp, &cHp, &cPeak, &cLp, &detail }) b->reset();
-        gSat.reset(); cSat.reset(); blendS.reset (0.7f);
-    }
-    void update (const Vals& v)
-    {
-        const float gf = V (v, P::PreGrowlFreq), g = V (v, P::PreGrowl), mf = V (v, P::PreMidFreq), m = V (v, P::PreMid);
-        const float d = V (v, P::PreDrive), det = V (v, P::PreDetail);
-        if (gf != lgf || g != lg) { gPeak.peak (gf, 0.8f, 9.0f * g, sr); lgf = gf; lg = g; }
-        if (mf != lmf || m != lm) { cPeak.peak (mf, 1.1f, 10.0f * m, sr); lmf = mf; lm = m; }
-        if (det != ldet) { detail.peak (3000.0f, 0.7f, det, sr); ldet = det; }
-        if (! init)
-        {
-            gDip.peak (400.0f, 1.0f, -3.0f, sr);   // keep out of the guitars' 250 to 500 Hz
-            gLp.lowPass (4500.0f, 0.707f, sr);
-            cHp.highPass (140.0f, 0.707f, sr);
-            cLp.lowPass (7000.0f, 0.707f, sr);
-            init = true;
-        }
-        gDrive = dbToGain (2.0f + 16.0f * d);
-        cDrive = dbToGain (6.0f + 22.0f * d);
-        blendS.set (V (v, P::PreBlend));
-        level = dbToGain (V (v, P::PreLevel));
-    }
-    float process (float x)
-    {
-        // growl
-        float g = gPeak.process (x);
-        g = gSat.process (g * gDrive + 0.08f) - 0.0798f;
-        g = gLp.process (gDip.process (g / gDrive * 1.12f));
-        // cut
-        float c = cPeak.process (cHp.process (x));
-        c = cSat.process (c * cDrive) / cDrive * 1.25f;
-        c = cLp.process (c);
-        const float b = blendS.next();
-        return detail.process ((1.0f - b) * g + b * c) * level;
-    }
-
-private:
-    float sr = 48000, gDrive = 1, cDrive = 1, level = 1;
-    float lgf = -1, lg = -1, lmf = -1, lm = -1, ldet = -99;
-    bool init = false;
-    Biquad gPeak, gDip, gLp, cHp, cPeak, cLp, detail;
-    AdaaTanh gSat, cSat;
-    Smoothed blendS;
-};
-
-// ---------------------------------------------------------------------------------------
 // Envelope filter, from Quack's engine: the sweep follows each note against the playing
 // level learnt from note peaks, glides through two one-pole stages, held 45 ms for bass.
 class EnvFilter

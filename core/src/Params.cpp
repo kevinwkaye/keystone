@@ -57,7 +57,7 @@ const ModuleInfo* moduleTable (int& count)
         { "drone", "Drone", "Bottom wet", "Capture, duck, octave, dimension" },
         { "drive", "Drive", "Full sound", "Edge and Drive voices" },
         { "bitrot", "Bitrot", "Full sound", "Tracking synth: square, sub, oscillator" },
-        { "preamp", "Preamp", "Full sound", "Growl to Cut, mid focus" },
+        { "preamp", "Preamp", "Full sound", "Valve, tone stack, Cut and tape" },
         { "filter", "Filter", "Full sound", "Envelope or manual" },
         { "dim", "Dimension", "Bottom wet", "Mono safe chorus" },
         { "grains", "Speckle", "Full sound", "Eleven effects, filter, mod and space" },

@@ -108,12 +108,19 @@ struct ParamInfo
     P(BitrotGate,     "bitrot.gate",     "Sensitivity",   "bitrot",  "Tracking",       Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(BitrotFirst,    "bitrot.first",    "Before drive",  "bitrot",  "Order",          Toggle, 0,    1,    0,    "",   "",   None) \
     P(PreOn,          "preamp.on",       "On",            "preamp",  "",               Toggle, 0,    1,    1,    "",   "",   None) \
-    P(PreBlend,       "preamp.blend",    "Blend",         "preamp",  "Blend",          Slider, 0,    1,    0.7f, "%",  "Growl|Cut", None) \
-    P(PreGrowlFreq,   "preamp.growlFreq","Growl centre",  "preamp",  "Growl",          Flip,   150,  250,  200,  "Hz", "",   None) \
-    P(PreGrowl,       "preamp.growl",    "Growl",         "preamp",  "Growl",          Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(PreMidFreq,     "preamp.midFreq",  "Mid focus",     "preamp",  "Cut",            Flip,   700,  1500, 1000, "Hz", "",   Log) \
-    P(PreMid,         "preamp.mid",      "Mid push",      "preamp",  "Cut",            Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(PreDrive,       "preamp.drive",    "Drive",         "preamp",  "Output",         Flip,   0,    1,    0.25f,"%",  "",   None) \
+    P(PreGain,        "preamp.gain",     "Gain",          "preamp",  "Valve",          Flip,   0,    1,    0.35f,"%",  "",   None) \
+    P(PreSag,         "preamp.sag",      "Sag",           "preamp",  "Valve",          Flip,   0,    1,    0.4f, "%",  "",   None) \
+    P(PreBass,        "preamp.bass",     "Bass",          "preamp",  "Tone stack",     Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(PreMiddle,      "preamp.middle",   "Middle",        "preamp",  "Tone stack",     Flip,   0,    1,    0.6f, "%",  "",   None) \
+    P(PreTreble,      "preamp.treble",   "Treble",        "preamp",  "Tone stack",     Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(PreUltraLo,     "preamp.ultraLo",  "Ultra Lo",      "preamp",  "Tone stack",     Toggle, 0,    1,    0,    "",   "",   None) \
+    P(PreUltraHi,     "preamp.ultraHi",  "Ultra Hi",      "preamp",  "Tone stack",     Toggle, 0,    1,    0,    "",   "",   None) \
+    P(PreBlend,       "preamp.blend",    "Blend",         "preamp",  "Modern",         Slider, 0,    1,    0.3f, "%",  "Valve|Cut", None) \
+    P(PreMidFreq,     "preamp.midFreq",  "Mid focus",     "preamp",  "Modern",         Flip,   700,  1500, 1000, "Hz", "",   Log) \
+    P(PreMid,         "preamp.mid",      "Mid push",      "preamp",  "Modern",         Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(PreDrive,       "preamp.drive",    "Grit",          "preamp",  "Modern",         Flip,   0,    1,    0.25f,"%",  "",   None) \
+    P(PreTape,        "preamp.tape",     "Tape",          "preamp",  "Tape",           Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(PreWow,         "preamp.wow",      "Wow",           "preamp",  "Tape",           Flip,   0,    1,    0.15f,"%",  "",   None) \
     P(PreDetail,      "preamp.detail",   "Detail",        "preamp",  "Output",         Flip,   0,    6,    2,    "dB", "",   None) \
     P(PreLevel,       "preamp.level",    "Level",         "preamp",  "Output",         Flip,   -12,  12,   0,    "dB", "",   None) \
     P(FiltOn,         "filter.on",       "On",            "filter",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
@@ -217,6 +224,7 @@ struct ParamInfo
     P(BloomWash,      "bloom.wash",      "Wash reach",    "bloom",   "Reach",          Flip,   0,    1,    0.9f, "%",  "",   None) \
     P(BloomTails,     "bloom.tails",     "Heel back",     "bloom",   "Behaviour",      Choice, 0,    1,    1,    "",   "Cut tails|Let tails ring", None) \
     P(BloomAutoCap,   "bloom.autocap",   "Capture drone on swell", "bloom", "Behaviour", Toggle, 0,  1,    0,    "",   "",   Hidden) \
+    P(OutIron,        "output.iron",     "Iron",          "output",  "Output",         Flip,   0,    1,    0.3f, "%",  "",   None) \
     P(OutLevel,       "output.level",    "Level",         "output",  "Output",         Flip,   -24,  12,   0,    "dB", "",   None) \
     P(OutLimit,       "output.limit",    "Limiter",       "output",  "Output",         Toggle, 0,    1,    1,    "",   "",   None) \
     P(OutVoicing,     "output.voicing",  "Into",          "output",  "Output",         Choice, 0,    1,    0,    "",   "Amp|PA", None) \

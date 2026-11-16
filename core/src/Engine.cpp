@@ -7,6 +7,7 @@
 #include "Drive.h"
 #include "Drone.h"
 #include "Grains.h"
+#include "Valve.h"
 #include "Modules.h"
 
 #include <chrono>
@@ -41,6 +42,7 @@ struct Engine::Impl
     CaptureSlot capture;
     Bitrot bitrot;
     Preamp preamp;
+    OutputIron iron;
     EnvFilter filter;
     MonoDimension dim;
     Grains grains;
@@ -109,7 +111,7 @@ bool Engine::namAvailable()
 #endif
 }
 
-int Engine::latencySamples() const { return Drive::kLatency; }
+int Engine::latencySamples() const { return Drive::kLatency + Preamp::kLatency; }
 
 void Engine::prepare (double sampleRate, int maxBlockSize)
 {
@@ -125,12 +127,13 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.lastSubCut = -1;
     d.wetLevel.setTime (0.03f, s); d.wetLevel.reset (1);
     d.fullBuf.assign ((size_t) d.maxBlock, 0.0f);
-    d.lowAlign.prepare (Drive::kLatency + 4);
+    d.lowAlign.prepare (Drive::kLatency + Preamp::kLatency + 4);
     d.low.prepare (s);
     d.drone.prepare (s);
     d.drive.prepare (s, d.maxBlock);
     d.bitrot.prepare (s);
     d.preamp.prepare (s);
+    d.iron.prepare (s);
     d.filter.prepare (s);
     d.dim.prepare (s);
     d.grains.prepare (s);
@@ -297,7 +300,8 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.drive.update (v, bloomOn, bl, subCut, d.haveCapture.load());
         auto* cap = d.capture.take();
         d.bitrot.update (v);
-        d.preamp.update (v);
+        d.preamp.update (v, d.play.level);
+        d.iron.set (V (v, P::OutIron));
         d.filter.update (v);
         d.dim.setMode (Vi (v, P::DimMode));
         d.dim.setMix (V (v, P::DimMix));
@@ -376,7 +380,7 @@ void Engine::process (const float* in, float* out, int numSamples)
         {
             float h = hb[i];
             const float pg = d.preOn.next();
-            if (pg > 1.0e-4f) h = h + (d.preamp.process (h) - h) * pg;
+            h = d.preamp.process (h, pg);   // always the same latency, on or off
             const float fg = filtHigh ? d.filtOn.next() : 0.0f;
             if (fg > 1.0e-4f) h = h + (d.filter.process (h) - h) * fg;
             const float dg = d.dimOn.next();
@@ -395,7 +399,7 @@ void Engine::process (const float* in, float* out, int numSamples)
             // ---- sum, mono out ----
             d.lowAlign.push (d.lowBuf[(size_t) i]);
             // bottom end dry, bottom end wet (Dimension), full sound
-            const float lowA = d.lowAlign.at (Drive::kLatency);
+            const float lowA = d.lowAlign.at (Drive::kLatency + Preamp::kLatency);
             float bottom = lowA * d.lowLevel.next();
             const float wl = d.wetLevel.next();
             if (dimLow && dg > 1.0e-4f) bottom += (d.dim.process (lowA) - lowA) * dg * wl;
@@ -407,6 +411,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                 if (wg > 1.0e-4f) core = core + (d.filter.process (core) - core) * wg;
             }
             float o = core + dr * wl + gr + dl + rv;
+            o = d.iron.process (o);
             o *= d.outLevel.next();
             if (pa) o = d.paLp.process (d.paHp.process (o));
             o *= d.tunerGate.next();

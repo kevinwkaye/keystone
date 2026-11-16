@@ -10,6 +10,7 @@
 
 #include "Analysis.h"
 #include "Drone.h"
+#include "Valve.h"
 
 #include <algorithm>
 #include <chrono>
@@ -112,7 +113,7 @@ static void testCrossover()
     // the full path is the whole bass with only its sub cut, so it overlaps the bottom end a
     // little: within 1.5 dB at the default 50 Hz sub cut and 100 Hz crossover
     CHECK (worst < 1.5, "bottom end and full sound sum near flat, worst %.2f dB (mark 1.5)", worst);
-    CHECK (e.latencySamples() == 15, "engine latency %d samples (%.2f ms at 48 kHz)", e.latencySamples(), e.latencySamples() * 1000.0 / kSr);
+    CHECK (e.latencySamples() == 30, "engine latency %d samples (%.2f ms at 48 kHz)", e.latencySamples(), e.latencySamples() * 1000.0 / kSr);
     report += "- Crossover sum: flat within " + std::to_string (worst).substr (0, 4) + " dB from 40 Hz to 4 kHz\n";
 }
 
@@ -715,6 +716,45 @@ static void testGrainEffects()
 }
 
 // ---------------------------------------------------------------------------------------
+static void testValvePreamp()
+{
+    std::printf ("Valve preamp\n");
+    Vals v {};
+    for (int i = 0; i < kNumParams; ++i) v[(size_t) i] = paramTable()[i].def;
+    v[(size_t) P::PreBlend] = 0; v[(size_t) P::PreTape] = 0; v[(size_t) P::PreWow] = 0;
+    auto run = [&] (float g, double f, double amp)
+    {
+        Preamp p;
+        p.prepare ((float) kSr);
+        v[(size_t) P::PreGain] = g;
+        std::vector<float> y;
+        for (int i = 0; i < (int) (8.0 * kSr); ++i)   // gain staging settles over a few seconds
+        {
+            if (i % 64 == 0) p.update (v, (float) amp);
+            y.push_back (p.process ((float) (amp * std::sin (2 * M_PI * f * i / kSr)), 1.0f));
+        }
+        return y;
+    };
+    double lo = 99, hi = -99;
+    for (float g : { 0.0f, 0.35f, 0.7f, 1.0f })
+        for (double amp : { 0.02, 0.2 })
+        {
+            auto y = run (g, 82.4, amp);
+            const size_t a = (size_t) (7 * kSr), n = (size_t) kSr;
+            const double l = 20 * std::log10 (toneAt (y, a, n, 82.4) / amp);
+            lo = std::min (lo, l); hi = std::max (hi, l);
+            if (getenv ("KS_DEBUG")) std::printf ("      gain %.2f amp %.2f: %.1f dB\n", g, amp, l);
+        }
+    CHECK (lo > -2 && hi < 2, "Gain changes the tone, not the volume: fundamental %.1f to %.1f dB, quiet or loud input (mark 2 dB)", lo, hi);
+    auto y = run (0.35f, 82.4, 0.02);
+    const size_t a = (size_t) (7 * kSr), n = (size_t) kSr;
+    const double h1 = toneAt (y, a, n, 82.4), h2 = toneAt (y, a, n, 164.8), h3 = toneAt (y, a, n, 247.2);
+    CHECK (h2 > 2 * h3 && h2 / h1 > 0.05, "warm at the default: 2nd harmonic %.1f dB, 3rd %.1f dB", 20 * std::log10 (h2 / h1), 20 * std::log10 (h3 / h1 + 1e-12));
+    auto clean = run (0.0f, 82.4, 0.2);
+    const double c1 = toneAt (clean, a, n, 82.4), c2 = toneAt (clean, a, n, 164.8);
+    CHECK (c2 / c1 < 0.06, "Gain at zero is close to clean: 2nd harmonic %.1f dB (mark -24)", 20 * std::log10 (c2 / c1));
+}
+
 static void testOffMeansOff()
 {
     std::printf ("Effects that are off stay silent, pedal or not\n");
@@ -1068,6 +1108,7 @@ int main (int argc, char** argv)
         testDelayLimits();
         testBitrotSynth();
     testOffMeansOff();
+    testValvePreamp();
     testGrainEffects();
         testReverbTypes();
         testReverbEdges();

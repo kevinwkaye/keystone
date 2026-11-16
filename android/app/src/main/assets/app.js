@@ -397,7 +397,7 @@ var KS = (function () {
       case 'grains': return fmt('grains.effect') + ' ' + fmt('grains.variant') + ', ' + fmt('grains.subdiv') + (Math.round(val('grains.pitch')) ? ', ' + fmt('grains.pitch') + ' up' : '');
       case 'delay': return fmt('delay.type') + ', ' + (Math.round(val('delay.sync')) ? fmt('delay.sync') : fmt('delay.time')) + ', ' + fmt('delay.feedback') + ' repeats';
       case 'reverb': return fmt('reverb.type') + (Math.round(val('reverb.type')) === 11 ? (S.space ? ', ' + S.space : ', no space loaded') : Math.round(val('reverb.type')) === 10 ? ', ' + fmt('reverb.length') : ', ' + fmt('reverb.decay'));
-      case 'preamp': return 'Blend ' + Math.round(val('preamp.blend') * 100) + '% Cut, mid ' + fmt('preamp.midFreq');
+      case 'preamp': return 'Valve gain ' + Math.round(val('preamp.gain') * 100) + '%, ' + Math.round(val('preamp.blend') * 100) + '% Cut' + (val('preamp.tape') > 0.01 ? ', tape' : '');
     }
     return m.summary;
   }
@@ -512,6 +512,15 @@ var KS = (function () {
     if (id === 'grains.subdiv') return 'Steps of the delay time, so tap tempo sets Speckle too.';
     if (id === 'grains.filter') return 'Fully up is open. Down darkens the effect, and right down mutes it.';
     if (id === 'grains.space') return 'A dotted echo and a reverb on the effect only. Fully up is all space.';
+    if (id === 'preamp.gain') return 'Two valve stages. Low is warm and clean, the middle thickens as you dig in, the top growls. The level stays put.';
+    if (id === 'preamp.sag') return 'How much the valve gives under a hard note: more sag compresses and fattens your attack.';
+    if (id === 'preamp.bass') return 'A real passive tone stack: the three knobs interact like an amp, so the middle shapes how the bass and treble sit.';
+    if (id === 'preamp.ultraLo') return 'Deeper lows and a scooped middle, for big open notes.';
+    if (id === 'preamp.ultraHi') return 'Extra top end, for slap and clank.';
+    if (id === 'preamp.blend') return 'Valve is warm and round. Cut is the tight, modern voice that keeps you clear in a busy mix. Blend the two.';
+    if (id === 'preamp.tape') return 'Tape saturation with its head bump and soft top: rounder attacks and a fuller low end.';
+    if (id === 'preamp.wow') return 'The slight drift of a tape machine. Keep it low: felt, not heard.';
+    if (id === 'output.iron') return 'An output transformer on everything, bottom end included: thicker lows and softer peaks.';
     if (id === 'split.subCut') return 'The full sound path is your whole bass with just the sub cut, so drive, Speckle and the spaces have body without mud.';
     if (id === 'split.lowLevel') return 'Bottom end dry: the clean low band under everything, below the crossover.';
     if (id === 'split.wetLevel') return 'Bottom end wet: how much of the Dimension chorus and the drone join the bottom end.';
