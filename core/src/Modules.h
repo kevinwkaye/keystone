@@ -192,8 +192,14 @@ private:
 class Bitrot
 {
 public:
-    void prepare (float sr_) { sr = sr_; mixS.setTime (0.02f, sr); reset(); }
-    void reset() { fuzz.reset(); toneLp.reset(); dc.prepare (sr); dc.reset(); hold = 0; held = 0; mixS.reset (0); }
+    void prepare (float sr_)
+    {
+        sr = sr_;
+        mixS.setTime (0.02f, sr);
+        levelEnv.set (0.01f, 1.5f, sr);
+        reset();
+    }
+    void reset() { fuzz.reset(); toneLp.reset(); dc.prepare (sr); dc.reset(); hold = 0; held = 0; mixS.reset (0); levelEnv.reset(); }
     void update (const Vals& v)
     {
         gain = dbToGain (6.0f + 34.0f * V (v, P::BitrotFuzz));
@@ -207,10 +213,16 @@ public:
     }
     float process (float x)
     {
-        float y = fuzz.process (x * gain + 0.15f) - 0.1489f;   // tanh(0.15): asymmetric, DC removed
+        // play softly or hard, the fuzz hits the same: the input is brought up to a
+        // working level first (up to +26 dB), so Fuzz sets the character, not your touch
+        const float lv = levelEnv.process (x);
+        const float norm = clampf (0.2f / std::max (lv, 1.0e-4f), 1.0f, 20.0f);
+        float y = fuzz.process (x * norm * gain + 0.15f) - 0.1489f;   // tanh(0.15): asymmetric, DC removed
         y = dc.process (y);
         if (++hold >= holdN) { hold = 0; held = std::round (y * q) / q; }
-        y = toneLp.lp (held) * 0.32f;
+        // and the fuzz comes out at about the level you went in, so switching it on
+        // doesn't jump in volume
+        y = toneLp.lp (held) * lv * 0.8f;
         const float m = mixS.next();
         return (x * (1.0f - m) + y * m) * level;
     }
@@ -223,6 +235,7 @@ private:
     OnePole toneLp;
     DcBlock dc;
     Smoothed mixS;
+    Follower levelEnv;
 };
 
 // ---------------------------------------------------------------------------------------
@@ -298,6 +311,9 @@ public:
         glideA = glideB = std::log (600.0f);
         glide = onePoleCoef (0.012f, sr);
         mixS.setTime (0.02f, sr);
+        envAtt = onePoleCoef (0.002f, sr);
+        envRel = onePoleCoef (0.6f, sr);
+        makeupGlide = 1.0f - onePoleCoef (0.25f, sr);
         reset();
     }
     void reset() { svf.reset(); det.reset(); env = 0; mixS.reset (1); counter = 0; }
@@ -332,7 +348,15 @@ public:
         if ((counter++ & 7) == 0) svf.set (std::exp (glideB), 0.15f + 0.8f * res, sr);
         float l, b;
         svf.process (x, l, b);
-        const float wet = bandPass ? b * (1.0f + 1.5f * res) : l;
+        float wet = bandPass ? b * (1.0f + 1.5f * res) : l;
+        // a band-pass drops the fundamental, so bring the wet back to the level you played
+        const float ax = std::fabs (x), aw = std::fabs (wet);
+        inEnv = ax > inEnv ? ax + (inEnv - ax) * envAtt : ax + (inEnv - ax) * envRel;
+        wetEnv = aw > wetEnv ? aw + (wetEnv - aw) * envAtt : aw + (wetEnv - aw) * envRel;
+        const float want = inEnv > 1.0e-3f && wetEnv > 1.0e-6f ? clampf (1.0f * inEnv / wetEnv, 1.0f, 4.0f) : 1.0f;
+        makeup += (want - makeup) * makeupGlide;
+        wet *= makeup;
+        wet = std::tanh (wet * 1.5f) / 1.5f;   // resonant peaks rounded off, not spiking the amp
         const float m = mixS.next();
         return x * (1.0f - m) + wet * m;
     }
@@ -346,6 +370,7 @@ private:
     float env = 0, relCoef = 0, glide = 0, glideA = 0, glideB = 0;
     bool manual = false, bandPass = false, down = false;
     float sens = 0.5f, lo = 300, hi = 2200, res = 0.5f, pos = 0.5f;
+    float inEnv = 0, wetEnv = 0, makeup = 2.5f, envAtt = 0.99f, envRel = 0.9999f, makeupGlide = 0.0001f;
     unsigned counter = 0;
     Smoothed mixS;
 };

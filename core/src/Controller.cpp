@@ -102,6 +102,15 @@ void Controller::load()
             if (js.contains ("values") && js["values"].is_object())
                 for (auto it = js["values"].begin(); it != js["values"].end(); ++it)
                     if (it.value().is_number() && song.values.count (it.key())) song.values[it.key()] = it.value().get<float>();
+            // setlist version 2: the envelope filter quacks by default (band-pass, more
+            // resonance, works on the whole bass) and the drone left the pedal
+            if (sl.value ("version", 1) < 2)
+            {
+                song.values["filter.type"] = 1.0f;
+                song.values["filter.q"] = 0.7f;
+                song.values["filter.low"] = 200.0f;
+                song.values["bloom.autocap"] = 0.0f;
+            }
             s->songs.push_back (song);
             if ((int) s->songs.size() >= kMaxSongs) break;
         }
@@ -149,7 +158,7 @@ void Controller::load()
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 1;
+    j["version"] = 2;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)

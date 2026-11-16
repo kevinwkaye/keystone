@@ -63,7 +63,7 @@ const ModuleInfo* moduleTable (int& count)
         { "grains", "Grains", "High band", "Sparkle and eleven grain effects, all up top" },
         { "delay", "Delay", "High band", "Twelve types, tape machine, tap" },
         { "reverb", "Reverb", "High band", "Twelve spaces, shimmer, your own impulses" },
-        { "bloom", "Bloom sweep", "Control", "Zones and reach per song" },
+        { "bloom", "Bloom sweep", "Control", "Grains then wash, per song" },
         { "footswitches", "Footswitches", "Control", "Tap and hold jobs" },
         { "output", "Output", "Control", "Level, limiter, amp or PA" },
     };

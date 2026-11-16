@@ -23,6 +23,7 @@ struct Health
     float expPos = 0;
     double expAgoSec = -1;        // -1 = never moved
     bool expCalibrated = false;
+    bool expReversed = false;
 
     float outDb = -100, limDb = 0;
     float cpu = 0;
@@ -47,7 +48,7 @@ struct Health
         o->setProperty ("audio", obj ({ { "ok", audioOk }, { "text", audioText } }));
         o->setProperty ("in", obj ({ { "db", juce::roundToInt (inDb) }, { "ch", inChannel + 1 }, { "dead", inputDead } }));
         o->setProperty ("fs", obj ({ { "ok", fsOk }, { "text", fsText }, { "ago", fsAgoSec < 0 ? -1 : (int) fsAgoSec }, { "last", fsLast } }));
-        o->setProperty ("exp", obj ({ { "pos", expPos }, { "ago", expAgoSec < 0 ? -1 : (int) expAgoSec }, { "cal", expCalibrated } }));
+        o->setProperty ("exp", obj ({ { "pos", expPos }, { "ago", expAgoSec < 0 ? -1 : (int) expAgoSec }, { "cal", expCalibrated }, { "rev", expReversed } }));
         o->setProperty ("out", obj ({ { "db", juce::roundToInt (outDb) }, { "lim", limDb } }));
         o->setProperty ("laptop", obj ({ { "cpu", juce::roundToInt (cpu * 100) }, { "dropouts", dropouts }, { "recent", dropoutsRecent }, { "light", light } }));
         o->setProperty ("link", obj ({ { "phones", phones }, { "laptop", laptopAddresses } }));

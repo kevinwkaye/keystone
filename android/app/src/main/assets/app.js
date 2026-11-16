@@ -211,7 +211,7 @@ var KS = (function () {
     else {
       rows.push({ n: 'Audio interface', d: h.audio.text, ok: h.audio.ok });
       rows.push({ n: 'Footswitches', d: h.fs.text + (h.fs.ago >= 0 ? ', last press ' + ago(h.fs.ago) + ' (' + h.fs.last + ')' : ''), ok: h.fs.ok });
-      rows.push({ n: 'Expression', d: h.exp.ago < 0 ? 'Not moved yet' : 'Bloom ' + Math.round(h.exp.pos * 100) + '%, moved ' + ago(h.exp.ago) + (h.exp.cal ? '' : ', not calibrated'), ok: h.exp.ago >= 0, st: h.exp.ago < 0 ? 'IDLE' : 'OK' });
+      rows.push({ n: 'Expression', d: h.exp.ago < 0 ? 'Not moved yet' : 'Bloom ' + Math.round(h.exp.pos * 100) + '%, moved ' + ago(h.exp.ago) + (h.exp.cal ? '' : ', not calibrated') + (h.exp.rev ? ', reversed' : ''), ok: h.exp.ago >= 0, st: h.exp.ago < 0 ? 'IDLE' : 'OK' });
       rows.push({ n: 'Output', d: h.out.db + ' dB peak' + (h.out.lim > 0.5 ? ', limiter working ' + h.out.lim.toFixed(1) + ' dB' : ', limiter idle'), ok: true });
       rows.push({ n: 'Laptop', d: 'CPU ' + h.laptop.cpu + '%, ' + (h.laptop.dropouts ? h.laptop.dropouts + ' dropouts, ' + h.laptop.recent + ' in the last minute' : 'no dropouts') + (h.laptop.light ? ', effects light' : '') + ', up ' + Math.round(h.uptime / 60) + ' min', ok: h.laptop.cpu <= 80 && h.laptop.recent === 0 });
       rows.push({ n: 'Phone link', d: (S.linkDetail || '') + (S.rtt != null ? ', ' + S.rtt + ' ms round trip' : ''), ok: true });
@@ -567,7 +567,7 @@ var KS = (function () {
     if (mod === 'bloom') {
       var bl = S.meter.bloom || 0;
       pre = '<section class="card"><h2 class="label">Sweep now</h2><div class="bar"><div id="bloomBar" style="width:' + bl * 100 + '%"></div></div>' +
-        '<div class="zones"><span>Drone</span><span>Grains</span><span>Wash</span></div><span class="small">Heel to a third: the drone swells in and its sustain stretches to infinite. A third to two thirds: grains join. Two thirds to toe: delay and reverb climb towards self-oscillation, held back by the feedback limiter. Grains reach is on the Grains page.</span></section>';
+        '<div class="zones"><span>Grains</span><span>Wash</span></div><span class="small">Heel to halfway: grains join. Halfway to toe: delay and reverb climb towards self-oscillation, held back by the feedback limiter. Grains reach is on the Grains page. The drone is not on the pedal: tap D to swell it in, double tap D to let it fade out, and set its level on the Drone page.</span></section>';
     }
     if (mod === 'drone') {
       pre = '<section class="card"><h2 class="label">Held notes</h2><div class="pair"><button type="button" class="wide" data-stomp="D">Capture</button><button type="button" class="wide" data-act="droneClear">Clear</button></div>' +
@@ -577,14 +577,15 @@ var KS = (function () {
       pre = '<section class="card"><h2 class="label">Tap tempo</h2><button type="button" class="wide" data-act="tap">Tap</button></section>';
     }
     if (mod === 'footswitches') {
-      var jobs = [['A', 'Edge / Drive', 'Previous song'], ['B', 'Bitrot', 'Next song'], ['C', 'Filter', 'Tuner'], ['D', 'Drone capture', 'Slap']];
+      var jobs = [['A', 'Edge / Drive', 'Previous song'], ['B', 'Bitrot', 'Next song'], ['C', 'Filter', 'Tuner'], ['D', 'Drone in (double tap: out)', 'Slap']];
       pre = '<section class="card"><h2 class="label">Tap and hold</h2>' + jobs.map(function (j, i) {
         return '<div style="display:flex;align-items:center;gap:12px">' + flip(j[0]).replace('class="flip "', 'class="flip" style="width:36px;height:42px;font-size:22px"') +
           '<span style="flex:1"><span style="display:block;font-size:17px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span>' +
           '<button type="button" class="wide" style="height:44px;padding:0 14px;font-size:14px" data-learn="' + i + '">Learn</button></div>';
       }).join('') + '<div class="small">Hold C and D together for a second: Keep.</div></section>' +
-        '<section class="card"><h2 class="label">Expression</h2><div class="small">Rock the pedal to heel and press Heel, then to toe and press Toe. This also fixes a pedal that reads backwards.</div>' +
+        '<section class="card"><h2 class="label">Expression</h2><div class="small">Rock the pedal to heel and press Heel, then to toe and press Toe. If heel and toe still work the wrong way round, press Reverse.</div>' +
         '<div class="pair"><button type="button" class="wide" data-cal="0">Heel</button><button type="button" class="wide" data-cal="1">Toe</button></div>' +
+        '<div class="pair"><button type="button" class="wide" data-cal="3">' + (S.health && S.health.exp && S.health.exp.rev ? 'Reversed: on' : 'Reverse') + '</button></div>' +
         '<div class="pair"><button type="button" class="wide" data-learn="4">Learn pedal</button><button type="button" class="wide" data-cal="2">Reset</button></div></section>' +
         '<section class="card"><h2 class="label">Status</h2><span class="small">' + esc(S.footswitch || 'Unknown') + '</span></section>';
     }

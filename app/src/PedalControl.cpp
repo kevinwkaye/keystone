@@ -23,6 +23,7 @@ void PedalSettings::load()
     heel = jlimit (0, 127, xml->getIntAttribute ("heel", heel));
     toe = jlimit (0, 127, xml->getIntAttribute ("toe", toe));
     curve = jlimit (0, 2, xml->getIntAttribute ("curve", curve));
+    reversed = xml->getBoolAttribute ("expReversed", reversed);
     pedalMapChannel = jlimit (0, 16, xml->getIntAttribute ("pedalMapChannel", pedalMapChannel));
     keeperChannel = jlimit (0, 16, xml->getIntAttribute ("keeperChannel", keeperChannel));
     keeperCC = jlimit (-1, 127, xml->getIntAttribute ("keeperCC", keeperCC));
@@ -49,6 +50,7 @@ void PedalSettings::save() const
     xml.setAttribute ("heel", heel);
     xml.setAttribute ("toe", toe);
     xml.setAttribute ("curve", curve);
+    xml.setAttribute ("expReversed", reversed);
     xml.setAttribute ("pedalMapChannel", pedalMapChannel);
     xml.setAttribute ("keeperChannel", keeperChannel);
     xml.setAttribute ("keeperCC", keeperCC);
@@ -70,6 +72,7 @@ float PedalSettings::expressionValue (int cc) const
     const float span = (float) (toe - heel);
     float v = std::abs (span) < 4.0f ? (float) cc / 127.0f : ((float) cc - (float) heel) / span;
     v = jlimit (0.0f, 1.0f, v);
+    if (reversed) v = 1.0f - v;
     if (curve == 1) v = v * v;
     else if (curve == 2) v = std::sqrt (v);
     return v;

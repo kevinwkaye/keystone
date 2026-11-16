@@ -48,6 +48,7 @@ struct Engine::Impl
     Limiter limiter;
     PlayLevel play;
 
+    Biquad bitrotHp1, bitrotHp2;
     Smoothed lowLevel, highLevel, outLevel, tunerGate, bitrotOn, preOn, filtOn, dimOn;
     Smoothed bloomS;
     std::vector<float> lowBuf, highBuf, cleanBuf, droneBuf;
@@ -122,6 +123,8 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.drone.prepare (s);
     d.drive.prepare (s, d.maxBlock);
     d.bitrot.prepare (s);
+    d.bitrotHp1.highPass (90.0f, 0.541f, s);
+    d.bitrotHp2.highPass (90.0f, 1.307f, s);
     d.preamp.prepare (s);
     d.filter.prepare (s);
     d.dim.prepare (s);
@@ -240,18 +243,15 @@ void Engine::process (const float* in, float* out, int numSamples)
         const bool light = q == 2 || (q == 0 && (d.autoLight || lightRequest.load()));
         d.light.store (light);
 
-        // bloom zones: heel to a third, a third to two thirds, two thirds to toe
+        // bloom zones: heel to halfway brings in grains, halfway to toe the wash.
+        // The drone is not on the sweep: footswitch D and the Drone page run it.
         const bool bloomOn = d.bloomActive.load();
         d.bloomS.set (bloomPos.load());
         const float bl = d.bloomS.target;
-        const float z1 = clampf (bl * 3.0f, 0.0f, 1.0f);
-        const float z2 = clampf ((bl - 1.0f / 3.0f) * 3.0f, 0.0f, 1.0f);
-        const float z3 = clampf ((bl - 2.0f / 3.0f) * 3.0f, 0.0f, 1.0f);
+        const float z2 = clampf (bl * 2.0f, 0.0f, 1.0f);
+        const float z3 = clampf ((bl - 0.5f) * 2.0f, 0.0f, 1.0f);
         const bool heelBack = bloomOn && bl < 0.02f;
         const bool cutTails = Vi (v, P::BloomTails) == 0;
-        // auto capture on the swell
-        if (bloomOn && Vb (v, P::BloomAutoCap) && d.lastBloom < 0.04f && bl >= 0.04f && d.drone.layerCount() == 0)
-            d.drone.requestCapture();
         d.lastBloom = bl;
 
         // tap tempo for the delay: time between two taps under 2 s
@@ -272,7 +272,7 @@ void Engine::process (const float* in, float* out, int numSamples)
         const float splitF = V (v, P::SplitFreq);
         d.split.set (splitF, d.sr);
         d.low.update (v);
-        d.drone.update (v, z1, bloomOn, d.play.level);
+        d.drone.update (v, d.play.level);
         d.drone.block (n);
         d.drive.update (v, bloomOn, bl, splitF, d.haveCapture.load());
         auto* cap = d.capture.take();
@@ -328,7 +328,14 @@ void Engine::process (const float* in, float* out, int numSamples)
             for (int i = 0; i < n; ++i)
             {
                 const float g = d.bitrotOn.next();
-                if (g > 1.0e-4f) hb[i] = hb[i] + (d.bitrot.process (hb[i]) - hb[i]) * g;
+                if (g > 1.0e-4f)
+                {
+                    // the fuzz hears the whole note, fundamental included, so it fuzzes
+                    // properly; its lows are then cut so the clean low band stays the bottom
+                    const float full = hb[i] + d.lowBuf[(size_t) i];
+                    const float fz = d.bitrotHp2.process (d.bitrotHp1.process (d.bitrot.process (full)));
+                    hb[i] = hb[i] + (fz - hb[i]) * g;
+                }
             }
         };
         if (bitrotFirst) runBitrot();
@@ -336,12 +343,13 @@ void Engine::process (const float* in, float* out, int numSamples)
         if (! bitrotFirst) runBitrot();
 
         float playLevel = d.play.level;
+        const bool filtHigh = Vi (v, P::FiltRange) == 1;
         for (int i = 0; i < n; ++i)
         {
             float h = hb[i];
             const float pg = d.preOn.next();
             if (pg > 1.0e-4f) h = h + (d.preamp.process (h) - h) * pg;
-            const float fg = d.filtOn.next();
+            const float fg = filtHigh ? d.filtOn.next() : 0.0f;
             if (fg > 1.0e-4f) h = h + (d.filter.process (h) - h) * fg;
             const float dg = d.dimOn.next();
             if (dg > 1.0e-4f) h = h + (d.dim.process (h) - h) * dg;
@@ -358,7 +366,14 @@ void Engine::process (const float* in, float* out, int numSamples)
 
             // ---- sum, mono out ----
             d.lowAlign.push (d.lowBuf[(size_t) i]);
-            float o = d.lowAlign.at (Drive::kLatency) * d.lowLevel.next() + h + dr + gr + dl + rv;
+            float core = d.lowAlign.at (Drive::kLatency) * d.lowLevel.next() + h;
+            if (! filtHigh)
+            {
+                // the envelope filter on the whole bass, so it sweeps the note you play
+                const float wg = d.filtOn.next();
+                if (wg > 1.0e-4f) core = core + (d.filter.process (core) - core) * wg;
+            }
+            float o = core + dr + gr + dl + rv;
             o *= d.outLevel.next();
             if (pa) o = d.paLp.process (d.paHp.process (o));
             o *= d.tunerGate.next();

@@ -38,6 +38,9 @@ public:
         hp1.reset(); hp2.reset(); shelf.reset(); ceil1.reset(); ceil2.reset();
         speckle.prepare (sr);
         mixS.setTime (0.05f, sr);
+        envAtt = onePoleCoef (0.003f, sr);
+        envRel = onePoleCoef (0.8f, sr);
+        makeupGlide = 1.0f - onePoleCoef (1.0f, sr);
         reset();
     }
     void reset()
@@ -128,7 +131,10 @@ public:
                 spIdx = 0;
                 activity += (std::min (1.0f, (float) speckle.grainCount() / 24.0f) - activity) * 0.05f;
             }
-            const float y = ceil2.process (ceil1.process (shelf.process (hp2.process (hp1.process (y0)))));
+            // makeup before the filters, so its movement never adds lows
+            float y = ceil2.process (ceil1.process (shelf.process (hp2.process (hp1.process (y0 * makeupG)))));
+            makeup (source, y / makeupG);
+            y = std::tanh (y);
             spTail = std::max (std::fabs (y), spTail * 0.9999f);
             anyVoice = spTail > 1.0e-5f;
             return y * m;
@@ -154,12 +160,27 @@ public:
         }
         activity += ((float) count / (float) maxVoices - activity) * 0.001f;
         float y = sum * norm;
-        y = ceil2.process (ceil1.process (shelf.process (hp2.process (hp1.process (y)))));
+        y = ceil2.process (ceil1.process (shelf.process (hp2.process (hp1.process (y * makeupG)))));
+        makeup (source, y / makeupG);
+        y = std::tanh (y);
         // feedback back into the buffer, gently limited so cascades never run away
         fbSample = std::tanh (y * feedback * 1.2f) * 0.8f;
         return y * m;
     }
     float activityLevel() const { return activity; }
+
+    // Lifting grains above the band leaves little of a bass note's energy, so the wet is
+    // brought back up towards the level you're playing at (up to +24 dB, never down), and
+    // Mix then means what it says. Only while you play: silence and hiss aren't lifted.
+    float makeup (float in, float wet)
+    {
+        const float a = std::fabs (in), b = std::fabs (wet);
+        inEnv = a > inEnv ? a + (inEnv - a) * envAtt : a + (inEnv - a) * envRel;
+        wetEnv = b > wetEnv ? b + (wetEnv - b) * envAtt : b + (wetEnv - b) * envRel;
+        const float want = inEnv > 2.0e-3f && wetEnv > 1.0e-6f ? clampf (0.7f * inEnv / wetEnv, 1.0f, 16.0f) : 1.0f;
+        makeupG += (want - makeupG) * makeupGlide;
+        return makeupG;
+    }
 
 private:
     struct Voice
@@ -267,6 +288,7 @@ private:
     float scatter = 0.4f, sizeS = 3840, density = 12, densityScale = 1, spray = 0.3f, reverseProb = 0.2f, feedback = 0.25f;
     float norm = 1, fbSample = 0, activity = 0;
     float lastHp = -1, lastBright = -99, lastCeil = -1;
+    float inEnv = 0, wetEnv = 0, makeupG = 1, envAtt = 0.999f, envRel = 0.9999f, makeupGlide = 0.0001f;
     Biquad hp1, hp2, shelf, ceil1, ceil2;
     int effect = 0, spIdx = 0;
     float spIn[SpeckleFx::kBlock] {}, spOut[SpeckleFx::kBlock] {}, spTail = 0;

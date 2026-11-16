@@ -376,7 +376,14 @@ private:
         {
             if (step == 0) { pedals.heel = lastExpRaw.load(); controller->notify ("HEEL SET"); }
             else if (step == 1) { pedals.toe = lastExpRaw.load(); controller->notify ("TOE SET"); }
-            else { pedals.heel = 0; pedals.toe = 127; pedals.resetFootswitches(); pedals.expCC = 11; controller->notify ("PEDALS RESET"); }
+            else if (step == 3)
+            {
+                pedals.reversed = ! pedals.reversed;
+                controller->notify (pedals.reversed ? "PEDAL REVERSED" : "PEDAL NORMAL");
+                // move Bloom straight away if the pedal has been used, so the flip is heard now
+                if (lastExpTime.load() > 0) engine.setBloom (pedals.expressionValue (lastExpRaw.load()));
+            }
+            else { pedals.heel = 0; pedals.toe = 127; pedals.reversed = false; pedals.resetFootswitches(); pedals.expCC = 11; controller->notify ("PEDALS RESET"); }
             pedals.save();
         };
         controller->footswitchStatus = [this] { return midi ? midi->status().toStdString() : std::string(); };
@@ -406,7 +413,8 @@ public:
         h.expPos = m.bloom;
         const double et = lastExpTime.load();
         h.expAgoSec = et < 0 ? -1 : now - et;
-        h.expCalibrated = pedals.heel != 0 || pedals.toe != 127;
+        h.expCalibrated = pedals.heel != 0 || pedals.toe != 127 || pedals.reversed;
+        h.expReversed = pedals.reversed;
         h.outDb = Decibels::gainToDecibels (m.outPeak, -100.0f);
         h.limDb = m.limiterReduction;
         h.cpu = audio ? audio->cpuLoad() : 0.0f;

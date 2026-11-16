@@ -19,7 +19,7 @@ class Controller
 public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;
-    static constexpr const char* kVersion = "0.2.5";
+    static constexpr const char* kVersion = "0.2.6";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -45,7 +45,7 @@ public:
     std::function<void (const std::string& entryJson)> onKeep;      // host writes the Keeper entry
     std::function<void (int number, const std::string& note)> onKeepNote;
     std::function<void (int sw)> onLearnFootswitch;                   // 0..3, or 4 for expression
-    std::function<void (int step)> onCalibrate;                       // 0 heel, 1 toe, 2 reset
+    std::function<void (int step)> onCalibrate;                       // 0 heel, 1 toe, 2 reset, 3 reverse
     std::function<std::string()> footswitchStatus;                   // device status line
     std::function<std::string()> audioStatus;                        // device status line
     std::function<bool()> keeperLiveTag;

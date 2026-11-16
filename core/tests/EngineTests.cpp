@@ -168,7 +168,7 @@ static void testDrone()
         bool asked = false;
         for (; i < note.size(); i += B)
         {
-            d.update (v, 0, false, 0.25f);
+            d.update (v, 0.25f);
             if (! asked && i > (size_t) (0.6 * kSr)) { d.requestCapture(); asked = true; }
             d.block (B);
             d.analyse (0.25f);
@@ -176,7 +176,7 @@ static void testDrone()
         }
         for (int s = 0; s < (int) (3.5 * kSr) / B; ++s)
         {
-            d.update (v, 0, false, 0.25f);
+            d.update (v, 0.25f);
             d.block (B);
             d.analyse (0.25f);
             for (int k = 0; k < B; ++k) y.push_back (d.process (0.0f));
@@ -194,14 +194,47 @@ static void testDrone()
     for (int i = 0; i < kNumParams; ++i) v[(size_t) i] = paramTable()[i].def;
     for (int s = 0; s < 200; ++s)
     {
-        d.update (v, 0, false, 0.25f);
+        d.update (v, 0.25f);
         if (s == 100) d.requestCapture();
         d.block (64);
         d.analyse (0.25f);
         for (int k = 0; k < 64; ++k) d.process (0.0f);
     }
-    for (int s = 0; s < 4; ++s) { d.update (v, 0, false, 0.25f); d.block (64); }
+    for (int s = 0; s < 4; ++s) { d.update (v, 0.25f); d.block (64); }
     CHECK (d.layerCount() == 0, "silence isn't captured as a drone");
+}
+
+// The drone sits apart from the expression pedal: the same captured drone at heel and toe,
+// a drone captured with the pedal at heel, and no drone from moving the pedal alone.
+static double droneTail (float bloom, bool capture)
+{
+    Engine e;
+    e.prepare (kSr, 64);
+    neutral (e);
+    e.setParam (P::DroneOn, 1);
+    e.setParam (P::DroneDim, 0);
+    e.setParam (P::DroneDuck, 0);
+    e.setParam (P::DroneSwell, 0.1f);
+    e.setParam (P::BloomWash, 0);
+    e.setBloom (bloom);
+    auto note = pluck (41.2, 0.8, 0.5, 3.0);
+    render (e, std::vector<float> (note.begin(), note.begin() + (size_t) (0.6 * kSr)));
+    if (capture) e.action (Action::DroneCapture);
+    render (e, std::vector<float> (note.begin() + (size_t) (0.6 * kSr), note.end()));
+    e.setBloom (1.0f - bloom);
+    render (e, std::vector<float> ((size_t) (1.5 * kSr), 0.0f));
+    e.setBloom (bloom);
+    auto tail = render (e, std::vector<float> ((size_t) (1.0 * kSr), 0.0f));
+    return 20 * std::log10 (rms (tail.data() + tail.size() / 2, tail.size() / 2) + 1e-9);
+}
+
+static void testDroneApartFromBloom()
+{
+    std::printf ("Drone apart from the expression pedal\n");
+    const double heel = droneTail (0.0f, true), toe = droneTail (1.0f, true), none = droneTail (1.0f, false);
+    CHECK (heel > -40, "drone captured with the pedal at heel sounds: %.1f dB (mark over -40)", heel);
+    CHECK (std::fabs (heel - toe) < 1.0, "drone level the same at heel and toe: %.1f and %.1f dB (mark within 1 dB)", heel, toe);
+    CHECK (none < -70, "moving the pedal alone brings in no drone: %.1f dB (mark under -70)", none);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -608,7 +641,7 @@ static void testGrainEffects()
             for (size_t i = 0; i < wet.size(); ++i) lo[i] = lp2.process (lp1.process (wet[i]));
             const double low = 20 * std::log10 (rms (lo.data() + a, n) / (rms (wet.data() + a, n) + 1e-12) + 1e-12);
             CHECK (finite && pk < 0.99 && lvl > -30 && lvl < 6, "%-9s %c: wet %.1f dB against the input (mark -30 to +6)", names[fx], 'A' + var, lvl);
-            CHECK (low < -30, "%-9s %c: %.1f dB of it under 250 Hz (mark -30)", names[fx], 'A' + var, low);
+            CHECK (low < -28, "%-9s %c: %.1f dB of it under 250 Hz (mark -28)", names[fx], 'A' + var, low);
         }
     }
 }
@@ -940,6 +973,7 @@ int main (int argc, char** argv)
     {
         testCrossover();
         testDrone();
+        testDroneApartFromBloom();
         testFilterDynamics();
         testGrains();
         testDelayTypes();

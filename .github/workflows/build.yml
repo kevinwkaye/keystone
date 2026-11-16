@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: "0.2.5"
+  VERSION: "0.2.6"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.

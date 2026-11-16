@@ -103,12 +103,13 @@ struct ParamInfo
     P(PreLevel,       "preamp.level",    "Level",         "preamp",  "Output",         Flip,   -12,  12,   0,    "dB", "",   None) \
     P(FiltOn,         "filter.on",       "On",            "filter",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(FiltMode,       "filter.mode",     "Mode",          "filter",  "Mode",           Choice, 0,    1,    0,    "",   "Envelope|Manual", None) \
-    P(FiltType,       "filter.type",     "Shape",         "filter",  "Mode",           Choice, 0,    1,    0,    "",   "Low-pass|Band-pass", None) \
+    P(FiltType,       "filter.type",     "Shape",         "filter",  "Mode",           Choice, 0,    1,    1,    "",   "Low-pass|Band-pass", None) \
     P(FiltDir,        "filter.dir",      "Direction",     "filter",  "Mode",           Choice, 0,    1,    0,    "",   "Up|Down", None) \
+    P(FiltRange,      "filter.range",    "Works on",      "filter",  "Mode",           Choice, 0,    1,    0,    "",   "Whole bass|High band", None) \
     P(FiltSens,       "filter.sens",     "Sensitivity",   "filter",  "Sweep",          Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(FiltLow,        "filter.low",      "From",          "filter",  "Sweep",          Flip,   150,  1000, 300,  "Hz", "",   Log) \
+    P(FiltLow,        "filter.low",      "From",          "filter",  "Sweep",          Flip,   80,   1000, 200,  "Hz", "",   Log) \
     P(FiltHigh,       "filter.high",     "To",            "filter",  "Sweep",          Flip,   800,  5000, 2200, "Hz", "",   Log) \
-    P(FiltQ,          "filter.q",        "Resonance",     "filter",  "Sweep",          Flip,   0,    1,    0.55f,"%",  "",   None) \
+    P(FiltQ,          "filter.q",        "Resonance",     "filter",  "Sweep",          Flip,   0,    1,    0.7f, "%",  "",   None) \
     P(FiltSpeed,      "filter.speed",    "Response",      "filter",  "Sweep",          Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(FiltMix,        "filter.mix",      "Mix",           "filter",  "Sweep",          Flip,   0,    1,    1,    "%",  "",   None) \
     P(FiltPos,        "filter.pos",      "Manual position","filter", "Manual",         Slider, 0,    1,    0.5f, "%",  "Low|High", None) \
@@ -195,10 +196,10 @@ struct ParamInfo
     P(RvLength,       "reverb.length",   "Length",        "reverb",  "Character",      Flip,   50,   800,  300,  "ms", "",   Log) \
     P(RvFreeze,       "reverb.freeze",   "Freeze the tail","reverb", "Freeze",         Toggle, 0,    1,    0,    "",   "",   None) \
     /* ---- Control ---- */ \
-    P(BloomDrone,     "bloom.drone",     "Drone reach",   "bloom",   "Reach",          Flip,   0,    1,    1,    "%",  "",   None) \
+    P(BloomDrone,     "bloom.drone",     "Drone reach",   "bloom",   "Reach",          Flip,   0,    1,    1,    "%",  "",   Hidden) \
     P(BloomWash,      "bloom.wash",      "Wash reach",    "bloom",   "Reach",          Flip,   0,    1,    0.9f, "%",  "",   None) \
     P(BloomTails,     "bloom.tails",     "Heel back",     "bloom",   "Behaviour",      Choice, 0,    1,    1,    "",   "Cut tails|Let tails ring", None) \
-    P(BloomAutoCap,   "bloom.autocap",   "Capture drone on swell", "bloom", "Behaviour", Toggle, 0,  1,    1,    "",   "",   None) \
+    P(BloomAutoCap,   "bloom.autocap",   "Capture drone on swell", "bloom", "Behaviour", Toggle, 0,  1,    0,    "",   "",   Hidden) \
     P(OutLevel,       "output.level",    "Level",         "output",  "Output",         Flip,   -24,  12,   0,    "dB", "",   None) \
     P(OutLimit,       "output.limit",    "Limiter",       "output",  "Output",         Toggle, 0,    1,    1,    "",   "",   None) \
     P(OutVoicing,     "output.voicing",  "Into",          "output",  "Output",         Choice, 0,    1,    0,    "",   "Amp|PA", None) \

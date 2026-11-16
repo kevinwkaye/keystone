@@ -22,6 +22,7 @@ struct PedalSettings
     int fsToggle = 0;            // bit per switch: sends one message per press (latching), so it can only tap
     int expChannel = 16, expCC = 11;
     int heel = 0, toe = 127;     // calibrated ends of the expression pedal; toe may be lower than heel
+    bool reversed = false;       // flips the pedal after calibration, for a pedal that reads backwards
     int curve = 0;               // 0 linear, 1 slow start, 2 fast start
     int pedalMapChannel = 0;     // 0 off, else the channel that speaks the original pedal's own CC map
     int keeperChannel = 0, keeperCC = -1;  // a learned switch just for Keeper; off until learned

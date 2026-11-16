@@ -69,7 +69,7 @@ public:
     bool swelling() const { return isSwelling.load(); }
 
     // ---- audio thread ----
-    void update (const Vals& v, float bloomZone, bool bloomActive, float playLevel)
+    void update (const Vals& v, float playLevel)
     {
         on = Vb (v, P::DroneOn);
         const float tone = V (v, P::DroneTone);
@@ -82,13 +82,10 @@ public:
         swellSec = V (v, P::DroneSwell);
         duck = V (v, P::DroneDuck);
         dbPlay = playLevel;
-        float level = V (v, P::DroneLevel), sustain = V (v, P::DroneSustain);
-        if (bloomActive)
-        {
-            // heel to a third: the drone swells in and its sustain stretches to infinite
-            level *= bloomZone * V (v, P::BloomDrone);
-            sustain = bloomZone;
-        }
+        // the drone has its own controls, apart from the expression pedal:
+        // footswitch D swells it in, a double tap lets it fade out over the same swell time
+        const float level = V (v, P::DroneLevel), sustain = V (v, P::DroneSustain);
+        fadeOutStep = 1.0f / (std::max (0.25f, swellSec) * sr);
         levelS.set (on ? level : 0.0f);
         sustainV = sustain;
         octS.set (Vb (v, P::DroneOctave) ? 1.0f : 0.0f);
