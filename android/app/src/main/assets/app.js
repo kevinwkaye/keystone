@@ -183,7 +183,7 @@ var KS = (function () {
   function warnings() {
     var h = S.health, out = [];
     if (!connected() || !h) return out;
-    if (!h.audio.ok) out.push('Audio interface not running: ' + h.audio.text);
+    if (!h.audio.ok) out.push(/NOT THE AUDIO INTERFACE/.test(h.audio.text) ? 'Not using the UM2: plug it in, Keystone switches over by itself' : 'Audio interface not running: ' + h.audio.text);
     else if (h['in'].dead) out.push('No signal at all from the interface. Check Windows microphone access and the cable.');
     else if (h['in'].db > -1) out.push('Bass input clipping: turn the input gain down');
     if (!h.fs.ok) out.push('Footswitches not connected');

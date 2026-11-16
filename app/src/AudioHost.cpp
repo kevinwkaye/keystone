@@ -65,6 +65,7 @@ bool AudioHost::tryOpen()
         String in, out;
         for (const auto& n : ins) if (in.isEmpty() && nameMatches (n, wantDevice)) in = n;
         for (const auto& n : outs) if (out.isEmpty() && nameMatches (n, wantDevice)) out = n;
+        const bool found = in.isNotEmpty() && out.isNotEmpty();
         if (in.isEmpty() && ins.size() > 0) in = ins[std::max (0, type->getDefaultDeviceIndex (true))];
         if (out.isEmpty() && outs.size() > 0) out = outs[std::max (0, type->getDefaultDeviceIndex (false))];
         if (in.isEmpty() || out.isEmpty()) { lastError = "no input or output device"; continue; }
@@ -115,6 +116,10 @@ bool AudioHost::tryOpen()
             openName = in == out ? in : in + " / " + out;
             lastError.clear();
         }
+        onInterface.store (found);
+        if (! found)
+            Logger::writeToLog ("Audio: the audio interface isn't plugged in, so Keystone is using the laptop's own sound for now."
+                                " It switches over as soon as the interface appears.");
         Logger::writeToLog ("Audio: " + openType + ", " + openName + ", " + String (dev->getCurrentSampleRate()) + " Hz, "
                             + String (dev->getCurrentBufferSizeSamples()) + " samples, round trip about "
                             + String (latency.load(), 1) + " ms");
@@ -220,14 +225,32 @@ void AudioHost::timerCallback()
     if (needsReopen.exchange (false) || deviceManager.getCurrentAudioDevice() == nullptr)
     {
         if (tryOpen()) Logger::writeToLog ("Audio: device open again");
+        return;
     }
+    // running on the laptop's own sound: keep looking for the interface and move to it
+    if (! onInterface.load() && interfacePresent())
+    {
+        Logger::writeToLog ("Audio: the audio interface has appeared, switching to it");
+        if (tryOpen()) Logger::writeToLog ("Audio: now on the audio interface");
+    }
+}
+
+bool AudioHost::interfacePresent()
+{
+    auto* type = deviceManager.getCurrentDeviceTypeObject();
+    if (type == nullptr) return false;
+    type->scanForDevices();
+    bool in = false, out = false;
+    for (const auto& n : type->getDeviceNames (true)) in = in || nameMatches (n, wantDevice);
+    for (const auto& n : type->getDeviceNames (false)) out = out || nameMatches (n, wantDevice);
+    return in && out;
 }
 
 String AudioHost::status() const
 {
     const ScopedLock l (statusLock);
     if (isRunning.load())
-        return openName + ", " + String (currentRate.load() / 1000.0, 1) + " kHz, " + String (currentBuffer.load()) + " samples, "
+        return (onInterface.load() ? String() : String ("NOT THE AUDIO INTERFACE (plug it in): ")) + openName + ", " + String (currentRate.load() / 1000.0, 1) + " kHz, " + String (currentBuffer.load()) + " samples, "
                + String (latency.load(), 1) + " ms" + (openType.contains ("Exclusive") ? ", exclusive" : "");
     return lastError.isNotEmpty() ? "No audio: " + lastError : "Looking for the audio interface";
 }

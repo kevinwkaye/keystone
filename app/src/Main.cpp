@@ -151,6 +151,8 @@ public:
             spaceReadme.replaceWithText ("Drop .wav impulse responses (16, 24 or 32-bit, mono or stereo, any sample rate) in this folder.\r\n"
                                          "Pick one on the phone (Tone, Reverb, type Impulse). Keystone plays the first 2 seconds, folded to mono.\r\n");
         logger = std::make_unique<FileLogger> (home.getChildFile ("keystone.log"), "Keystone " + getApplicationVersion() + " started", 512 * 1024);
+
+        Logger::setCurrentLogger (logger.get());
        #ifdef KEYSTONE_AVX2
         const String build = "AVX2 build";
        #else
@@ -160,7 +162,6 @@ public:
                             + String (SystemStats::getCpuSpeedInMegahertz()) + " MHz, AVX " + (SystemStats::hasAVX() ? "yes" : "no")
                             + ", AVX2 " + (SystemStats::hasAVX2() ? "yes" : "no") + ", FMA " + (SystemStats::hasFMA3() ? "yes" : "no")
                             + ". Keystone " + build + ".");
-        Logger::setCurrentLogger (logger.get());
         SystemStats::setApplicationCrashHandler (crashHandler);
         std::set_terminate ([] { Logger::writeToLog ("TERMINATE: an unhandled error stopped Keystone. Stack:\n" + SystemStats::getStackBacktrace()); std::abort(); });
         watchdog.startThread();
@@ -366,7 +367,7 @@ public:
         h.song = String (controller->songName (controller->currentSong()));
         h.songNumber = controller->currentSong() + 1;
         h.uptimeSec = now - startedAt;
-        h.audioOk = audio && audio->running();
+        h.audioOk = audio && audio->running() && audio->onAudioInterface();
         h.audioText = audio ? audio->status() : String();
         h.inDb = Decibels::gainToDecibels (m.inPeak, -100.0f);
         h.inChannel = audio ? audio->inputChannel() : 1;

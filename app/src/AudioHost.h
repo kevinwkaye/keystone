@@ -30,6 +30,7 @@ public:
     int dropouts() const;                      // the device's own count plus late callbacks
     int inputChannel() const { return chosenChannel.load(); }
     juce::String deviceName() const;
+    bool onAudioInterface() const { return onInterface.load(); }
     void restart() { needsReopen.store (true); }
 
     void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
@@ -41,6 +42,7 @@ public:
 private:
     void timerCallback() override;
     bool tryOpen();
+    bool interfacePresent();
     static bool nameMatches (const juce::String& name, const juce::String& preferred);
 
     ks::Engine& engine;
@@ -51,7 +53,7 @@ private:
     std::vector<float> monoIn, monoOut;
     std::atomic<int> currentBuffer { 0 };
     std::atomic<double> currentRate { 0 }, latency { 0 };
-    std::atomic<bool> isRunning { false }, needsReopen { false };
+    std::atomic<bool> isRunning { false }, needsReopen { false }, onInterface { true };
     // input channel choice (Auto picks the louder input, with hysteresis)
     float chanLevel[2] { 0, 0 };
     int chosen = 1, louderFor = 0;
