@@ -48,7 +48,11 @@ bool AudioHost::tryOpen()
     deviceManager.closeAudioDevice();
 
 #if JUCE_WINDOWS
-    const StringArray typeOrder { "Windows Audio (Exclusive Mode)", "Windows Audio (Low Latency Mode)", "Windows Audio" };
+    // Exclusive talks to the interface directly; Shared goes through Windows' own mixer,
+    // which copes better with some USB interfaces that drop data in exclusive mode
+    const bool shared = (int) std::lround (engine.getParam (ks::P::OutMode)) == 1;
+    const StringArray typeOrder = shared ? StringArray { "Windows Audio (Low Latency Mode)", "Windows Audio", "Windows Audio (Exclusive Mode)" }
+                                         : StringArray { "Windows Audio (Exclusive Mode)", "Windows Audio (Low Latency Mode)", "Windows Audio" };
 #elif JUCE_LINUX
     const StringArray typeOrder { "ALSA", "JACK" };
 #else
@@ -266,23 +270,25 @@ void AudioHost::timerCallback()
                                 + String (late) + " blocks where Keystone ran late (buffer " + String (openedBuffer) + " samples)");
         const int choice = (int) std::lround (engine.getParam (ks::P::OutBuffer));
         const int step = std::clamp ((int) std::lround (engine.getParam (ks::P::OutBufferStep)), 0, 3);
-        if (choice == 0 && late + xr >= 6 && step < 3 && wantBuffer <= 0)
+        // only when Keystone itself ran late: dropouts the interface reports come from its
+        // USB connection, and a bigger buffer only adds delay without curing them
+        if (choice == 0 && late >= 6 && step < 3 && wantBuffer <= 0)
         {
             Logger::writeToLog ("Audio: too many dropouts, moving the buffer up a step");
             if (onBufferStepLearnt) onBufferStepLearnt (step + 1);
-            openedForSetting = String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep));
+            openedForSetting = String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep)) + "/" + String (engine.getParam (ks::P::OutMode));
             if (tryOpen()) Logger::writeToLog ("Audio: device open again");
             return;
         }
     }
     // the buffer setting was changed on the phone
     {
-        const String setting = String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep));
+        const String setting = String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep)) + "/" + String (engine.getParam (ks::P::OutMode));
         if (openedForSetting.isEmpty()) openedForSetting = setting;
         else if (setting != openedForSetting)
         {
             openedForSetting = setting;
-            Logger::writeToLog ("Audio: buffer setting changed");
+            Logger::writeToLog ("Audio: buffer or mode setting changed");
             if (tryOpen()) Logger::writeToLog ("Audio: device open again");
             return;
         }
@@ -295,7 +301,7 @@ void AudioHost::timerCallback()
     }
 }
 
-// Auto: the buffer Keystone has learnt works on this computer (starts at 6 ms); or the
+// Auto: the buffer Keystone has learnt works on this computer (starts at 3 ms); or the
 // size chosen on the phone (Tone, Output, Setup).
 int AudioHost::targetBufferMs() const
 {
