@@ -144,6 +144,12 @@ public:
             readme.replaceWithText ("Drop .nam capture files (NAM A1 or A2) in this folder.\r\n"
                                     "Keystone loads the one you pick on the phone (Tone, Drive, Source), or the first one here.\r\n"
                                     "With no capture, the Drive stage uses its modelled fallback.\r\n");
+        const auto spaces = home.getChildFile ("Spaces");
+        spaces.createDirectory();
+        const auto spaceReadme = spaces.getChildFile ("Put your impulse responses here.txt");
+        if (! spaceReadme.existsAsFile())
+            spaceReadme.replaceWithText ("Drop .wav impulse responses (16, 24 or 32-bit, mono or stereo, any sample rate) in this folder.\r\n"
+                                         "Pick one on the phone (Tone, Reverb, type Impulse). Keystone plays the first 2 seconds, folded to mono.\r\n");
         logger = std::make_unique<FileLogger> (home.getChildFile ("keystone.log"), "Keystone " + getApplicationVersion() + " started", 512 * 1024);
         Logger::setCurrentLogger (logger.get());
         SystemStats::setApplicationCrashHandler (crashHandler);
@@ -242,18 +248,22 @@ public:
     // ---- MIDI, from the MIDI thread ----
     void handleMidi (const MidiMessage& m)
     {
-        if (! m.isController()) return;
-        const int cc = m.getControllerNumber(), val = m.getControllerValue(), ch = m.getChannel();
+        // Footswitches may send controllers or notes; a note counts as controller 128 + note
+        int cc, val;
+        if (m.isController()) { cc = m.getControllerNumber(); val = m.getControllerValue(); }
+        else if (m.isNoteOnOrOff()) { cc = 128 + m.getNoteNumber(); val = m.isNoteOn() ? 127 : 0; }
+        else return;
+        const int ch = m.getChannel();
 
         // Learn: the next controller moved takes the job
         const int learning = learnTarget.load();
-        if (learning >= 0 && (learning == 4 || val >= 64))
+        if (learning >= 0 && ((learning == 4 && cc < 128) || (learning < 4 && val >= 64)))
         {
             learnTarget.store (-1);
             MessageManager::callAsync ([this, learning, ch, cc]
             {
                 if (learning == 4) { pedals.expChannel = ch; pedals.expCC = cc; }
-                else { pedals.fsChannel[(size_t) learning] = ch; pedals.fsCC[(size_t) learning] = cc; }
+                else { pedals.fsChannel[(size_t) learning] = ch; pedals.fsCC[(size_t) learning] = cc; pedals.fsToggle &= ~(1 << learning); }
                 pedals.save();
                 controller->notify ((learning == 4 ? String ("EXPRESSION LEARNT") : String ("FOOTSWITCH ") + String::charToString ((juce_wchar) ('A' + learning)) + " LEARNT").toStdString());
                 flush();
@@ -262,7 +272,7 @@ public:
         }
 
         // Expression: the Bloom sweep, after heel and toe calibration
-        if (cc == pedals.expCC)
+        if (cc == pedals.expCC && cc < 128)
         {
             lastExpRaw.store (val);
             lastExpTime.store (Time::getMillisecondCounterHiRes() * 0.001);
@@ -273,8 +283,20 @@ public:
         for (int sw = 0; sw < 4; ++sw)
         {
             if (cc != pedals.fsCC[(size_t) sw]) continue;
-            const bool down = val >= 64;
             const double now = Time::getMillisecondCounterHiRes() * 0.001;
+            if ((pedals.fsToggle >> sw) & 1)
+            {
+                // a latching switch: every message is one tap
+                MessageManager::callAsync ([this, sw, now]
+                {
+                    lastFsTime = now; lastFsName = String::charToString ((juce_wchar) ('A' + sw)) + " press";
+                    controller->footswitchPress (sw, now);
+                    controller->footswitchRelease (sw, now + 0.05);
+                    flush();
+                });
+                return;
+            }
+            const bool down = val >= 64;
             MessageManager::callAsync ([this, sw, down, now]
             {
                 if (down) { lastFsTime = now; lastFsName = String::charToString ((juce_wchar) ('A' + sw)) + " press"; }

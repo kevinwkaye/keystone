@@ -2,6 +2,7 @@
 
 #include "Ambient.h"
 #include "Delay.h"
+#include "Reverb.h"
 #include "Analysis.h"
 #include "Drive.h"
 #include "Drone.h"
@@ -41,6 +42,8 @@ struct Engine::Impl
     Grains grains;
     Delay delay;
     Reverb reverb;
+    std::mutex spaceLock;
+    std::string spacePath, spaceName;
     Biquad paHp, paLp;
     Limiter limiter;
     PlayLevel play;
@@ -125,6 +128,21 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.grains.prepare (s);
     d.delay.prepare (s);
     d.reverb.prepare (s);
+    {
+        // an impulse built for the old rate: build it again for this one
+        std::string path;
+        { std::lock_guard<std::mutex> l (d.spaceLock); path = d.spacePath; }
+        if (! path.empty())
+        {
+            std::vector<float> h;
+            std::string err;
+            if (readWavMono (path, s, h, err) && d.reverb.convolver().offer (d.reverb.convolver().build (h)))
+            {
+                d.reverb.block();
+                d.reverb.convolver().collect();
+            }
+        }
+    }
     d.paHp.highPass (45, 0.707f, s);
     d.paLp.lowPass (5500, 0.707f, s);
     d.limiter.prepare (s);
@@ -266,6 +284,7 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.grains.update (v, z2, bloomOn, light);
         d.delay.update (v, z3, bloomOn, heelBack, cutTails);
         d.reverb.update (v, z3, bloomOn, heelBack, cutTails, light);
+        d.reverb.block();
         d.lowLevel.set (dbToGain (V (v, P::SplitLowLevel)));
         d.highLevel.set (dbToGain (V (v, P::SplitHighLevel)));
         d.outLevel.set (dbToGain (V (v, P::OutLevel)));
@@ -362,6 +381,7 @@ void Engine::idle()
     auto& d = *impl;
     d.drone.analyse (d.play.level);
     d.capture.collect();
+    d.reverb.convolver().collect();
 
     // tuner, about 20 times a second while it's on
     if (! d.tunerOn.load()) { d.tunerMidi.store (-1); return; }
@@ -451,4 +471,40 @@ std::string Engine::captureName() const
 }
 
 bool Engine::hasCapture() const { return impl->haveCapture.load(); }
+
+bool Engine::loadSpace (const std::string& path, std::string& error)
+{
+    auto& d = *impl;
+    Convolver::Impulse* imp = nullptr;
+    if (! path.empty())
+    {
+        std::vector<float> h;
+        if (! readWavMono (path, d.sr, h, error)) return false;
+        imp = d.reverb.convolver().build (h);
+    }
+    for (int i = 0; i < 300; ++i)
+    {
+        if (d.reverb.convolver().offer (imp))
+        {
+            std::lock_guard<std::mutex> l (d.spaceLock);
+            d.spacePath = path;
+            const auto slash = path.find_last_of ("/\\");
+            std::string name = slash == std::string::npos ? path : path.substr (slash + 1);
+            if (name.size() > 4 && (name.substr (name.size() - 4) == ".wav" || name.substr (name.size() - 4) == ".WAV")) name.resize (name.size() - 4);
+            d.spaceName = name;
+            return true;
+        }
+        d.reverb.convolver().collect();
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+    delete imp;
+    error = "Keystone is busy, try again";
+    return false;
+}
+
+std::string Engine::spaceName() const
+{
+    std::lock_guard<std::mutex> l (impl->spaceLock);
+    return impl->spaceName;
+}
 } // namespace ks

@@ -18,7 +18,7 @@ class Controller
 {
 public:
     static constexpr int kMaxSongs = 15;
-    static constexpr const char* kVersion = "0.2.0";
+    static constexpr const char* kVersion = "0.2.1";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -87,6 +87,9 @@ private:
     void keep();
     std::vector<std::string> listCaptures() const;
     bool useCapture (const std::string& file, std::string& error);
+    std::string spacesDir() const;   // Spaces, next to Captures
+    std::vector<std::string> listSpaces() const;
+    bool useSpace (const std::string& file, std::string& error);
     void setlistOp (const std::string& op, int i, int to, const std::string& name);
 };
 } // namespace ks

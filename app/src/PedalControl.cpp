@@ -15,8 +15,9 @@ void PedalSettings::load()
     for (int i = 0; i < 4; ++i)
     {
         fsChannel[(size_t) i] = jlimit (1, 16, xml->getIntAttribute ("fsChannel" + String (i), fsChannel[(size_t) i]));
-        fsCC[(size_t) i] = jlimit (0, 127, xml->getIntAttribute ("fsCC" + String (i), fsCC[(size_t) i]));
+        fsCC[(size_t) i] = jlimit (0, 255, xml->getIntAttribute ("fsCC" + String (i), fsCC[(size_t) i]));
     }
+    fsToggle = jlimit (0, 15, xml->getIntAttribute ("fsToggle", fsToggle));
     expChannel = jlimit (1, 16, xml->getIntAttribute ("expChannel", expChannel));
     expCC = jlimit (0, 127, xml->getIntAttribute ("expCC", expCC));
     heel = jlimit (0, 127, xml->getIntAttribute ("heel", heel));
@@ -42,6 +43,7 @@ void PedalSettings::save() const
         xml.setAttribute ("fsChannel" + String (i), fsChannel[(size_t) i]);
         xml.setAttribute ("fsCC" + String (i), fsCC[(size_t) i]);
     }
+    xml.setAttribute ("fsToggle", fsToggle);
     xml.setAttribute ("expChannel", expChannel);
     xml.setAttribute ("expCC", expCC);
     xml.setAttribute ("heel", heel);

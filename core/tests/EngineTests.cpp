@@ -416,6 +416,168 @@ static void testDelayLimits()
     CHECK (worstRatio < 2.0, "changing type mid-repeats: worst step %.2f times what the types make anyway (into %s, mark 2)", worstRatio, kDelayNames[worstType]);
 }
 
+// ---------------------------------------------------------------------------------------
+// Reverb: twelve spaces, level matched, bounded, freeze holds, impulses load from .wav
+static const char* kReverbNames[12] = { "Room", "Hall", "Plate", "Spring", "Chamber", "Cloud", "Bloom", "Chorale", "Shimmer", "Magneto", "Nonlinear", "Impulse" };
+
+static std::string writeTestWav (int bits, bool isFloat, int channels, int rate)
+{
+    // a 1.5 s decaying noise burst
+    const int n = (int) (1.5 * rate);
+    std::vector<uint8_t> d;
+    auto put16 = [&] (uint32_t v) { d.push_back ((uint8_t) v); d.push_back ((uint8_t) (v >> 8)); };
+    auto put32 = [&] (uint32_t v) { put16 (v & 0xffff); put16 (v >> 16); };
+    const int bytes = bits / 8;
+    d.insert (d.end(), { 'R', 'I', 'F', 'F' }); put32 (0);
+    d.insert (d.end(), { 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ' }); put32 (16);
+    put16 (isFloat ? 3 : 1); put16 ((uint32_t) channels); put32 ((uint32_t) rate); put32 ((uint32_t) (rate * channels * bytes));
+    put16 ((uint32_t) (channels * bytes)); put16 ((uint32_t) bits);
+    d.insert (d.end(), { 'd', 'a', 't', 'a' }); put32 ((uint32_t) (n * channels * bytes));
+    uint32_t r = 12345;
+    for (int i = 0; i < n; ++i)
+        for (int c = 0; c < channels; ++c)
+        {
+            r = r * 1664525u + 1013904223u;
+            const float v = ((float) (r >> 8) / 16777216.0f * 2 - 1) * std::exp (-4.0f * i / rate) * 0.5f;
+            if (isFloat) { uint32_t u; std::memcpy (&u, &v, 4); put32 (u); }
+            else if (bits == 16) put16 ((uint32_t) (int32_t) (v * 32767));
+            else { const int32_t q = (int32_t) (v * 8388607); d.push_back ((uint8_t) q); d.push_back ((uint8_t) (q >> 8)); d.push_back ((uint8_t) (q >> 16)); }
+        }
+    const uint32_t riff = (uint32_t) d.size() - 8;
+    std::memcpy (d.data() + 4, &riff, 4);
+    const std::string path = (std::filesystem::temp_directory_path() / ("ks_space_" + std::to_string (bits) + (isFloat ? "f" : "") + ".wav")).string();
+    std::ofstream (path, std::ios::binary).write ((const char*) d.data(), (std::streamsize) d.size());
+    return path;
+}
+
+static void testReverbTypes()
+{
+    std::printf ("Reverb types\n");
+    auto in = bassLine (3.0, 0.5);
+    in.resize (in.size() + (size_t) (6 * kSr), 0.0f);
+    const std::string wav = writeTestWav (24, false, 2, 44100);
+    double ref = 0;
+    for (int t = 0; t < 12; ++t)
+    {
+        auto wet = wetOf ([t, &wav] (Engine& e)
+                          {
+                              e.setParam (P::RvOn, 1);
+                              e.setParam (P::RvType, (float) t);
+                              e.setParam (P::RvMix, 0.5f);
+                              e.setParam (P::RvDecay, 2.0f);
+                              if (t == 11) { std::string err; e.loadSpace (wav, err); }
+                          }, in);
+        double peak = 0;
+        bool finite = true;
+        for (float s : wet) { peak = std::max (peak, (double) std::fabs (s)); finite = finite && std::isfinite (s); }
+        const double lvl = 20 * std::log10 (rms (wet.data() + (size_t) (1.0 * kSr), (size_t) (2.0 * kSr)) + 1e-12);
+        const double late = 20 * std::log10 (rms (wet.data() + wet.size() - (size_t) kSr, (size_t) kSr) + 1e-12);
+        if (t == 1) ref = lvl;
+        if (t == 0) ref = lvl;   // replaced by Hall below
+        CHECK (finite && peak < 0.99, "%-9s finite, wet peak %.1f dBFS", kReverbNames[t], 20 * std::log10 (peak + 1e-12));
+        if (t >= 1) CHECK (std::fabs (lvl - ref) < 6.0, "%-9s level %.1f dB against Hall (mark within 6)", kReverbNames[t], lvl - ref);
+        CHECK (late < lvl - 30, "%-9s dies away: %.1f dB down 5 s after the last note (mark 30)", kReverbNames[t], lvl - late);
+    }
+}
+
+static void testReverbEdges()
+{
+    std::printf ("Reverb at the edge: Bloom, freeze, type changes, impulses\n");
+    auto in = bassLine (2.0, 0.9);
+    in.resize (in.size() + (size_t) (10 * kSr), 0.0f);
+    double worst = 0;
+    bool finite = true;
+    for (int t = 0; t < 11; ++t)
+    {
+        Engine e;
+        e.prepare (kSr, 64);
+        neutral (e);
+        e.setParam (P::RvOn, 1);
+        e.setParam (P::RvType, (float) t);
+        e.setParam (P::RvMix, 1.0f);
+        e.setParam (P::RvGrit, 1.0f);
+        e.setParam (P::RvShimmer, 1.0f);
+        e.setParam (P::RvEchoes, 0.9f);
+        e.setParam (P::BloomWash, 1.0f);
+        e.setBloom (1.0f);
+        auto out = render (e, in);
+        for (float s : out) { worst = std::max (worst, (double) std::fabs (s)); finite = finite && std::isfinite (s); }
+    }
+    CHECK (finite && worst < 0.99, "every type at full Bloom, grit and shimmer: peak %.1f dBFS (mark under 0)", 20 * std::log10 (worst));
+
+    // freeze holds the tail and lets nothing new in
+    Engine f;
+    f.prepare (kSr, 64);
+    neutral (f);
+    f.setParam (P::RvOn, 1);
+    f.setParam (P::RvMix, 1.0f);
+    render (f, bassLine (2.0, 0.5));
+    f.setParam (P::RvFreeze, 1);
+    auto held = render (f, bassLine (6.0, 0.5));   // playing on top: shouldn't get in
+    const double a = 20 * std::log10 (rms (held.data() + (size_t) kSr, (size_t) kSr) + 1e-12);
+    const double b = 20 * std::log10 (rms (held.data() + held.size() - (size_t) kSr, (size_t) kSr) + 1e-12);
+    CHECK (b > -45 && std::fabs (a - b) < 6, "Freeze: tail at %.1f then %.1f dBFS five seconds later", a, b);
+
+    // type changes while the tail rings: no worse a step than the types make anyway
+    auto tone = sine (220, 1.6, 0.3);
+    auto runWith = [&] (int first, int second)
+    {
+        Engine c;
+        c.prepare (kSr, 64);
+        neutral (c);
+        c.setParam (P::RvOn, 1);
+        c.setParam (P::RvMix, 1.0f);
+        c.setParam (P::RvType, (float) first);
+        const size_t at = (size_t) (1.0 * kSr);
+        render (c, std::vector<float> (tone.begin(), tone.begin() + (long) at));
+        c.setParam (P::RvType, (float) second);
+        auto y2 = render (c, std::vector<float> (tone.begin() + (long) at, tone.end()));
+        double w = 0;
+        for (size_t i = 1; i + 1 < y2.size(); ++i) w = std::max (w, (double) std::fabs (y2[i + 1] - 2 * y2[i] + y2[i - 1]));
+        if (getenv ("KS_DEBUG")) { size_t wi = 0; double ww = 0; for (size_t i = 1; i + 1 < y2.size(); ++i) { const double dd = std::fabs (y2[i + 1] - 2 * y2[i] + y2[i - 1]); if (dd > ww) { ww = dd; wi = i; } } std::printf ("      rv %d -> %d %.5f at %.1f ms\n", first, second, ww, wi * 1000.0 / kSr); }
+        return w;
+    };
+    double worstRatio = 0;
+    int worstType = 0;
+    const double steadyHall = runWith (1, 1);
+    for (int t = 0; t < 11; ++t)
+    {
+        if (t == 1) continue;
+        const double r = runWith (1, t) / std::max (steadyHall, runWith (t, t));
+        if (r > worstRatio) { worstRatio = r; worstType = t; }
+    }
+    CHECK (worstRatio < 2.0, "changing type mid-tail: worst step %.2f times what the types make anyway (into %s, mark 2)", worstRatio, kReverbNames[worstType]);
+
+    // impulses in every format load and sound alike
+    double lv[4] = {};
+    const int bits[4] = { 16, 24, 32, 32 };
+    const bool fl[4] = { false, false, false, true };
+    bool allLoaded = true;
+    auto shortIn = bassLine (1.5, 0.5);
+    for (int k = 0; k < 4; ++k)
+    {
+        const std::string path = writeTestWav (bits[k], fl[k], k == 1 ? 2 : 1, k == 2 ? 96000 : 48000);
+        bool ok = false;
+        auto wet = wetOf ([&] (Engine& e)
+                          {
+                              e.setParam (P::RvOn, 1);
+                              e.setParam (P::RvType, 11);
+                              e.setParam (P::RvMix, 0.5f);
+                              std::string err;
+                              ok = e.loadSpace (path, err);
+                          }, shortIn);
+        allLoaded = allLoaded && ok;
+        lv[k] = 20 * std::log10 (rms (wet.data() + (size_t) (0.5 * kSr), (size_t) kSr) + 1e-12);
+    }
+    const double spread = *std::max_element (lv, lv + 4) - *std::min_element (lv, lv + 4);
+    CHECK (allLoaded && spread < 3.0 && lv[0] > -40, "impulses as 16, 24, 32-bit and float .wav, mono, stereo and 96 kHz all load, levels within %.1f dB (mark 3)", spread);
+    std::string err;
+    Engine bad;
+    bad.prepare (kSr, 64);
+    const bool refused = ! bad.loadSpace ("/nonexistent/space.wav", err);
+    CHECK (refused && ! err.empty(), "a missing file says why: \"%s\"", err.c_str());
+}
+
 // Grain effects: all eleven Speckle effects make sound and live up top
 static void testGrainEffects()
 {
@@ -705,6 +867,8 @@ static void bench (const char* capture)
                              { "Everything on, Bloom at 80%", everything, nullptr },
                              { "Everything on, light effects", everythingLight, nullptr },
                              { "Everything on, tape delay and Haze grains", [&] (Engine& e) { everything (e); e.setParam (P::DlType, 2); e.setParam (P::DlTapeMode, 2); e.setParam (P::GrEffect, 4); }, nullptr },
+                             { "Everything on, Cloud reverb", [&] (Engine& e) { everything (e); e.setParam (P::RvType, 5); }, nullptr },
+                             { "Everything on, Impulse reverb (2 s)", [&] (Engine& e) { everything (e); e.setParam (P::RvType, 11); std::string err; e.loadSpace (writeTestWav (24, false, 1, 48000), err); }, nullptr },
                              { "Everything on, Galaxy delay and Arp grains", [&] (Engine& e) { everything (e); e.setParam (P::DlType, 11); e.setParam (P::GrEffect, 9); e.setParam (P::GrPitch, 3); }, nullptr } };
     if (capture && Engine::namAvailable() && std::filesystem::exists (capture))
     {
@@ -753,6 +917,8 @@ int main (int argc, char** argv)
         testTapeMachines();
         testDelayLimits();
         testGrainEffects();
+        testReverbTypes();
+        testReverbEdges();
         testBloomSafety();
         testClicks();
         testSteadyDrive();

@@ -39,7 +39,7 @@ struct Controller::State
     int current = 0;
     FootswitchLogic logic;
     std::vector<std::string> outbox;
-    std::string captureFile;
+    std::string captureFile, spaceFile;
     double lastDTap = -10;
     bool dTapCaptured = false;
 };
@@ -126,6 +126,7 @@ void Controller::load()
                 if (i >= 0 && isGlobal (i) && it.value().is_number()) engine.setParam ((P) i, it.value().get<float>());
             }
         s->captureFile = st.value ("capture", std::string());
+        s->spaceFile = st.value ("space", std::string());
     }
 
     // the capture: the saved one, else the first in the folder
@@ -135,6 +136,13 @@ void Controller::load()
     if (! s->captureFile.empty() && std::find (caps.begin(), caps.end(), s->captureFile) != caps.end())
         loaded = useCapture (s->captureFile, err);
     if (! loaded && ! caps.empty()) loaded = useCapture (caps.front(), err);
+
+    // the impulse for the Impulse reverb: the saved one, else the first in the folder
+    auto spaces = listSpaces();
+    bool spaceOk = false;
+    if (! s->spaceFile.empty() && std::find (spaces.begin(), spaces.end(), s->spaceFile) != spaces.end())
+        spaceOk = useSpace (s->spaceFile, err);
+    if (! spaceOk && ! spaces.empty()) useSpace (spaces.front(), err);
     applySong (s->current);
 }
 
@@ -162,6 +170,7 @@ void Controller::saveSettings() const
         if (isGlobal (i)) g[paramTable()[i].id] = engine.getParam ((P) i);
     j["globals"] = g;
     j["capture"] = s->captureFile;
+    j["space"] = s->spaceFile;
     writeJsonAtomic (toPath (dataDir) / "settings.json", j);
 }
 
@@ -398,6 +407,35 @@ std::vector<std::string> Controller::listCaptures() const
     return out;
 }
 
+std::string Controller::spacesDir() const { return fromPath (toPath (capturesDir).parent_path() / "Spaces"); }
+
+std::vector<std::string> Controller::listSpaces() const
+{
+    std::vector<std::string> out;
+    std::error_code ec;
+    const auto dir = toPath (spacesDir());
+    if (! fs::is_directory (dir, ec)) return out;
+    for (const auto& entry : fs::directory_iterator (dir, ec))
+    {
+        if (! entry.is_regular_file()) continue;
+        auto ext = fromPath (entry.path().extension());
+        std::transform (ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".wav") out.push_back (fromPath (entry.path().filename()));
+    }
+    std::sort (out.begin(), out.end());
+    return out;
+}
+
+bool Controller::useSpace (const std::string& file, std::string& error)
+{
+    if (file.empty()) { std::string e; engine.loadSpace ("", e); s->spaceFile.clear(); saveSettings(); return true; }
+    if (file.find ("..") != std::string::npos || file.find_first_of ("/\\") != std::string::npos) { error = "Bad file name"; return false; }
+    if (! engine.loadSpace (fromPath (toPath (spacesDir()) / toPath (file)), error)) return false;
+    s->spaceFile = file;
+    saveSettings();
+    return true;
+}
+
 bool Controller::useCapture (const std::string& file, std::string& error)
 {
     if (file.empty()) { engine.clearCapture(); s->captureFile.clear(); saveSettings(); return true; }
@@ -478,6 +516,9 @@ std::string Controller::stateJson() const
     j["capture"] = engine.captureName();
     j["captureFile"] = s->captureFile;
     j["captures"] = listCaptures();
+    j["space"] = engine.spaceName();
+    j["spaceFile"] = s->spaceFile;
+    j["spaces"] = listSpaces();
     j["namAvailable"] = Engine::namAvailable();
     j["keeperLive"] = keeperLiveTag ? keeperLiveTag() : false;
     j["footswitch"] = footswitchStatus ? footswitchStatus() : std::string();
@@ -574,6 +615,13 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     {
         std::string err;
         if (useCapture (m.value ("file", std::string()), err)) queueToast ("CAPTURE LOADED");
+        else queueToast (err);
+        queueState();
+    }
+    else if (t == "space")
+    {
+        std::string err;
+        if (useSpace (m.value ("file", std::string()), err)) queueToast ("SPACE LOADED");
         else queueToast (err);
         queueState();
     }

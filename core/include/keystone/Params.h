@@ -170,13 +170,29 @@ struct ParamInfo
     P(DlLofiRate,     "delay.lofiRate",  "Sample rate",   "delay",   "Lo-fi",          Flip,   2000, 24000,8000, "Hz", "",   Log) \
     P(DlHold,         "delay.hold",      "Hold the repeats","delay", "Hold",           Toggle, 0,    1,    0,    "",   "",   None) \
     P(RvOn,           "reverb.on",       "On",            "reverb",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
-    P(RvSize,         "reverb.size",     "Size",          "reverb",  "Space",          Flip,   0,    1,    0.6f, "%",  "",   None) \
+    P(RvType,         "reverb.type",     "Type",          "reverb",  "Type",           Choice, 0,    11,   1,    "",   "Room|Hall|Plate|Spring|Chamber|Cloud|Bloom|Chorale|Shimmer|Magneto|Nonlinear|Impulse", None) \
     P(RvDecay,        "reverb.decay",    "Decay",         "reverb",  "Space",          Flip,   0.3f, 20,   3,    "s",  "",   Log) \
-    P(RvDamp,         "reverb.damp",     "Darkness",      "reverb",  "Space",          Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(RvPredelay,     "reverb.predelay", "Pre-delay",     "reverb",  "Space",          Flip,   0,    150,  20,   "ms", "",   None) \
+    P(RvPredelay,     "reverb.predelay", "Pre-delay",     "reverb",  "Space",          Flip,   0,    250,  20,   "ms", "",   None) \
     P(RvMix,          "reverb.mix",      "Mix",           "reverb",  "Space",          Flip,   0,    1,    0.25f,"%",  "",   None) \
-    P(RvShimmer,      "reverb.shimmer",  "Shimmer",       "reverb",  "Shimmer",        Flip,   0,    1,    0.3f, "%",  "",   None) \
-    P(RvInterval,     "reverb.interval", "Interval",      "reverb",  "Shimmer",        Choice, 0,    1,    0,    "",   "Octave|Fifth", None) \
+    P(RvDamp,         "reverb.damp",     "Darkness",      "reverb",  "Space",          Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(RvLowCut,       "reverb.lowcut",   "Low cut",       "reverb",  "Space",          Flip,   20,   500,  180,  "Hz", "",   Log) \
+    P(RvDuck,         "reverb.duck",     "Duck",          "reverb",  "Space",          Flip,   0,    1,    0.2f, "%",  "",   None) \
+    P(RvMod,          "reverb.mod",      "Mod",           "reverb",  "Space",          Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(RvSwell,        "reverb.swell",    "Swell",         "reverb",  "Space",          Flip,   0,    2,    0,    "s",  "",   None) \
+    P(RvGrit,         "reverb.grit",     "Grit",          "reverb",  "Space",          Flip,   0,    1,    0,    "%",  "",   None) \
+    P(RvDiffusion,    "reverb.diffusion","Diffusion",     "reverb",  "Character",      Flip,   0,    1,    0.7f, "%",  "",   None) \
+    P(RvSize,         "reverb.size",     "Size",          "reverb",  "Character",      Flip,   0,    1,    0.6f, "%",  "",   None) \
+    P(RvShimmer,      "reverb.shimmer",  "Shimmer",       "reverb",  "Character",      Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(RvInterval,     "reverb.interval", "Interval",      "reverb",  "Character",      Choice, 0,    2,    0,    "",   "Octave|Fifth|Oct + 5th", None) \
+    P(RvSprings,      "reverb.springs",  "Springs",       "reverb",  "Character",      Choice, 0,    2,    1,    "",   "One|Two|Three", None) \
+    P(RvTension,      "reverb.tension",  "Drip",          "reverb",  "Character",      Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(RvVowel,        "reverb.vowel",    "Vowel",         "reverb",  "Character",      Choice, 0,    4,    0,    "",   "Ah|Eh|Ee|Oh|Oo", None) \
+    P(RvVoices,       "reverb.voices",   "Voices",        "reverb",  "Character",      Flip,   0,    1,    0.7f, "%",  "",   None) \
+    P(RvEchoTime,     "reverb.echoTime", "Echo time",     "reverb",  "Character",      Flip,   60,   800,  300,  "ms", "",   Log) \
+    P(RvEchoes,       "reverb.echoes",   "Echoes",        "reverb",  "Character",      Flip,   0,    0.9f, 0.4f, "%",  "",   None) \
+    P(RvShape,        "reverb.shape",    "Shape",         "reverb",  "Character",      Choice, 0,    3,    0,    "",   "Gate|Reverse|Swoosh|Ramp", None) \
+    P(RvLength,       "reverb.length",   "Length",        "reverb",  "Character",      Flip,   50,   800,  300,  "ms", "",   Log) \
+    P(RvFreeze,       "reverb.freeze",   "Freeze the tail","reverb", "Freeze",         Toggle, 0,    1,    0,    "",   "",   None) \
     /* ---- Control ---- */ \
     P(BloomDrone,     "bloom.drone",     "Drone reach",   "bloom",   "Reach",          Flip,   0,    1,    1,    "%",  "",   None) \
     P(BloomWash,      "bloom.wash",      "Wash reach",    "bloom",   "Reach",          Flip,   0,    1,    0.9f, "%",  "",   None) \

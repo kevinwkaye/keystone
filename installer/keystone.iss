@@ -3,7 +3,7 @@
 ; firewall so the phone can find it on the hotspot.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.2.1"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\build\app\Keystone_artefacts\Release"
@@ -37,10 +37,16 @@ Name: "power"; Description: "Keep USB audio and Wi-Fi at full power (avoids drop
 [Files]
 Source: "{#SourceDir}\Keystone.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
+Source: "..\tools\Set up footswitch.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
+Source: "..\tools\Set up footswitch.bat"; DestDir: "{app}\Tools"; Flags: ignoreversion
+Source: "..\tools\Set up gig laptop.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
+Source: "..\tools\Set up gig laptop.bat"; DestDir: "{app}\Tools"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Keystone"; Filename: "{app}\Keystone.exe"
-Name: "{group}\Keystone folder (captures, log, songs)"; Filename: "{userdocs}\Keystone"
+Name: "{group}\Keystone folder (captures, spaces, log, songs)"; Filename: "{userdocs}\Keystone"
+Name: "{group}\Set up footswitch"; Filename: "{app}\Tools\Set up footswitch.bat"
+Name: "{group}\Set up gig laptop"; Filename: "{app}\Tools\Set up gig laptop.bat"
 Name: "{group}\Uninstall Keystone"; Filename: "{uninstallexe}"
 
 [Registry]

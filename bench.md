@@ -6,10 +6,12 @@
 
 | Case | 64 samples | 128 samples |
 |---|---|---|
-| Song default, modelled drive | 1.9% | 1.8% |
-| Everything on, Bloom at 80% | 3.7% | 3.2% |
-| Everything on, light effects | 3.1% | 3.1% |
-| Everything on, tape delay and Haze grains | 3.8% | 4.3% |
-| Everything on, Galaxy delay and Arp grains | 3.6% | 3.4% |
+| Song default, modelled drive | 1.8% | 1.8% |
+| Everything on, Bloom at 80% | 3.9% | 4.1% |
+| Everything on, light effects | 3.4% | 3.4% |
+| Everything on, tape delay and Haze grains | 4.4% | 4.3% |
+| Everything on, Cloud reverb | 3.7% | 3.6% |
+| Everything on, Impulse reverb (2 s) | 4.9% | 4.9% |
+| Everything on, Galaxy delay and Arp grains | 3.9% | 3.9% |
 
 CPU is the share of one core for one Keystone at 48 kHz, measured on the build machine.

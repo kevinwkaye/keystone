@@ -76,6 +76,11 @@ public:
     bool hasCapture() const;
     static bool namAvailable();
 
+    // ---- spaces (impulse responses for the Impulse reverb) ----
+    // Loads a .wav on the calling thread (never the audio thread). Empty path clears.
+    bool loadSpace (const std::string& path, std::string& error);
+    std::string spaceName() const;
+
     // ---- housekeeping thread ----
     void idle();
 

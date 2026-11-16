@@ -9,7 +9,7 @@ var KS = (function () {
     link: 'searching', linkDetail: '',
     schema: null, params: {}, modules: [], values: {},
     songs: [], current: 0, edited: false, maxSongs: 15,
-    tuner: false, captures: [], capture: '', captureFile: '', namAvailable: true,
+    tuner: false, captures: [], capture: '', captureFile: '', namAvailable: true, spaces: [], space: '', spaceFile: '',
     footswitch: '', audio: '', keeperLive: false,
     meter: {}, screen: 'play', module: null, prevScreen: 'play', tunerAuto: false,
     editVoice: null, sel: null, openRow: -1, renameRow: -1, confirmDel: -1,
@@ -48,7 +48,7 @@ var KS = (function () {
         queueRender(); break;
       case 'state':
         S.values = m.values; S.songs = m.songs; S.current = m.current; S.edited = m.edited;
-        S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile;
+        S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile; S.spaces = m.spaces || []; S.space = m.space || ''; S.spaceFile = m.spaceFile || '';
         S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive;
         tunerState(m.tuner);
         try { localStorage.setItem('ks.state', JSON.stringify(m)); } catch (e) {}
@@ -134,6 +134,7 @@ var KS = (function () {
     if (p.kind === 'toggle') return v > 0.5 ? 'On' : 'Off';
     if (p.kind === 'choice') return p.choices[Math.round(v)] || '';
     if (id === 'drone.sustain' && v >= 0.995) return 'Inf';
+    if (id === 'reverb.swell' && v < 0.01) return 'Off';
     if (/gate$/.test(id) && v <= -89) return 'Off';
     switch (p.unit) {
       case '%': return trim(v * 100, 0) + '%';
@@ -391,7 +392,7 @@ var KS = (function () {
       case 'dim': return 'Mode ' + fmt('dim.mode') + ', mono safe';
       case 'grains': return (Math.round(val('grains.effect')) ? fmt('grains.effect') + ' ' + fmt('grains.variant') : 'Sparkle') + ', ' + fmt('grains.pitch') + ', ' + fmt('grains.hp') + ' to ' + fmt('grains.ceiling');
       case 'delay': return fmt('delay.type') + ', ' + (Math.round(val('delay.sync')) ? fmt('delay.sync') : fmt('delay.time')) + ', ' + fmt('delay.feedback') + ' repeats';
-      case 'reverb': return fmt('reverb.decay') + ', shimmer ' + fmt('reverb.shimmer');
+      case 'reverb': return fmt('reverb.type') + (Math.round(val('reverb.type')) === 11 ? (S.space ? ', ' + S.space : ', no space loaded') : Math.round(val('reverb.type')) === 10 ? ', ' + fmt('reverb.length') : ', ' + fmt('reverb.decay'));
       case 'preamp': return 'Blend ' + Math.round(val('preamp.blend') * 100) + '% Cut, mid ' + fmt('preamp.midFreq');
     }
     return m.summary;
@@ -458,7 +459,21 @@ var KS = (function () {
     ['basic arpeggios of your notes', 'pitched patterns', 'a random filter per note', 'crushed'],
     ['classic, even repeats', 'dotted', 'off-beat', 'triplet bursts'],
     ['an envelope filter on each tap', 'resonant band-pass taps', 'octave and fifth shifted taps', 'taps that fade into grains']];
+  var REVERB_TYPES = [
+    'Room: small and close, with early reflections off the walls.',
+    'Hall: big, smooth and even.',
+    'Plate: bright and dense, straight in with no gap.',
+    'Spring: an amp-style spring tank, with drip.',
+    'Chamber: a dark stone room with strong early reflections.',
+    'Cloud: huge and soft, it blurs where one note ends and the next begins.',
+    'Bloom: swells up after each note instead of starting straight away.',
+    'Chorale: the tail sings, through vowel shapes.',
+    'Shimmer: the tail climbs an octave or a fifth.',
+    'Magneto: a multi-head tape echo washing into the room.',
+    'Nonlinear: a shaped burst, gated, reversed, swooshing or ramped.',
+    'Impulse: plays your own .wav spaces from Documents\\Keystone\\Spaces.'];
   function describe(id) {
+    if (id === 'reverb.type') return REVERB_TYPES[Math.round(val(id))] || '';
     if (id === 'delay.type') return DELAY_TYPES[Math.round(val(id))] || '';
     if (id === 'delay.tapeMode') return (TAPE_MODES[Math.round(val('delay.tapeMachine'))] || [])[Math.round(val(id))] || '';
     if (id === 'grains.variant' || (id === 'grains.effect' && Math.round(val(id)) === 0)) {
@@ -499,7 +514,8 @@ var KS = (function () {
       if (flips.length) body += '<div class="flips">' + flips.map(function (p) {
         return '<button type="button" class="fbtn' + (S.sel === p.id ? ' sel' : '') + '" data-flip="' + p.id + '">' + flip(fmt(p.id)) + '<span class="lb">' + esc(p.label) + '</span></button>';
       }).join('') + '</div>';
-      return '<section class="card"><h2 class="label">' + esc(sec) + '</h2>' + body + '</section>';
+      var title = sec === 'Character' && S.params['reverb.type'] ? fmt('reverb.type') : sec;
+      return '<section class="card"><h2 class="label">' + esc(title) + '</h2>' + body + '</section>';
     }).join('');
   }
 
@@ -529,6 +545,18 @@ var KS = (function () {
       var cut = html.indexOf('</section>') + '</section>'.length;
       pre = html.slice(0, cut) + srcHtml;
       list = null; extra = html.slice(cut);
+    }
+    if (mod === 'reverb' && Math.round(val('reverb.type')) === 11) {
+      var spName = S.space ? S.space : (S.spaces.length ? 'No space loaded' : 'No spaces yet');
+      var spCard = '<section class="card"><h2 class="label">Impulse file</h2><button type="button" class="source" data-act="spaces"><span><span class="t">' + esc(spName) + '</span>' +
+        '<span class="s">' + esc(S.space ? '.wav from your Spaces folder' : 'Put .wav files in Documents\\Keystone\\Spaces') + '</span></span><span style="font-size:14px;color:#5DCAA5">Change</span></button>' +
+        (S.showSpaces ? '<div class="group">' + (S.spaces.length ? S.spaces.map(function (f) {
+          return '<button type="button" class="row" data-space="' + esc(f) + '" style="min-height:48px;background:#262626"><span class="t" style="font-size:16px">' + esc(f.replace(/\.wav$/i, '')) + '</span><span class="r" style="color:#5DCAA5">' + (f === S.spaceFile ? 'LOADED' : '') + '</span></button>';
+        }).join('') : '<span class="small">No .wav files found in Documents\\Keystone\\Spaces on the laptop.</span>') + '</div>' : '') + '</section>';
+      var rvHtml = renderParams(list);
+      var rvCut = rvHtml.indexOf('</section>') + '</section>'.length;
+      pre = rvHtml.slice(0, rvCut) + spCard;
+      list = null; extra = rvHtml.slice(rvCut);
     }
     if (mod === 'bloom') {
       var bl = S.meter.bloom || 0;
@@ -677,7 +705,7 @@ var KS = (function () {
   function go(screen) {
     if (screen === 'tuner' && !S.tuner) { send({ t: 'tuner', on: true }); S.tunerAuto = false; }
     if (S.screen === 'tuner' && screen !== 'tuner' && S.tuner) { send({ t: 'tuner', on: false }); S.tuner = false; }
-    S.screen = screen; S.sel = null; sheetEl.hidden = true; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false;
+    S.screen = screen; S.sel = null; sheetEl.hidden = true; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false; S.showSpaces = false;
     render();
   }
 
@@ -704,6 +732,7 @@ var KS = (function () {
     if (d.song) { if (send({ t: 'song', i: +d.song })) { S.current = +d.song; render(true); } return; }
     if (d.menu) { var i = +d.menu; S.openRow = S.openRow === i ? -1 : i; S.renameRow = -1; S.confirmDel = -1; return render(); }
     if (d.capture) { send({ t: 'capture', file: d.capture }); S.showCaptures = false; return render(); }
+    if (d.space) { send({ t: 'space', file: d.space }); S.showSpaces = false; return render(); }
     if (d.learn) { send({ t: 'learn', sw: +d.learn }); return; }
     if (d.cal) { send({ t: 'calibrate', step: +d.cal }); return; }
     var i2 = d.i != null ? +d.i : -1;
@@ -717,6 +746,7 @@ var KS = (function () {
       case 'note': var nt = document.getElementById('noteText'); if (nt && nt.value.trim()) send({ t: 'keepNote', text: nt.value.trim() }); S.noteUntil = 0; render(); break;
       case 'sheetClose': S.sel = null; sheetEl.hidden = true; render(true); break;
       case 'captures': S.showCaptures = !S.showCaptures; render(); break;
+      case 'spaces': S.showSpaces = !S.showSpaces; render(); break;
       case 'droneClear': send({ t: 'drone', op: 'clear' }); break;
       case 'tap': send({ t: 'tap' }); break;
       case 'keeperLive': send({ t: 'keeperLive', on: t.checked }); break;
