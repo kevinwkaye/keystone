@@ -486,6 +486,12 @@ var KS = (function () {
       var name = S.params['grains.effect'].choices[e];
       return name + ' ' + 'ABCD'[v] + ': ' + (GRAIN_FX[e] || [])[v] + '.';
     }
+    if (id === 'bitrot.subInt') return 'The sub plays the note divided by this: 2 is an octave down, 3 an octave and a fifth, 4 two octaves.';
+    if (id === 'bitrot.oscInt') return 'The oscillator locks onto this harmonic of the note: x2 an octave up, x3 an octave and a fifth, x4 two octaves.';
+    if (id === 'bitrot.floor') return 'Lifts any sub that falls below the floor by octaves, so low notes stay felt rather than flapping.';
+    if (id === 'bitrot.corrupt') return 'Low keeps the loop tight on the note. High lets it hunt, dive and glitch between notes.';
+    if (id === 'bitrot.gate') return 'How quiet a note can be and still play the synth. It follows how hard you play, so hiss never plays it.';
+    if (id === 'bitrot.clean') return 'How much of your clean bass stays under the synth, lows included.';
     if (id === 'grains.pitch') return 'Every effect plays pitched up, always in key, so it never lands on the bass, guitars or keys.';
     return '';
   }

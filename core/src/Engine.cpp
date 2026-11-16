@@ -48,10 +48,10 @@ struct Engine::Impl
     Limiter limiter;
     PlayLevel play;
 
-    Biquad bitrotHp1, bitrotHp2;
     Smoothed lowLevel, highLevel, outLevel, tunerGate, bitrotOn, preOn, filtOn, dimOn;
     Smoothed bloomS;
-    std::vector<float> lowBuf, highBuf, cleanBuf, droneBuf;
+    std::vector<float> lowBuf, highBuf, cleanBuf, droneBuf, synthBuf, lowMul;
+    Smoothed bitrotClean;
 
     // tuner: input decimated by 4 into a ring, analysed on the housekeeping thread
     Biquad tunerLp1, tunerLp2;
@@ -123,8 +123,6 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.drone.prepare (s);
     d.drive.prepare (s, d.maxBlock);
     d.bitrot.prepare (s);
-    d.bitrotHp1.highPass (90.0f, 0.541f, s);
-    d.bitrotHp2.highPass (90.0f, 1.307f, s);
     d.preamp.prepare (s);
     d.filter.prepare (s);
     d.dim.prepare (s);
@@ -160,6 +158,9 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.highBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.cleanBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.droneBuf.assign ((size_t) d.maxBlock, 0.0f);
+    d.synthBuf.assign ((size_t) d.maxBlock, 0.0f);
+    d.lowMul.assign ((size_t) d.maxBlock, 1.0f);
+    d.bitrotClean.setTime (0.03f, s); d.bitrotClean.reset (0.5f);
     d.tunerLp1.lowPass (2000, 0.54f, s);
     d.tunerLp2.lowPass (2000, 1.31f, s);
     d.tunerRing.assign (8192, 0.0f);
@@ -289,6 +290,7 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.highLevel.set (dbToGain (V (v, P::SplitHighLevel)));
         d.outLevel.set (dbToGain (V (v, P::OutLevel)));
         d.bitrotOn.set (Vb (v, P::BitrotOn) ? 1.0f : 0.0f);
+        d.bitrotClean.set (V (v, P::BitrotClean));
         d.preOn.set (Vb (v, P::PreOn) ? 1.0f : 0.0f);
         d.filtOn.set (Vb (v, P::FiltOn) ? 1.0f : 0.0f);
         d.dimOn.set (Vb (v, P::DimOn) ? 1.0f : 0.0f);
@@ -323,19 +325,23 @@ void Engine::process (const float* in, float* out, int numSamples)
 
         // ---- high band: Bitrot (if first), drive, Bitrot, preamp ----
         float* hb = d.highBuf.data();
+        // Bitrot hears the whole bass (high band plus low band) and plays its synth into the
+        // high band; Clean bass sets how much of the clean signal, low band included, stays
+        float* lm = d.lowMul.data();
+        std::fill (lm, lm + n, 1.0f);
         auto runBitrot = [&]()
         {
+            const bool active = Vb (v, P::BitrotOn) || d.bitrotOn.current() > 1.0e-4f;
+            if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); return; }
+            float* sy = d.synthBuf.data();
+            for (int i = 0; i < n; ++i) sy[i] = hb[i] + d.lowBuf[(size_t) i];
+            d.bitrot.process (sy, n);
             for (int i = 0; i < n; ++i)
             {
                 const float g = d.bitrotOn.next();
-                if (g > 1.0e-4f)
-                {
-                    // the fuzz hears the whole note, fundamental included, so it fuzzes
-                    // properly; its lows are then cut so the clean low band stays the bottom
-                    const float full = hb[i] + d.lowBuf[(size_t) i];
-                    const float fz = d.bitrotHp2.process (d.bitrotHp1.process (d.bitrot.process (full)));
-                    hb[i] = hb[i] + (fz - hb[i]) * g;
-                }
+                const float keep = 1.0f - g * (1.0f - d.bitrotClean.next());
+                hb[i] = hb[i] * keep + sy[i] * g;
+                lm[i] = keep;
             }
         };
         if (bitrotFirst) runBitrot();
@@ -366,7 +372,7 @@ void Engine::process (const float* in, float* out, int numSamples)
 
             // ---- sum, mono out ----
             d.lowAlign.push (d.lowBuf[(size_t) i]);
-            float core = d.lowAlign.at (Drive::kLatency) * d.lowLevel.next() + h;
+            float core = d.lowAlign.at (Drive::kLatency) * d.lowLevel.next() * lm[i] + h;
             if (! filtHigh)
             {
                 // the envelope filter on the whole bass, so it sweeps the note you play

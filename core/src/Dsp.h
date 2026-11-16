@@ -36,6 +36,7 @@ struct Smoothed
     void reset (float v) { value = target = v; }
     void set (float t) { target = t; }
     float next() { value = target + (value - target) * coef; return value; }
+    float current() const { return value; }
     bool settled() const { return std::fabs (value - target) < 1.0e-5f; }
 };
 

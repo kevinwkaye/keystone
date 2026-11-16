@@ -85,12 +85,24 @@ struct ParamInfo
     P(DriveMorph,     "drive.morph",     "Exp morph",     "drive",   "Behaviour",      Choice, 0,    1,    0,    "",   "Off|On", None) \
     P(DriveLowInto,   "drive.lowInto",   "Low end into drive","drive","Behaviour",     Slider, 0,    1,    0.35f,"%",  "None|Full", None) \
     P(BitrotOn,       "bitrot.on",       "On",            "bitrot",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
-    P(BitrotFuzz,     "bitrot.fuzz",     "Fuzz",          "bitrot",  "Fuzz and crush", Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(BitrotBits,     "bitrot.bits",     "Bits",          "bitrot",  "Fuzz and crush", Flip,   3,    16,   8,    "",   "",   None) \
-    P(BitrotRate,     "bitrot.rate",     "Crush rate",    "bitrot",  "Fuzz and crush", Flip,   0,    1,    0.3f, "%",  "",   None) \
-    P(BitrotTone,     "bitrot.tone",     "Tone",          "bitrot",  "Output",         Flip,   0,    1,    0.6f, "%",  "",   None) \
-    P(BitrotMix,      "bitrot.mix",      "Mix",           "bitrot",  "Output",         Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(BitrotLevel,    "bitrot.level",    "Level",         "bitrot",  "Output",         Flip,   -12,  12,   0,    "dB", "",   None) \
+    P(BitrotSquare,   "bitrot.square",   "Square",        "bitrot",  "Voices",         Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(BitrotSub,      "bitrot.sub",      "Sub",           "bitrot",  "Voices",         Flip,   0,    1,    0.6f, "%",  "",   None) \
+    P(BitrotOsc,      "bitrot.osc",      "Oscillator",    "bitrot",  "Voices",         Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(BitrotClean,    "bitrot.clean",    "Clean bass",    "bitrot",  "Voices",         Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(BitrotVol,      "bitrot.vol",      "Level",         "bitrot",  "Voices",         Flip,   0,    1,    0.7f, "%",  "",   None) \
+    P(BitrotSubInt,   "bitrot.subInt",   "Divide by",     "bitrot",  "Sub",            Choice, 0,    7,    0,    "",   "2|3|4|5|6|7|8|9", None) \
+    P(BitrotSubRoot,  "bitrot.subRoot",  "Divides",       "bitrot",  "Sub",            Choice, 0,    1,    0,    "",   "Square|Oscillator", None) \
+    P(BitrotSubMix,   "bitrot.subMix",   "Sub blend",     "bitrot",  "Sub",            Choice, 0,    1,    0,    "",   "Sum and difference|Plain divide", None) \
+    P(BitrotFloor,    "bitrot.floor",    "Floor",         "bitrot",  "Sub",            Toggle, 0,    1,    1,    "",   "",   None) \
+    P(BitrotFloorHz,  "bitrot.floorHz",  "Floor at",      "bitrot",  "Sub",            Choice, 0,    2,    1,    "",   "25 Hz|30 Hz|40 Hz", None) \
+    P(BitrotOscInt,   "bitrot.oscInt",   "Harmonic",      "bitrot",  "Oscillator",     Choice, 0,    7,    1,    "",   "x1|x2|x3|x4|x5|x6|x7|x8", None) \
+    P(BitrotOscRoot,  "bitrot.oscRoot",  "Root",          "bitrot",  "Oscillator",     Choice, 0,    2,    0,    "",   "Unison|Oct down|Two down", None) \
+    P(BitrotBend,     "bitrot.bend",     "Bend",          "bitrot",  "Oscillator",     Flip,   0,    1,    0,    "%",  "",   None) \
+    P(BitrotFm,       "bitrot.fm",       "Modulator",     "bitrot",  "Movement",       Choice, 0,    1,    0,    "",   "Glide|Vibrato", None) \
+    P(BitrotFmRate,   "bitrot.fmRate",   "Rate",          "bitrot",  "Movement",       Flip,   0,    1,    0.75f, "%", "",   None) \
+    P(BitrotFmDepth,  "bitrot.fmDepth",  "Depth",         "bitrot",  "Movement",       Flip,   0,    1,    0.4f, "%",  "",   None) \
+    P(BitrotCorrupt,  "bitrot.corrupt",  "Corrupt",       "bitrot",  "Tracking",       Flip,   0,    1,    0.25f, "%", "",   None) \
+    P(BitrotGate,     "bitrot.gate",     "Sensitivity",   "bitrot",  "Tracking",       Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(BitrotFirst,    "bitrot.first",    "Before drive",  "bitrot",  "Order",          Toggle, 0,    1,    0,    "",   "",   None) \
     P(PreOn,          "preamp.on",       "On",            "preamp",  "",               Toggle, 0,    1,    1,    "",   "",   None) \
     P(PreBlend,       "preamp.blend",    "Blend",         "preamp",  "Blend",          Slider, 0,    1,    0.7f, "%",  "Growl|Cut", None) \

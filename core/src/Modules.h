@@ -3,6 +3,7 @@
 // coefficients are updated once per block from the parameter snapshot, the work is
 // per sample. Nothing allocates after prepare().
 
+#include "bit/BitrotEngine.h"
 #include "Dsp.h"
 #include "keystone/Params.h"
 
@@ -188,61 +189,59 @@ private:
 };
 
 // ---------------------------------------------------------------------------------------
-// Bitrot: fuzz plus bit crush with a mix.
+// Bitrot: Kevin's own Bitrot plugin engine (a modulated monophonic PLL, after the Data
+// Corrupter), vendored in core/src/bit. It hears the whole bass and plays a square wave,
+// a divided sub and a multiplied oscillator back from it. Its own gate follows how loud
+// you play, so it stops dead between notes rather than tracking hiss.
 class Bitrot
 {
 public:
-    void prepare (float sr_)
+    void prepare (double sampleRate)
     {
-        sr = sr_;
-        mixS.setTime (0.02f, sr);
-        levelEnv.set (0.01f, 1.5f, sr);
-        play.prepare (sr);
-        reset();
+        eng.prepare (sampleRate);
+        right.assign (kChunk, 0.0f);
     }
-    void reset() { fuzz.reset(); toneLp.reset(); dc.prepare (sr); dc.reset(); hold = 0; held = 0; mixS.reset (0); levelEnv.reset(); }
+    void reset() { /* the engine clears itself in prepare */ }
     void update (const Vals& v)
     {
-        gain = dbToGain (6.0f + 34.0f * V (v, P::BitrotFuzz));
-        const float bits = V (v, P::BitrotBits);
-        q = std::pow (2.0f, bits - 1.0f);
-        const float r = V (v, P::BitrotRate);
-        holdN = 1 + (int) (r * r * 23.0f);
-        toneLp.setLowPass (800.0f * std::pow (15.0f, V (v, P::BitrotTone)), sr);
-        mixS.set (V (v, P::BitrotMix));
-        level = dbToGain (V (v, P::BitrotLevel));
+        p.square = V (v, P::BitrotSquare);
+        p.sub = V (v, P::BitrotSub);
+        p.osc = V (v, P::BitrotOsc);
+        p.dry = 0.0f;   // Keystone blends the clean bass itself (Clean bass)
+        p.level = V (v, P::BitrotVol);
+        p.subInterval = Vi (v, P::BitrotSubInt);
+        p.subRoot = Vi (v, P::BitrotSubRoot);
+        p.subMix = Vi (v, P::BitrotSubMix);
+        p.floor = Vb (v, P::BitrotFloor);
+        p.floorHz = Vi (v, P::BitrotFloorHz);
+        p.oscInterval = Vi (v, P::BitrotOscInt);
+        p.oscRoot = Vi (v, P::BitrotOscRoot);
+        p.bend = V (v, P::BitrotBend);
+        p.fmMode = Vi (v, P::BitrotFm);
+        p.rate = V (v, P::BitrotFmRate);
+        p.depth = V (v, P::BitrotFmDepth);
+        p.corrupt = V (v, P::BitrotCorrupt);
+        p.gate = V (v, P::BitrotGate);
+        p.input = 1;   // bass
+        p.trackComp = true;
     }
-    float process (float x)
+    // in place, mono: buf holds the whole bass in, the synth out
+    void process (float* buf, int n)
     {
-        // play softly or hard, the fuzz hits the same: the input is brought up to a
-        // working level first (up to +26 dB), so Fuzz sets the character, not your touch
-        const float lv = levelEnv.process (x);
-        play.process (x);
-        const float norm = clampf (0.2f / std::max (lv, 1.0e-4f), 1.0f, 20.0f);
-        // between notes the fuzz shuts, so the lift never turns hiss into fizz
-        const float open = smoothstep ((lv - play.quietThreshold()) / std::max (1.0e-6f, 2.0f * play.quietThreshold()));
-        gateG += (open - gateG) * (open > gateG ? 0.01f : 0.0015f);
-        float y = fuzz.process (x * norm * gain + 0.15f) - 0.1489f;   // tanh(0.15): asymmetric, DC removed
-        y = dc.process (y);
-        if (++hold >= holdN) { hold = 0; held = std::round (y * q) / q; }
-        // and the fuzz comes out at about the level you went in, so switching it on
-        // doesn't jump in volume
-        y = toneLp.lp (held) * lv * 0.8f * gateG;
-        const float m = mixS.next();
-        return (x * (1.0f - m) + y * m) * level;
+        for (int at = 0; at < n; at += kChunk)
+        {
+            const int m = std::min (kChunk, n - at);
+            std::copy (buf + at, buf + at + m, right.begin());
+            eng.process (buf + at, right.data(), m, p);
+        }
     }
+    float lock() const { return eng.uiLock.load (std::memory_order_relaxed); }
 
 private:
-    float sr = 48000, gain = 10, q = 128, level = 1;
-    int holdN = 1, hold = 0;
-    float held = 0;
-    AdaaTanh fuzz;
-    OnePole toneLp;
-    DcBlock dc;
-    Smoothed mixS;
-    Follower levelEnv;
-    PlayLevel play;
-    float gateG = 0;
+    static constexpr int kChunk = 256;
+    bit::BitrotEngine eng;
+    bit::EngineParams p;
+    std::vector<float> right;
 };
 
 // ---------------------------------------------------------------------------------------

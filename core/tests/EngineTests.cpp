@@ -612,6 +612,37 @@ static void testReverbEdges()
 }
 
 // Grain effects: all eleven Speckle effects make sound and live up top
+static double toneAt (const std::vector<float>& x, size_t a, size_t n, double f)
+{
+    double re = 0, im = 0;
+    for (size_t i = 0; i < n; ++i)
+    {
+        const double w = 2 * M_PI * f * (double) i / kSr;
+        re += x[a + i] * std::cos (w); im += x[a + i] * std::sin (w);
+    }
+    return 2 * std::sqrt (re * re + im * im) / (double) n;
+}
+
+static void testBitrotSynth()
+{
+    std::printf ("Bitrot synth\n");
+    Engine e;
+    e.prepare (kSr, 128);
+    neutral (e);
+    e.setParam (P::BitrotOn, 1);
+    e.setParam (P::BitrotClean, 0);
+    e.setParam (P::BitrotSquare, 0); e.setParam (P::BitrotSub, 0); e.setParam (P::BitrotOsc, 1);
+    auto in = sine (98.0, 1.5, 0.15);           // G on the E string
+    in.resize (in.size() + (size_t) kSr, 0.0f);  // then a second of silence
+    auto out = render (e, in);
+    const size_t a = (size_t) (0.8 * kSr), n = (size_t) (0.4 * kSr);
+    const double up = toneAt (out, a, n, 196.0), fund = toneAt (out, a, n, 98.0);
+    std::printf ("  octave up %.1f dB, fundamental %.1f dB\n", 20 * std::log10 (up + 1e-9), 20 * std::log10 (fund + 1e-9));
+    CHECK (up > 0.02 && up > 4 * fund, "the oscillator locks an octave above the note (x2)");
+    const double tail = rms (out.data() + (size_t) (2.0 * kSr), (size_t) (0.4 * kSr));
+    CHECK (tail < 1.0e-4, "between notes the synth is silent, so hiss never plays it");
+}
+
 static void testGrainEffects()
 {
     std::printf ("Grain effects, up top\n");
@@ -979,7 +1010,8 @@ int main (int argc, char** argv)
         testDelayTypes();
         testTapeMachines();
         testDelayLimits();
-        testGrainEffects();
+        testBitrotSynth();
+    testGrainEffects();
         testReverbTypes();
         testReverbEdges();
         testBloomSafety();

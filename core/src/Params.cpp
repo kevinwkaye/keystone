@@ -44,6 +44,9 @@ const char* showIf (P p)
         case P::RvEchoTime: case P::RvEchoes: return "reverb.type=9";
         case P::RvShape: case P::RvLength: return "reverb.type=10";
         case P::RvFreeze: case P::RvMod: case P::RvGrit: return "reverb.type!=3|10|11";
+        case P::BitrotSubMix: return "bitrot.subRoot=1";
+        case P::BitrotFloorHz: return "bitrot.floor=1";
+        case P::BitrotFmDepth: return "bitrot.fm=1";
         default: return "";
     }
 }
@@ -56,7 +59,7 @@ const ModuleInfo* moduleTable (int& count)
         { "lowcomp", "Low compressor", "Low band", "Light, slap mode on hold D" },
         { "drone", "Drone", "Low band", "Capture, duck, octave, dimension" },
         { "drive", "Drive", "High band", "Edge and Drive voices" },
-        { "bitrot", "Bitrot", "High band", "Fuzz, crush, mix" },
+        { "bitrot", "Bitrot", "Whole bass", "Tracking synth: square, sub, oscillator" },
         { "preamp", "Preamp", "High band", "Growl to Cut, mid focus" },
         { "filter", "Filter", "High band", "Envelope or manual" },
         { "dim", "Dimension", "High band", "Mono safe" },
