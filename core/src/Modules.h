@@ -276,6 +276,19 @@ public:
         relCoef = onePoleCoef (0.04f + 0.36f * (1.0f - V (v, P::FiltSpeed)), sr);
         mixS.set (V (v, P::FiltMix));
     }
+    // the pedal wah: a resonant band-pass swept by the pedal from Heel to Toe
+    void updateWah (const Vals& v, float pedal)
+    {
+        manual = true;
+        bandPass = true;
+        down = false;
+        lo = V (v, P::WahLow);
+        hi = std::max (lo * 1.5f, V (v, P::WahHigh));
+        res = V (v, P::WahQ);
+        pos = clampf (pedal, 0.0f, 1.0f);
+        relCoef = onePoleCoef (0.2f, sr);
+        mixS.set (V (v, P::WahMix));
+    }
     float process (float x)
     {
         const float e = det.process (x);

@@ -29,6 +29,14 @@ struct Meters
     float tunerCents = 0, tunerFreq = 0;
     bool clipped = false;
     float bloom = 0;
+    // pedal jobs: the bank the pedal is working for, each job's value and whether the
+    // pedal has taken it yet (a job not taken plays its saved sound)
+    int pedalBank = 0;                           // 0 Grit, 1 Groove, 2 Glow
+    int pedalTarget = 0;                         // 0 dirt, 1 wah, 2 volume, 3 Bloom
+    float pedal = -1;                            // last raw position after calibration, -1 not moved
+    float dirt = 1, wah = 0.5f, volume = 1;
+    bool dirtActive = false, wahActive = false, volumeActive = false, bloomActive = false;
+    bool waiting = false;                        // the pedal hasn't caught up with its job yet
     float cpuLoad = 0;                           // filled by the host
     bool light = false;                          // effects in light mode right now
 };
@@ -41,7 +49,11 @@ enum class Action
     TunerOff,
     TunerToggle,
     DelayTap,        // tap tempo for the delay
+    Spill,           // the next few blocks: delay and reverb switched off keep their tails
 };
+
+// What the expression pedal does: one job per bank, and in Groove, wah or volume.
+enum class PedalJob { Dirt = 0, Wah = 1, Volume = 2, Bloom = 3 };
 
 class Engine
 {
@@ -60,8 +72,16 @@ public:
     // ---- control, any thread ----
     void setParam (P p, float value);
     float getParam (P p) const { return values[(size_t) p].load (std::memory_order_relaxed); }
-    void setBloom (float pos01);          // expression position after calibration
-    float bloom() const { return bloomPos.load(); }
+    // The expression pedal, after calibration. Goes to the job of the bank set with
+    // setPedalBank: a job nobody has touched takes the pedal on its first move; a job the
+    // pedal left earlier waits until the pedal passes its value (soft takeover). Volume
+    // starts full and always waits, so it never drops out on a bank change.
+    void setPedal (float pos01);
+    void setPedalBank (int bank);         // 0 Grit (dirt), 1 Groove (wah or volume), 2 Glow (Bloom)
+    void resetPedalJobs();                // new song or part: every job back to its saved sound
+    void setJob (PedalJob job, float v);  // the phone's bar: set a job directly
+    void setBloom (float pos01) { setJob (PedalJob::Bloom, pos01); }
+    float bloom() const { return job[3].value.load(); }
     void action (Action a);
     void setLightMode (bool light) { lightRequest.store (light); }
     Meters meters() const;
@@ -94,7 +114,11 @@ private:
     std::unique_ptr<Impl> impl;
     double sr = 48000.0;
     std::array<std::atomic<float>, kNumParams> values;
-    std::atomic<float> bloomPos { 0.0f }, cpuLoad { 0.0f };
+    struct JobState { std::atomic<float> value { 0.0f }; std::atomic<bool> active { false }, caught { false }; };
+    std::array<JobState, 4> job;
+    std::atomic<int> pedalBank { 0 }, lastTarget { -1 };
+    std::atomic<float> lastPedal { -1.0f }, cpuLoad { 0.0f };
+    int pedalTarget() const;
     std::atomic<bool> lightRequest { false };
 };
 

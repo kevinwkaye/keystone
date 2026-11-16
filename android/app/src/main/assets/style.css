@@ -115,7 +115,7 @@ input[type=range] { width: 100%; accent-color: var(--blue); height: 32px; }
 .sload .n { font-size: 18px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .sload .s { font-size: 13px; color: var(--muted); display: block; }
 .dots { width: 44px; height: 44px; border: none; border-radius: 8px; background: transparent; display: flex; align-items: center; justify-content: center; }
-.acts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 0 10px 10px; }
+.acts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 0 10px 10px; }
 .acts button { height: 44px; border: none; border-radius: 8px; background: var(--flip); font-size: 14px; }
 .acts .del { color: var(--orange); }
 .rename { display: flex; gap: 6px; padding: 0 10px 10px; }
@@ -141,3 +141,12 @@ input[type=range] { width: 100%; accent-color: var(--blue); height: 32px; }
 
 .dot.warn { background: var(--orange); }
 .warnstrip { width: 100%; min-height: 48px; border: none; border-radius: 10px; background: var(--orange); color: #0E0E10; font-size: 15px; font-weight: 700; text-align: left; padding: 8px 14px; }
+
+/* banks */
+.banks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.banks button { height: 48px; border: none; border-radius: 10px; background: var(--btn); font-size: 16px; letter-spacing: 0.1em; }
+.song .partname { font-weight: 500; color: var(--muted); }
+
+/* setlist parts */
+.srow.part { margin-left: 28px; }
+.partmark { height: 42px; flex: none; border-left: 2px solid var(--dim); border-bottom: 2px solid var(--dim); border-radius: 0 0 0 8px; margin: -14px 0 14px 12px; width: 18px; }

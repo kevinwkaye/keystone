@@ -92,7 +92,7 @@ public:
     // ---- impulses: the housekeeping thread loads, the audio thread picks up ----
     Convolver& convolver() { return conv; }
 
-    void update (const Vals& v, float zone3, bool bloomActive, bool heelBack, bool cutTails, bool light)
+    void update (const Vals& v, float zone3, bool bloomActive, bool heelBack, bool cutTails, bool light, bool spillWindow = false)
     {
         const bool on = Vb (v, P::RvOn);
         pendingType = std::max (0, std::min ((int) kTypes - 1, Vi (v, P::RvType)));
@@ -105,12 +105,18 @@ public:
             decay = decay + (40.0f * reach - decay) * zone3;
             mix = std::max (mix, zone3 * 0.35f * reach);
         }
+        // tails ring over a part change: switched off in the window, the wet stays up and
+        // the tail dies away on its own (nothing new goes in)
+        if (mix > 0.0f) { spilling = false; spillMix = mix; }
+        else if (spillWindow && mixS.target > 0.0f) spilling = true;
+        if (spilling && tail < 1.0e-4f && mixS.value > 0.0f && mixS.settled()) spilling = false;
+        if (spilling) mix = spillMix;
         mixS.set (mix);
         decaySec = decay;
         vals = &v;
         lightMode = light;
         voice (v);
-        gateS.set (heelBack && cutTails && ! on ? 0.0f : 1.0f);
+        gateS.set (heelBack && cutTails && ! on && ! spilling ? 0.0f : 1.0f);
         feeding = (on && ! freeze) || (bloomActive && on && zone3 > 0);
         updateGains();
     }
@@ -461,6 +467,8 @@ private:
     Convolver conv;
     LoopLimiter lim, limEcho, limBloom, limSpring[kSprings];
     Follower duckEnv, fastEnv, slowEnv;
+    bool spilling = false;
+    float spillMix = 0;
     Smoothed mixS, gateS, shimS;
 };
 } // namespace ks

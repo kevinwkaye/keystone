@@ -30,6 +30,7 @@ static std::string fromPath (const fs::path& p) { const auto u = p.u8string(); r
 struct Controller::Song
 {
     std::string name;
+    bool part = false;                      // a part of the song above it
     std::map<std::string, float> values;   // non-global parameters only
 };
 
@@ -41,6 +42,7 @@ struct Controller::State
     std::vector<std::string> outbox;
     std::string captureFile, spaceFile;
     double lastDTap = -10;
+    int bank = 0;
     bool droneHeld = false;
     bool dTapCaptured = false;
 };
@@ -99,6 +101,7 @@ void Controller::load()
         {
             Song song;
             song.name = js.value ("name", std::string ("Song"));
+            song.part = js.value ("part", false) && ! s->songs.empty();
             song.values = defaults();
             if (js.contains ("values") && js["values"].is_object())
                 for (auto it = js["values"].begin(); it != js["values"].end(); ++it)
@@ -128,7 +131,7 @@ void Controller::load()
                 song.values["drive.drive.lowcut"] = 70.0f;
             }
             s->songs.push_back (song);
-            if ((int) s->songs.size() >= kMaxSongs) break;
+            if ((int) s->songs.size() >= kMaxEntries) break;
         }
         s->current = std::clamp (sl.value ("current", 0), 0, std::max (0, (int) s->songs.size() - 1));
     }
@@ -136,7 +139,7 @@ void Controller::load()
     {
         // first run: the songs from the analysis, all on the same clean starting point
         for (auto* n : { "New choon", "I'm Not a Robot", "When the Circus Comes to Town", "The Comedian and the Boxer" })
-            s->songs.push_back ({ n, defaults() });
+            s->songs.push_back ({ n, false, defaults() });
         s->current = 0;
     }
 
@@ -174,13 +177,14 @@ void Controller::load()
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 5;
+    j["version"] = 6;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)
     {
         json js;
         js["name"] = song.name;
+        if (song.part) js["part"] = true;
         js["values"] = song.values;
         j["songs"].push_back (js);
     }
@@ -206,33 +210,65 @@ int Controller::songCount() const { return (int) s->songs.size(); }
 int Controller::currentSong() const { return s->current; }
 std::string Controller::songName (int i) const { return i >= 0 && i < songCount() ? s->songs[(size_t) i].name : std::string(); }
 
-void Controller::applySong (int i)
+bool Controller::isPart (int i) const { return i > 0 && i < songCount() && s->songs[(size_t) i].part; }
+
+int Controller::songNumber (int i) const
+{
+    int n = 0;
+    for (int k = 0; k <= i && k < songCount(); ++k) if (! s->songs[(size_t) k].part) ++n;
+    return n;
+}
+
+int Controller::songsOnly() const { return songNumber (songCount() - 1); }
+
+int Controller::bank() const { return s->bank; }
+
+void Controller::setBank (int b)
+{
+    s->bank = std::clamp (b, 0, 2);
+    engine.setPedalBank (s->bank);
+    static const char* names[] = { "GRIT", "GROOVE", "GLOW" };
+    queueState();
+    queueToast (names[s->bank]);
+}
+
+void Controller::applySong (int i, bool keepGoing)
 {
     if (s->songs.empty()) return;
     i = std::clamp (i, 0, songCount() - 1);
     s->current = i;
+    // a part of the same song: delay and reverb switched off keep their tails, so the
+    // request goes in before the new settings
+    if (keepGoing) engine.action (Action::Spill);
     for (const auto& [id, v] : s->songs[(size_t) i].values)
     {
         const int p = findParam (id.c_str());
         if (p >= 0) engine.setParam ((P) p, v);
     }
-    engine.action (Action::DroneClear);
+    engine.resetPedalJobs();
+    s->bank = std::clamp ((int) std::lround (engine.getParam (P::BankStart)), 0, 2);
+    engine.setPedalBank (s->bank);
+    if (! keepGoing) engine.action (Action::DroneClear);   // a held drone trails off between songs
 }
 
 void Controller::selectSong (int i)
 {
     if (s->songs.empty()) return;
-    applySong (i);
+    i = std::clamp (i, 0, songCount() - 1);
+    const bool keepGoing = i != s->current && songNumber (i) == songNumber (s->current);
+    applySong (i, keepGoing);
     saveSetlist();
     queueState();
-    queueToast (songName (s->current));
+    queueToast (isPart (i) ? songName (i) : songName (s->current));
 }
 
 void Controller::stepSong (int delta)
 {
     const int n = songCount();
     if (n == 0) return;
-    selectSong (((s->current + delta) % n + n) % n);
+    const int to = std::clamp (s->current + delta, 0, n - 1);
+    if (to == s->current) { queueToast (delta > 0 ? "LAST SONG" : "FIRST SONG"); return; }
+    selectSong (to);
 }
 
 bool Controller::edited() const
@@ -262,19 +298,46 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     auto& songs = s->songs;
     const int n = (int) songs.size();
     auto valid = [&] (int k) { return k >= 0 && k < n; };
+    auto full = [&] (bool newSong)
+    {
+        if (n >= kMaxEntries) { queueToast ("40 songs and parts is the limit"); return true; }
+        if (newSong && songsOnly() >= kMaxSongs) { queueToast ("15 songs is the limit"); return true; }
+        return false;
+    };
+    auto groupEnd = [&] (int k) { while (k + 1 < n && songs[(size_t) k + 1].part) ++k; return k; };
     if (op == "add")
     {
-        if (n >= kMaxSongs) { queueToast ("15 songs is the limit"); return; }
-        songs.push_back ({ name.empty() ? "Song " + std::to_string (n + 1) : name, defaults() });
+        if (full (true)) return;
+        Song ns { name.empty() ? "Song " + std::to_string (songsOnly() + 1) : name, false, defaults() };
+        songs.push_back (ns);
         applySong (n);
     }
     else if (op == "copy" && valid (i))
     {
-        if (n >= kMaxSongs) { queueToast ("15 songs is the limit"); return; }
+        if (full (! songs[(size_t) i].part)) return;
         Song c = songs[(size_t) i];
         c.name += " copy";
         songs.insert (songs.begin() + i + 1, c);
         if (s->current > i) ++s->current;
+    }
+    else if (op == "addPart" && valid (i))
+    {
+        // a new part at the end of i's song, starting from i's saved settings
+        if (full (false)) return;
+        const int end = groupEnd (i);
+        int head = i;
+        while (head > 0 && songs[(size_t) head].part) --head;
+        Song c = songs[(size_t) i];
+        c.part = true;
+        c.name = name.empty() ? "Part " + std::to_string (end - head + 2) : name;
+        songs.insert (songs.begin() + end + 1, c);
+        if (s->current > end) ++s->current;
+    }
+    else if (op == "part" && valid (i) && i > 0)
+    {
+        // make a song a part of the one above, or a part its own song again
+        if (! songs[(size_t) i].part) songs[(size_t) i].part = true;
+        else { if (songsOnly() >= kMaxSongs) { queueToast ("15 songs is the limit"); return; } songs[(size_t) i].part = false; }
     }
     else if (op == "rename" && valid (i) && ! name.empty())
     {
@@ -284,6 +347,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     {
         if (n <= 1) { queueToast ("Keep at least one song"); return; }
         songs.erase (songs.begin() + i);
+        songs.front().part = false;
         if (s->current == i) applySong (std::min (i, n - 2));
         else if (s->current > i) --s->current;
     }
@@ -295,6 +359,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
         if (s->current == i) s->current = to;
         else if (i < s->current && to >= s->current) --s->current;
         else if (i > s->current && to <= s->current) ++s->current;
+        songs.front().part = false;
     }
     else if (op == "save")
     {
@@ -316,8 +381,12 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
 }
 
 // ---------------------------------------------------------------------------------------
-// Footswitches: tap A Edge/Drive, B Bitrot, C filter, D drone capture.
-// Hold A previous song, B next song, C tuner, D slap. Hold C and D together: Keep.
+// Footswitches, in three banks. The bank sets what taps A to C and the pedal do:
+//   Grit:   A Edge/Drive, B Bitrot, C Growl/Cut flip; pedal: dirt blend
+//   Groove: A auto filter, B Dimension, C wah; pedal: wah, or volume with the wah off
+//   Glow:   A Speckle, B delay, C reverb; pedal: Bloom
+// Every bank: tap D drone. Hold A next bank, B next song or part, C tuner, D slap.
+// Hold C and D together: Keep. Changing bank never changes the sound.
 // ---------------------------------------------------------------------------------------
 void Controller::footswitchPress (int sw, double now) { s->logic.press (sw, now); }
 void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, now); }
@@ -333,12 +402,35 @@ void Controller::onFootswitch (int sw, int ev)
     using E = FootswitchLogic::Event;
     const bool tuning = tunerOn();
     if (ev == E::ComboHoldCD) { keep(); return; }
+    auto toggle = [&] (P p) { setValue (p, value (p) > 0.5f ? 0.0f : 1.0f); };
     if (ev == E::Tap)
     {
         if (tuning) { engine.action (Action::TunerOff); queueState(); return; }   // any tap leaves the tuner
-        switch (sw)
+        if (sw == 3)
         {
-            case 0:
+            // tap to hold the note you're playing, tap again to let it trail off
+            const double now = std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count();
+            // a held drone that has died away on its own (Sustain under full) counts as off
+            if (s->droneHeld && now - s->lastDTap > 2.0 && engine.meters().droneLayers == 0) s->droneHeld = false;
+            if (s->droneHeld)
+            {
+                engine.action (Action::DroneClear);
+                queueToast ("DRONE OFF");
+                s->droneHeld = false;
+            }
+            else
+            {
+                engine.action (Action::DroneCapture);
+                queueToast ("DRONE");
+                s->droneHeld = true;
+            }
+            s->lastDTap = now;
+            return;
+        }
+        if (sw < 0 || sw > 2) return;
+        if (s->bank == 0)
+        {
+            if (sw == 0)
             {
                 const bool on = value (P::DriveOn) > 0.5f;
                 const int voice = (int) std::lround (value (P::DriveVoice));
@@ -347,32 +439,21 @@ void Controller::onFootswitch (int sw, int ev)
                 else if (voice == 0) setValue (P::DriveVoice, 1);
                 else if (withOff) { setValue (P::DriveOn, 0); setValue (P::DriveVoice, 0); }
                 else setValue (P::DriveVoice, 0);
-                break;
             }
-            case 1: setValue (P::BitrotOn, value (P::BitrotOn) > 0.5f ? 0.0f : 1.0f); break;
-            case 2: setValue (P::FiltOn, value (P::FiltOn) > 0.5f ? 0.0f : 1.0f); break;
-            case 3:
-            {
-                // tap to hold the note you're playing, tap again to let it trail off
-                const double now = std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count();
-                // a held drone that has died away on its own (Sustain under full) counts as off
-                if (s->droneHeld && now - s->lastDTap > 2.0 && engine.meters().droneLayers == 0) s->droneHeld = false;
-                if (s->droneHeld)
-                {
-                    engine.action (Action::DroneClear);
-                    queueToast ("DRONE OFF");
-                    s->droneHeld = false;
-                }
-                else
-                {
-                    engine.action (Action::DroneCapture);
-                    queueToast ("DRONE");
-                    s->droneHeld = true;
-                }
-                s->lastDTap = now;
-                break;
-            }
-            default: break;
+            else if (sw == 1) toggle (P::BitrotOn);
+            else toggle (P::PreFlip);
+        }
+        else if (s->bank == 1)
+        {
+            if (sw == 0) toggle (P::FiltOn);
+            else if (sw == 1) toggle (P::DimOn);
+            else toggle (P::WahOn);
+        }
+        else
+        {
+            if (sw == 0) toggle (P::GrOn);
+            else if (sw == 1) toggle (P::DlOn);
+            else toggle (P::RvOn);
         }
         return;
     }
@@ -380,7 +461,7 @@ void Controller::onFootswitch (int sw, int ev)
     {
         switch (sw)
         {
-            case 0: if (! tuning) stepSong (-1); break;
+            case 0: if (! tuning) setBank ((s->bank + 1) % 3); break;
             case 1: if (! tuning) stepSong (1); break;
             case 2: engine.action (Action::TunerToggle); queueState(); break;
             case 3: if (! tuning) setValue (P::CompSlap, value (P::CompSlap) > 0.5f ? 0.0f : 1.0f); break;
@@ -398,6 +479,8 @@ void Controller::keep()
     e["plugin"] = "Keystone";
     e["version"] = kVersion;
     e["preset"] = songName (s->current);
+    e["song"] = songNumber (s->current);
+    e["part"] = isPart (s->current);
     e["edited"] = edited();
     json params, text;
     for (int i = 0; i < kNumParams; ++i)
@@ -407,7 +490,15 @@ void Controller::keep()
     }
     e["parameters"] = params;
     e["parameterText"] = text;
-    e["expression"] = { { "assignment", "Bloom sweep" }, { "position", engine.bloom() } };
+    {
+        const auto m = engine.meters();
+        static const char* banks[] = { "Grit", "Groove", "Glow" };
+        static const char* jobs[] = { "Dirt blend", "Wah", "Volume", "Bloom sweep" };
+        e["bank"] = banks[s->bank];
+        e["expression"] = { { "assignment", jobs[m.pedalTarget] }, { "position", m.pedal },
+                            { "dirt", m.dirtActive ? json (m.dirt) : json() }, { "wah", m.wahActive ? json (m.wah) : json() },
+                            { "volume", m.volumeActive ? json (m.volume) : json() }, { "bloom", m.bloomActive ? json (m.bloom) : json() } };
+    }
     e["tempo"] = nullptr;
     e["capture"] = engine.captureName();
     e["droneLayers"] = engine.meters().droneLayers;
@@ -536,8 +627,11 @@ std::string Controller::stateJson() const
     for (int i = 0; i < kNumParams; ++i) vals[paramTable()[i].id] = engine.getParam ((P) i);
     j["values"] = vals;
     j["songs"] = json::array();
-    for (const auto& song : s->songs) j["songs"].push_back (song.name);
+    j["parts"] = json::array();
+    for (const auto& song : s->songs) { j["songs"].push_back (song.name); j["parts"].push_back (song.part); }
     j["current"] = s->current;
+    j["bank"] = s->bank;
+    j["maxEntries"] = kMaxEntries;
     j["edited"] = edited();
     j["maxSongs"] = kMaxSongs;
     j["tuner"] = tunerOn();
@@ -565,6 +659,16 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
     j["in"] = std::round (gainToDb (m.inPeak) * 10) / 10;
     j["lim"] = std::round (m.limiterReduction * 10) / 10;
     j["bloom"] = std::round (m.bloom * 1000) / 1000;
+    j["bank"] = m.pedalBank;
+    j["job"] = m.pedalTarget;
+    {
+        const float jv[] = { m.dirtActive ? m.dirt : 1.0f, m.wahActive ? m.wah : 0.5f, m.volume, m.bloom };
+        j["jobv"] = std::round (jv[m.pedalTarget] * 1000) / 1000;
+        const bool act[] = { m.dirtActive, m.wahActive, m.volumeActive, m.bloomActive };
+        j["jobOn"] = act[m.pedalTarget];
+    }
+    j["wait"] = m.waiting;
+    j["pedal"] = std::round (m.pedal * 1000) / 1000;
     j["drone"] = m.droneLayers;
     j["swell"] = m.droneSwelling;
     j["grains"] = std::round (m.grainsActivity * 100) / 100;
@@ -617,6 +721,8 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     else if (t == "songStep") stepSong (m.value ("d", 1));
     else if (t == "setlist") setlistOp (m.value ("op", std::string()), m.value ("i", s->current), m.value ("to", -1), m.value ("name", std::string()));
     else if (t == "bloom") engine.setBloom (m.value ("v", 0.0f));
+    else if (t == "pedal") engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));   // the phone's bar
+    else if (t == "bank") setBank (m.value ("i", 0));
     else if (t == "tuner")
     {
         engine.action (m.value ("on", false) ? Action::TunerOn : Action::TunerOff);

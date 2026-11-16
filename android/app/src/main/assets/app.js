@@ -8,12 +8,12 @@ var KS = (function () {
   var S = {
     link: 'searching', linkDetail: '',
     schema: null, params: {}, modules: [], values: {},
-    songs: [], current: 0, edited: false, maxSongs: 15,
+    songs: [], parts: [], current: 0, edited: false, maxSongs: 15, maxEntries: 40, bank: 0,
     tuner: false, captures: [], capture: '', captureFile: '', namAvailable: true, spaces: [], space: '', spaceFile: '',
     footswitch: '', audio: '', keeperLive: false,
     meter: {}, screen: 'play', module: null, prevScreen: 'play', tunerAuto: false,
     editVoice: null, sel: null, openRow: -1, renameRow: -1, confirmDel: -1,
-    noteFor: 0, noteUntil: 0, bloomDrag: null,
+    noteFor: 0, noteUntil: 0, bloomDrag: null, lastBank: -1,
     health: null, rtt: null, healthAt: 0
   };
 
@@ -47,7 +47,8 @@ var KS = (function () {
         try { localStorage.setItem('ks.schema', JSON.stringify(m)); } catch (e) {}
         queueRender(); break;
       case 'state':
-        S.values = m.values; S.songs = m.songs; S.current = m.current; S.edited = m.edited;
+        S.values = m.values; S.songs = m.songs; S.parts = m.parts || []; S.current = m.current; S.edited = m.edited;
+        S.bank = m.bank || 0; S.maxEntries = m.maxEntries || 40;
         S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile; S.spaces = m.spaces || []; S.space = m.space || ''; S.spaceFile = m.spaceFile || '';
         S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive;
         tunerState(m.tuner);
@@ -67,6 +68,7 @@ var KS = (function () {
         break;
       case 'meter':
         S.meter = m;
+        if (m.bank != null && m.bank !== S.bank) { S.bank = m.bank; queueRender(true); }
         if (m.tuner) tunerState(true); else if (S.tuner) tunerState(false);
         queueMeters(); break;
       case 'toast':
@@ -93,7 +95,7 @@ var KS = (function () {
     try { sc = JSON.parse(localStorage.getItem('ks.schema')); st = JSON.parse(localStorage.getItem('ks.state')); } catch (e) {}
     if (!sc && window.KS_DEFAULT) { sc = window.KS_DEFAULT.schema; st = window.KS_DEFAULT.state; }
     if (sc) useSchema(sc);
-    if (st) { S.values = st.values || {}; S.songs = st.songs || []; S.current = st.current || 0; S.captures = st.captures || []; S.capture = st.capture; S.captureFile = st.captureFile; }
+    if (st) { S.values = st.values || {}; S.songs = st.songs || []; S.parts = st.parts || []; S.bank = st.bank || 0; S.current = st.current || 0; S.captures = st.captures || []; S.capture = st.capture; S.captureFile = st.captureFile; }
   }
 
   // Renders and meter updates are coalesced into one per screen frame, so a burst of
@@ -244,26 +246,61 @@ var KS = (function () {
       '<span class="title">' + esc(title) + '</span>' + (right || '<span></span>') + '</div>';
   }
 
+  // ---------------------------------------------------------------- banks and parts
+  var BANKS = [
+    { name: 'Grit', col: '#F0997B', pedal: 'Dirt blend', zones: ['Clean', 'Drive', 'Bitrot'] },
+    { name: 'Groove', col: '#B38CF0', pedal: 'Volume', zones: ['Heel', '', 'Toe'] },
+    { name: 'Glow', col: '#6FA8FF', pedal: 'Bloom', zones: ['Speckle', '', 'Wash'] }];
+  var JOBS = ['Dirt blend', 'Wah', 'Volume', 'Bloom'];
+  function isPart(i) { return !!S.parts[i] && i > 0; }
+  function songNo(i) { var n = 0; for (var k = 0; k <= i && k < S.songs.length; k++) if (!isPart(k)) n++; return n; }
+  function songsOnly() { return songNo(S.songs.length - 1); }
+  function headOf(i) { while (i > 0 && isPart(i)) i--; return i; }
+  // what taps A to C do in each bank, and their state now
+  function bankTiles(b) {
+    var lit = function (id) { return on(id) ? 'ON' : 'OFF'; };
+    if (b === 1) return [
+      { k: 'A', name: 'Filter', st: lit('filter.on'), id: 'filter.on' },
+      { k: 'B', name: 'Dimension', st: lit('dim.on'), id: 'dim.on' },
+      { k: 'C', name: 'Wah', st: lit('wah.on'), id: 'wah.on' }];
+    if (b === 2) return [
+      { k: 'A', name: 'Speckle', st: lit('grains.on'), id: 'grains.on' },
+      { k: 'B', name: 'Delay', st: lit('delay.on'), id: 'delay.on' },
+      { k: 'C', name: 'Reverb', st: lit('reverb.on'), id: 'reverb.on' }];
+    var voice = Math.round(val('drive.voice')), driveOn = on('drive.on');
+    return [
+      { k: 'A', name: 'Drive', st: !driveOn ? 'OFF' : voice ? 'DRIVE' : 'EDGE', col: !driveOn ? '#8A847A' : voice ? '#F0997B' : '#5DCAA5', border: !driveOn ? '#262626' : voice ? '#F0997B' : '#5DCAA5' },
+      { k: 'B', name: 'Bitrot', st: lit('bitrot.on'), id: 'bitrot.on' },
+      { k: 'C', name: 'Growl/Cut', st: on('preamp.flip') ? 'FLIPPED' : 'OFF', id: 'preamp.flip' }];
+  }
+  function pedalInfo() {
+    var m = S.meter, job = m.job != null ? m.job : [0, on('wah.on') ? 1 : 2, 3][S.bank];
+    var zones = job === 0 ? BANKS[0].zones : job === 3 ? BANKS[2].zones : ['Heel', '', 'Toe'];
+    var v = S.bloomDrag != null ? S.bloomDrag : (m.jobv != null ? m.jobv : job === 3 ? (m.bloom || 0) : 1);
+    var text = !m.jobOn && job !== 2 ? 'Saved sound, move the pedal' : m.wait ? 'Waiting: pedal at ' + Math.round((m.pedal || 0) * 100) + '%' : Math.round(v * 100) + '%';
+    return { job: job, name: JOBS[job], zones: zones, v: v, text: text };
+  }
+  function bankBar() {
+    return '<div class="banks">' + BANKS.map(function (b, i) {
+      var cur = i === S.bank;
+      return '<button type="button" data-bank="' + i + '" style="' + (cur ? 'background:' + b.col + ';color:#0E0E10;font-weight:700' : 'color:' + b.col) + '">' + b.name.toUpperCase() + '</button>';
+    }).join('') + '</div>';
+  }
+
   // ---------------------------------------------------------------- screens
   function playScreen() {
-    var n = S.songs.length, i = S.current;
-    var song = S.songs[i] || 'No songs yet';
-    var voice = Math.round(val('drive.voice')), driveOn = on('drive.on');
+    var n = songsOnly(), i = S.current, head = headOf(i);
+    var song = S.songs[head] || 'No songs yet', part = isPart(i) ? S.songs[i] : '';
     var layers = S.meter.drone || 0;
-    var tiles = [
-      { k: 'A', name: 'Drive', st: !driveOn ? 'OFF' : voice ? 'DRIVE' : 'EDGE', col: !driveOn ? '#8A847A' : voice ? '#F0997B' : '#5DCAA5', border: !driveOn ? '#262626' : voice ? '#F0997B' : '#5DCAA5' },
-      { k: 'B', name: 'Bitrot', st: on('bitrot.on') ? 'ON' : 'OFF' },
-      { k: 'C', name: 'Filter', st: on('filter.on') ? 'ON' : 'OFF' },
-      { k: 'D', name: 'Drone', st: layers ? 'HOLDING' + (layers > 1 ? ' ' + layers : '') : 'READY' }
-    ];
+    var tiles = bankTiles(S.bank).concat([{ k: 'D', name: 'Drone', st: layers ? 'HOLDING' + (layers > 1 ? ' ' + layers : '') : 'READY' }]);
+    var bc = BANKS[S.bank].col, pi = pedalInfo();
     var stomps = tiles.map(function (t) {
       var lit = t.st !== 'OFF' && t.st !== 'READY';
-      var col = t.col || (lit ? '#5DCAA5' : '#8A847A'), border = t.border || (lit ? '#5DCAA5' : '#262626');
+      var col = t.col || (lit ? (t.k === 'D' ? '#5DCAA5' : bc) : '#8A847A'), border = t.border || (lit ? (t.k === 'D' ? '#5DCAA5' : bc) : '#262626');
       return '<button type="button" class="stomp" data-stomp="' + t.k + '" style="border-color:' + border + '">' +
         '<span class="head">' + flip(t.k) + '<span class="nm">' + t.name + '</span></span>' +
         '<span class="st" style="color:' + col + '">' + t.st + '</span></button>';
     }).join('');
-    var bl = S.bloomDrag != null ? S.bloomDrag : (S.meter.bloom || 0);
     var offline = S.link !== 'connected' ? '<div class="card"><span style="font-size:17px;font-weight:700">Looking for Keystone</span>' +
       '<span class="small">Turn on this phone\'s hotspot and switch on the laptop. Keystone joins the hotspot by itself and this screen connects within a few seconds. No internet or mobile data needed.</span>' +
       (S.linkDetail ? '<span class="small" style="color:#F2EDE4">' + esc(S.linkDetail) + '</span>' : '') +
@@ -275,15 +312,17 @@ var KS = (function () {
       '<div class="top"><div class="brand">' + PEBBLE + '<span class="title">Keystone</span></div>' + pill() + '</div>' +
       offline +
       '<div class="songbar"><button type="button" class="arrow" data-act="prev" aria-label="Previous song">' + ICON.left + '</button>' +
-      '<button type="button" class="song" data-go="setlist" aria-label="Open the setlist">' + flip(n ? two(i + 1) : '--', 'blue') +
-      '<span style="display:flex;flex-direction:column;min-width:0"><span class="name">' + esc(song) + '</span><span class="pos">Song ' + (i + 1) + ' of ' + n +
-      (S.edited ? ', <span class="edited">edited</span>' : '. Hold A or B to step.') + '</span></span></button>' +
+      '<button type="button" class="song" data-go="setlist" aria-label="Open the setlist">' + flip(n ? two(songNo(i)) : '--', 'blue') +
+      '<span style="display:flex;flex-direction:column;min-width:0"><span class="name">' + esc(song) + (part ? '<span class="partname">, ' + esc(part) + '</span>' : '') + '</span><span class="pos">Song ' + songNo(i) + ' of ' + n +
+      (S.edited ? ', <span class="edited">edited</span>' : '. Hold B for next.') + '</span></span></button>' +
       '<button type="button" class="arrow" data-act="next" aria-label="Next song">' + ICON.right + '</button></div>' +
       '<div class="card meter">' + meterSvg() + '<div class="label">Output</div></div>' +
+      bankBar() +
       '<div class="stomps">' + stomps + '</div>' + note +
-      '<div class="card bloom" id="bloom"><div class="label" style="display:flex;justify-content:space-between"><span>Bloom</span><span id="bloomPct">Expression ' + Math.round(bl * 100) + '%</span></div>' +
-      '<div class="bar"><div id="bloomBar" style="width:' + (bl * 100) + '%"></div></div>' +
-      '<div class="zones"><span>Speckle</span><span>Wash</span></div></div>' +
+      '<div class="card bloom" id="bloom"><div class="label" style="display:flex;justify-content:space-between"><span id="pedalName">Pedal: ' + pi.name + '</span><span id="bloomPct">' + pi.text + '</span></div>' +
+      '<div class="bar"><div id="bloomBar" style="width:' + (pi.v * 100) + '%;background:' + bc + '"></div></div>' +
+      '<div class="zones">' + pi.zones.map(function (z) { return '<span>' + z + '</span>'; }).join('') + '</div>' +
+      '<span class="small">Hold A for the next bank. Changing bank never changes the sound.</span></div>' +
       nav('play') + '</section>';
   }
 
@@ -379,7 +418,8 @@ var KS = (function () {
     var id = m.id;
     if (id === 'drone') return { s: (S.meter.drone ? 'HOLDING' : on('drone.on') ? 'READY' : 'OFF') };
     if (id === 'drive') return { s: !on('drive.on') ? 'OFF' : Math.round(val('drive.voice')) ? 'DRIVE' : 'EDGE' };
-    if (id === 'bloom') return { s: 'EXP' };
+    if (id === 'bloom') return { s: 'GLOW' };
+    if (id === 'pedal') return { s: BANKS[S.bank].name.toUpperCase() };
     if (id === 'footswitches') return { s: 'A to D' };
     if (id === 'output') return { s: on('output.limit') ? 'ON' : 'NO LIMIT' };
     if (id === 'split') return { s: 'ON' };
@@ -399,6 +439,8 @@ var KS = (function () {
       case 'grains': return fmt('grains.effect') + ' ' + fmt('grains.variant') + ', ' + fmt('grains.subdiv') + (Math.round(val('grains.pitch')) ? ', ' + fmt('grains.pitch') + ' up' : '');
       case 'delay': return fmt('delay.type') + ', ' + (Math.round(val('delay.sync')) ? fmt('delay.sync') : fmt('delay.time')) + ', ' + fmt('delay.feedback') + ' repeats';
       case 'reverb': return fmt('reverb.type') + (Math.round(val('reverb.type')) === 11 ? (S.space ? ', ' + S.space : ', no space loaded') : Math.round(val('reverb.type')) === 10 ? ', ' + fmt('reverb.length') : ', ' + fmt('reverb.decay'));
+      case 'wah': return 'Heel ' + fmt('wah.low') + ' Hz to toe ' + fmt('wah.high') + ' Hz';
+      case 'pedal': return 'Now: ' + pedalInfo().name + ' in ' + BANKS[S.bank].name;
       case 'preamp': return 'Valve gain ' + Math.round(val('preamp.gain') * 100) + '%, ' + Math.round(val('preamp.blend') * 100) + '% Cut' + (val('preamp.tape') > 0.01 ? ', tape' : '');
     }
     return m.summary;
@@ -412,8 +454,8 @@ var KS = (function () {
       ['Split', ['split']],
       ['Bottom end dry', ['lowcomp']],
       ['Bottom end wet', dimFull ? ['drone'] : ['dim', 'drone']],
-      ['Full sound', (place === 0 ? ['bitrot', 'drive', 'preamp'] : place === 1 ? ['drive', 'bitrot', 'preamp'] : ['drive', 'preamp', 'bitrot']).concat(['filter'], dimFull ? ['dim'] : [], ['grains', 'delay', 'reverb'])],
-      ['Control', ['bloom', 'footswitches', 'output']]];
+      ['Full sound', (place === 0 ? ['bitrot', 'drive', 'preamp'] : place === 1 ? ['drive', 'bitrot', 'preamp'] : ['drive', 'preamp', 'bitrot']).concat(['filter', 'wah'], dimFull ? ['dim'] : [], ['grains', 'delay', 'reverb'])],
+      ['Control', ['footswitches', 'pedal', 'bloom', 'output']]];
     var seen = {}, out = [];
     paths.forEach(function (pg) {
       var list = pg[1].filter(function (id) { return by[id]; }).map(function (id) { seen[id] = 1; return by[id]; });
@@ -605,6 +647,12 @@ var KS = (function () {
       pre = rvHtml.slice(0, rvCut) + spCard;
       list = null; extra = rvHtml.slice(rvCut);
     }
+    if (mod === 'pedal') {
+      pre = '<section class="card"><h2 class="label">One pedal, a job per bank</h2><span class="small">Grit: dirt blend. Heel is clean, the drive is fully in by halfway and Bitrot joins from Bitrot joins at up to the toe. It only blends dirt you have switched on.</span>' +
+        '<span class="small">Groove: with the wah on (tap C) the pedal sweeps it, on the full sound so the bottom end stays solid. With the wah off it is a volume pedal before the delay and reverb, so tails ring as you pull back.</span>' +
+        '<span class="small">Glow: Bloom, see Bloom sweep.</span>' +
+        '<span class="small">After a bank change the pedal waits until it passes the value its job was left at, then follows, so nothing jumps. Volume starts full and always waits. A new song or part puts every job back to its saved sound until you move the pedal.</span></section>';
+    }
     if (mod === 'bloom') {
       var bl = S.meter.bloom || 0;
       pre = '<section class="card"><h2 class="label">Sweep now</h2><div class="bar"><div id="bloomBar" style="width:' + bl * 100 + '%"></div></div>' +
@@ -618,12 +666,15 @@ var KS = (function () {
       pre = '<section class="card"><h2 class="label">Tap tempo</h2><button type="button" class="wide" data-act="tap">Tap</button></section>';
     }
     if (mod === 'footswitches') {
-      var jobs = [['A', 'Edge / Drive', 'Previous song'], ['B', 'Bitrot', 'Next song'], ['C', 'Filter', 'Tuner'], ['D', 'Drone hold / trail off', 'Slap']];
-      pre = '<section class="card"><h2 class="label">Tap and hold</h2>' + jobs.map(function (j, i) {
+      var jobs = [['A', 'Grit: Edge / Drive. Groove: auto filter. Glow: Speckle', 'Next bank'], ['B', 'Grit: Bitrot. Groove: Dimension. Glow: delay', 'Next song or part'],
+                  ['C', 'Grit: Growl/Cut flip. Groove: wah. Glow: reverb', 'Tuner'], ['D', 'Drone hold / trail off, in every bank', 'Slap']];
+      pre = '<section class="card"><h2 class="label">Banks</h2>' + bankBar() +
+        '<span class="small">Hold A to step Grit, Groove, Glow. The bank sets what A, B and C do and what the pedal does: dirt blend in Grit, wah in Groove (volume with the wah off), Bloom in Glow. Changing bank never changes the sound. Each song opens in its own bank (This song, below).</span></section>' +
+        '<section class="card"><h2 class="label">Tap and hold</h2>' + jobs.map(function (j, i) {
         return '<div style="display:flex;align-items:center;gap:12px">' + flip(j[0]).replace('class="flip "', 'class="flip" style="width:36px;height:42px;font-size:22px"') +
-          '<span style="flex:1"><span style="display:block;font-size:17px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span>' +
+          '<span style="flex:1"><span style="display:block;font-size:16px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span>' +
           '<button type="button" class="wide" style="height:44px;padding:0 14px;font-size:14px" data-learn="' + i + '">Learn</button></div>';
-      }).join('') + '<div class="small">Hold C and D together for a second: Keep.</div></section>' +
+      }).join('') + '<div class="small">Hold C and D together for a second: Keep. Hold B only goes forwards. Use the arrows on Play to go back.</div></section>' +
         '<section class="card"><h2 class="label">Expression</h2><div class="small">Rock the pedal to heel and press Heel, then to toe and press Toe. If heel and toe still work the wrong way round, press Reverse.</div>' +
         '<div class="pair"><button type="button" class="wide" data-cal="0">Heel</button><button type="button" class="wide" data-cal="1">Toe</button></div>' +
         '<div class="pair"><button type="button" class="wide" data-cal="3">' + (S.health && S.health.exp && S.health.exp.rev ? 'Reversed: on' : 'Reverse') + '</button></div>' +
@@ -644,23 +695,28 @@ var KS = (function () {
 
   function setlistScreen() {
     var rows = S.songs.map(function (name, i) {
-      var cur = i === S.current;
-      var sub = cur ? (S.edited ? 'Playing now, <span class="edited">edited</span>' : 'Playing now') : 'Tap to load';
+      var cur = i === S.current, pt = isPart(i);
+      var sub = cur ? (S.edited ? 'Playing now, <span class="edited">edited</span>' : 'Playing now') : pt ? 'Part of ' + esc(S.songs[headOf(i)]) : 'Tap to load';
       var inner = '';
       if (S.renameRow === i) inner = '<div class="rename"><input id="renameText" maxlength="48" value="' + esc(name) + '" aria-label="Song name"><button type="button" data-act="renameSave" data-i="' + i + '">Save</button></div>';
       else if (S.confirmDel === i) inner = '<div class="acts" style="grid-template-columns:2fr 1fr 1fr"><span class="small" style="align-self:center">Delete ' + esc(name) + '?</span><button type="button" class="del" data-act="delYes" data-i="' + i + '">Delete</button><button type="button" data-act="delNo">Keep</button></div>';
       else if (S.openRow === i) inner = '<div class="acts"><button type="button" data-act="rename" data-i="' + i + '">Rename</button><button type="button" data-act="copy" data-i="' + i + '">Copy</button>' +
         '<button type="button" data-act="up" data-i="' + i + '" aria-label="Move up">Up</button><button type="button" data-act="down" data-i="' + i + '" aria-label="Move down">Down</button>' +
-        '<button type="button" class="del" data-act="del" data-i="' + i + '">Delete</button></div>';
-      return '<div class="srow' + (cur ? ' cur' : '') + '" data-row="' + i + '"><div class="main">' +
+        '<button type="button" data-act="addPart" data-i="' + i + '">Add part</button>' +
+        (i > 0 ? '<button type="button" data-act="part" data-i="' + i + '">' + (pt ? 'Own song' : 'Part of above') + '</button>' : '<span></span>') +
+        '<span></span><button type="button" class="del" data-act="del" data-i="' + i + '">Delete</button></div>';
+      return '<div class="srow' + (cur ? ' cur' : '') + (pt ? ' part' : '') + '" data-row="' + i + '"><div class="main">' +
         '<button type="button" class="grip" data-grip="' + i + '" aria-label="Drag to reorder">' + ICON.grip + '</button>' +
-        '<button type="button" class="sload" data-song="' + i + '">' + flip(two(i + 1), cur ? 'blue' : '') + '<span style="display:flex;flex-direction:column;min-width:0"><span class="n">' + esc(name) + '</span><span class="s">' + sub + '</span></span></button>' +
+        '<button type="button" class="sload" data-song="' + i + '">' + (pt ? '<span class="partmark" aria-hidden="true"></span>' : flip(two(songNo(i)), cur ? 'blue' : '')) +
+        '<span style="display:flex;flex-direction:column;min-width:0"><span class="n">' + esc(name) + '</span><span class="s">' + sub + '</span></span></button>' +
         '<button type="button" class="dots" data-menu="' + i + '" aria-label="Song options">' + ICON.dots + '</button></div>' + inner + '</div>';
     }).join('');
-    return '<section class="screen" style="gap:14px">' + header('Setlist', { id: 'play', label: 'Play' }, '<span class="small">' + S.songs.length + ' of ' + S.maxSongs + '</span>') +
+    var fullSongs = songsOnly() >= S.maxSongs || S.songs.length >= S.maxEntries;
+    return '<section class="screen" style="gap:14px">' + header('Setlist', { id: 'play', label: 'Play' }, '<span class="small">' + songsOnly() + ' of ' + S.maxSongs + ' songs</span>') +
       '<div class="group" id="rows">' + rows + '</div>' +
-      '<div class="pair"><button type="button" class="wide" data-act="add"' + (S.songs.length >= S.maxSongs ? ' disabled style="opacity:0.4"' : '') + '>Add song</button><button type="button" class="wide blue" data-act="save">Save edits</button></div>' +
-      '<div class="small">Save writes your current changes into the loaded song. Changing song without saving puts it back as it was.</div>' +
+      '<div class="pair"><button type="button" class="wide" data-act="add"' + (fullSongs ? ' disabled style="opacity:0.4"' : '') + '>Add song</button><button type="button" class="wide blue" data-act="save">Save edits</button></div>' +
+      '<div class="small">Save writes your current changes into the loaded song or part. Changing song without saving puts it back as it was.</div>' +
+      '<div class="small">Parts split a song, for a big change in the middle: hold B and everything changes at once, with the delay and reverb tails ringing over and a held drone carrying on. Add part copies the song\'s settings as a starting point.</div>' +
       nav('play') + '</section>';
   }
 
@@ -701,8 +757,10 @@ var KS = (function () {
       if (n) { n.setAttribute('x2', p.x.toFixed(1)); n.setAttribute('y2', p.y.toFixed(1)); }
       if (S.bloomDrag == null) {
         var bar = document.getElementById('bloomBar'), pct = document.getElementById('bloomPct');
-        if (bar) bar.style.width = (m.bloom * 100) + '%';
-        if (pct) pct.textContent = 'Expression ' + Math.round(m.bloom * 100) + '%';
+        var pi = pedalInfo(), pn = document.getElementById('pedalName');
+        if (bar) bar.style.width = (pi.v * 100) + '%';
+        if (pct) pct.textContent = pi.text;
+        if (pn && pn.textContent !== 'Pedal: ' + pi.name) queueRender(true);
       }
       var droneTile = document.querySelector('[data-stomp="D"] .st');
       var want = m.drone ? 'HOLDING' + (m.drone > 1 ? ' ' + m.drone : '') : 'READY';
@@ -765,13 +823,14 @@ var KS = (function () {
     if (d.stomp) {
       // show the change at once; Keystone's answer confirms it
       if (send({ t: 'stomp', k: d.stomp })) {
-        if (d.stomp === 'B') S.values['bitrot.on'] = on('bitrot.on') ? 0 : 1;
-        if (d.stomp === 'C') S.values['filter.on'] = on('filter.on') ? 0 : 1;
-        if (d.stomp === 'A' && on('drive.on')) S.values['drive.voice'] = Math.round(val('drive.voice')) ? 0 : 1;
+        var tl = d.stomp !== 'D' ? bankTiles(S.bank)['ABC'.indexOf(d.stomp)] : null;
+        if (tl && tl.id) S.values[tl.id] = on(tl.id) ? 0 : 1;
+        else if (d.stomp === 'A' && on('drive.on')) S.values['drive.voice'] = Math.round(val('drive.voice')) ? 0 : 1;
         render(true);
       }
       return;
     }
+    if (d.bank) { if (send({ t: 'bank', i: +d.bank })) { S.bank = +d.bank; render(true); } return; }
     if (d.onoff) { setParam(d.onoff, on(d.onoff) ? 0 : 1); return render(true); }
     if (d.module) { S.module = d.module; return go('module'); }
     if (d.set) { setParam(d.set, +d.v); return render(true); }
@@ -788,8 +847,8 @@ var KS = (function () {
     switch (d.act) {
       case 'keep': send({ t: 'keep' }); break;
       case 'manual': var mi = document.getElementById('manualIp'); if (mi && mi.value.trim()) { S.manualIp = mi.value.trim(); if (window.KeystoneNative && KeystoneNative.connectTo) KeystoneNative.connectTo(S.manualIp); toast('TRYING'); } break;
-      case 'prev': if (send({ t: 'songStep', d: -1 }) && S.songs.length) { S.current = (S.current + S.songs.length - 1) % S.songs.length; render(true); } break;
-      case 'next': if (send({ t: 'songStep', d: 1 }) && S.songs.length) { S.current = (S.current + 1) % S.songs.length; render(true); } break;
+      case 'prev': if (send({ t: 'songStep', d: -1 }) && S.songs.length) { S.current = Math.max(0, S.current - 1); render(true); } break;
+      case 'next': if (send({ t: 'songStep', d: 1 }) && S.songs.length) { S.current = Math.min(S.songs.length - 1, S.current + 1); render(true); } break;
       case 'restartAudio': send({ t: 'restartAudio' }); break;
       case 'asioPanel': send({ t: 'asioPanel' }); break;
       case 'light': setParam('output.quality', Math.round(val('output.quality')) === 2 ? 0 : 2); render(true); break;
@@ -805,6 +864,8 @@ var KS = (function () {
       case 'rename': S.renameRow = i2; S.openRow = -1; render(); var r = document.getElementById('renameText'); if (r) { r.focus(); r.select(); } break;
       case 'renameSave': var rt = document.getElementById('renameText'); if (rt && rt.value.trim()) send({ t: 'setlist', op: 'rename', i: i2, name: rt.value.trim() }); S.renameRow = -1; render(); break;
       case 'copy': send({ t: 'setlist', op: 'copy', i: i2 }); S.openRow = -1; break;
+      case 'addPart': send({ t: 'setlist', op: 'addPart', i: i2 }); S.openRow = -1; break;
+      case 'part': send({ t: 'setlist', op: 'part', i: i2 }); S.openRow = -1; break;
       case 'up': if (i2 > 0) { send({ t: 'setlist', op: 'move', i: i2, to: i2 - 1 }); S.openRow = i2 - 1; } break;
       case 'down': if (i2 < S.songs.length - 1) { send({ t: 'setlist', op: 'move', i: i2, to: i2 + 1 }); S.openRow = i2 + 1; } break;
       case 'del': S.confirmDel = i2; S.openRow = -1; render(); break;
@@ -851,8 +912,8 @@ var KS = (function () {
     S.bloomDrag = v;
     var bar = document.getElementById('bloomBar'), pct = document.getElementById('bloomPct');
     if (bar) bar.style.width = (v * 100) + '%';
-    if (pct) pct.textContent = 'Expression ' + Math.round(v * 100) + '%';
-    if (!bloomSendTimer) bloomSendTimer = setTimeout(function () { bloomSendTimer = null; send({ t: 'bloom', v: S.bloomDrag }); }, 20);
+    if (pct) pct.textContent = Math.round(v * 100) + '%';
+    if (!bloomSendTimer) bloomSendTimer = setTimeout(function () { bloomSendTimer = null; send({ t: 'pedal', v: S.bloomDrag }); }, 20);
   }
   function bloomDown(e) {
     if (!e.target.closest || !e.target.closest('#bloom')) return;
@@ -860,7 +921,7 @@ var KS = (function () {
   }
   function bloomUp() {
     if (S.bloomDrag == null) return;
-    send({ t: 'bloom', v: S.bloomDrag });
+    send({ t: 'pedal', v: S.bloomDrag });
     setTimeout(function () { S.bloomDrag = null; S.dragging = false; }, 150);
   }
   document.addEventListener('touchstart', bloomDown, { passive: false });

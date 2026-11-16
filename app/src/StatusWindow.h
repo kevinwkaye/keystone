@@ -128,7 +128,7 @@ public:
         const Row rows[] = {
             { "Audio interface", h.audioText, h.audioOk },
             { "Footswitches", h.fsText + (h.fsAgoSec >= 0 ? ", last press " + duration (h.fsAgoSec) + " ago (" + h.fsLast + ")" : String()), h.fsOk },
-            { "Expression", h.expAgoSec < 0 ? String ("Not moved yet") : "Bloom " + String (roundToInt (h.expPos * 100)) + "%, moved " + duration (h.expAgoSec) + " ago" + (h.expCalibrated ? "" : ", not calibrated"), h.expAgoSec >= 0 },
+            { "Expression", h.expAgoSec < 0 ? String ("Not moved yet") : "Pedal at " + String (roundToInt (h.expPos * 100)) + "%, moved " + duration (h.expAgoSec) + " ago" + (h.expCalibrated ? "" : ", not calibrated"), h.expAgoSec >= 0 },
             { "Phone", h.phones > 0 ? "Connected from " + h.phoneAddresses : "None connected. Laptop is " + h.laptopAddresses, h.phones > 0 },
             { "Laptop", "CPU " + String (roundToInt (h.cpu * 100)) + "%, " + (h.dropouts == 0 ? String ("no dropouts") : String (h.dropouts) + " dropouts (" + String (h.dropoutsRecent) + " in the last minute)") + (h.light ? ", effects light" : ""), h.cpu < 0.7f && h.dropoutsRecent == 0 },
         };

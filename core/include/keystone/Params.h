@@ -124,6 +124,8 @@ struct ParamInfo
     P(PreWow,         "preamp.wow",      "Wow",           "preamp",  "Tape",           Flip,   0,    1,    0.15f,"%",  "",   None) \
     P(PreDetail,      "preamp.detail",   "Detail",        "preamp",  "Output",         Flip,   0,    6,    2,    "dB", "",   None) \
     P(PreLevel,       "preamp.level",    "Level",         "preamp",  "Output",         Flip,   -12,  12,   0,    "dB", "",   None) \
+    P(PreFlip,        "preamp.flip",     "Flipped",       "preamp",  "Flip (tap C in Grit)", Toggle, 0, 1,    0,    "",   "",   None) \
+    P(PreBlendB,      "preamp.blendB",   "Flip to",       "preamp",  "Flip (tap C in Grit)", Slider, 0, 1,    0.85f,"%",  "Valve|Cut", None) \
     P(FiltOn,         "filter.on",       "On",            "filter",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(FiltMode,       "filter.mode",     "Mode",          "filter",  "Mode",           Choice, 0,    1,    0,    "",   "Envelope|Manual", None) \
     P(FiltType,       "filter.type",     "Shape",         "filter",  "Mode",           Choice, 0,    1,    1,    "",   "Low-pass|Band-pass", None) \
@@ -136,6 +138,11 @@ struct ParamInfo
     P(FiltSpeed,      "filter.speed",    "Response",      "filter",  "Sweep",          Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(FiltMix,        "filter.mix",      "Mix",           "filter",  "Sweep",          Flip,   0,    1,    1,    "%",  "",   None) \
     P(FiltPos,        "filter.pos",      "Manual position","filter", "Manual",         Slider, 0,    1,    0.5f, "%",  "Low|High", None) \
+    P(WahOn,          "wah.on",          "On",            "wah",     "",               Toggle, 0,    1,    0,    "",   "",   None) \
+    P(WahLow,         "wah.low",         "Heel",          "wah",     "Sweep",          Flip,   150,  800,  320,  "Hz", "",   Log) \
+    P(WahHigh,        "wah.high",        "Toe",           "wah",     "Sweep",          Flip,   1000, 4000, 2200, "Hz", "",   Log) \
+    P(WahQ,           "wah.q",           "Resonance",     "wah",     "Sweep",          Flip,   0,    1,    0.75f,"%",  "",   None) \
+    P(WahMix,         "wah.mix",         "Mix",           "wah",     "Sweep",          Flip,   0,    1,    1,    "%",  "",   None) \
     P(DimOn,          "dim.on",          "On",            "dim",     "",               Toggle, 0,    1,    1,    "",   "",   None) \
     P(DimMode,        "dim.mode",        "Mode",          "dim",     "Mode",           Choice, 0,    3,    1,    "",   "1|2|3|4", None) \
     P(DimMix,         "dim.mix",         "Mix",           "dim",     "Mix",            Flip,   0,    1,    0.5f, "%",  "",   None) \
@@ -225,6 +232,9 @@ struct ParamInfo
     P(BloomWash,      "bloom.wash",      "Wash reach",    "bloom",   "Reach",          Flip,   0,    1,    0.9f, "%",  "",   None) \
     P(BloomTails,     "bloom.tails",     "Heel back",     "bloom",   "Behaviour",      Choice, 0,    1,    1,    "",   "Cut tails|Let tails ring", None) \
     P(BloomAutoCap,   "bloom.autocap",   "Capture drone on swell", "bloom", "Behaviour", Toggle, 0,  1,    0,    "",   "",   Hidden) \
+    P(PedalBitrotAt,  "pedal.bitrotAt",  "Bitrot joins at","pedal",  "Dirt blend (Grit)", Flip, 0,    0.9f, 0.25f,"%",  "",   None) \
+    P(PedalVolFloor,  "pedal.volFloor",  "Heel volume",   "pedal",   "Volume (Groove, wah off)", Flip, -60, 0, -60, "dB", "", None) \
+    P(BankStart,      "bank.start",      "Opens in",      "footswitches","This song",  Choice, 0,    2,    0,    "",   "Grit|Groove|Glow", None) \
     P(OutIron,        "output.iron",     "Iron",          "output",  "Output",         Flip,   0,    1,    0.3f, "%",  "",   None) \
     P(OutLevel,       "output.level",    "Level",         "output",  "Output",         Flip,   -24,  12,   0,    "dB", "",   None) \
     P(OutLimit,       "output.limit",    "Limiter",       "output",  "Output",         Toggle, 0,    1,    1,    "",   "",   None) \

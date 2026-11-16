@@ -98,10 +98,11 @@ public:
         lowIntoHp1.reset(); lowIntoHp2.reset();
     }
 
-    void update (const Vals& v, bool bloomActive, float bloom, float splitFreq, bool haveCapture)
+    // dirtMix: the expression pedal's dirt blend in Grit, 1 when the pedal hasn't taken it
+    void update (const Vals& v, bool bloomActive, float bloom, float splitFreq, bool haveCapture, float dirtMix = 1.0f)
     {
         on = Vb (v, P::DriveOn);
-        onS.set (on ? 1.0f : 0.0f);
+        onS.set (on ? clampf (dirtMix, 0.0f, 1.0f) : 0.0f);
         // each voice has its own source: a capture saved at high gain can't play a light
         // Edge, so Edge defaults to the model and Drive to the capture
         capVoice[0] = Vi (v, P::EdgeSource) == 0 && haveCapture;

@@ -18,8 +18,9 @@ class Controller
 {
 public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
-    static constexpr int kMaxSongs = 15;
-    static constexpr const char* kVersion = "0.3.2";
+    static constexpr int kMaxSongs = 15;     // songs; their parts don't count
+    static constexpr int kMaxEntries = 40;   // songs and parts together
+    static constexpr const char* kVersion = "0.3.3";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -60,8 +61,15 @@ public:
     int currentSong() const;
     std::string songName (int i) const;
     void selectSong (int i);
-    void stepSong (int delta);
+    void stepSong (int delta);   // forwards or back through songs and parts, no wrap
     bool edited() const;
+    bool isPart (int i) const;
+    int songNumber (int i) const;   // 1-based, parts share their song's number
+    int songsOnly() const;          // songs, parts not counted
+
+    // banks: what taps A to C and the pedal do. 0 Grit, 1 Groove, 2 Glow
+    int bank() const;
+    void setBank (int b);
 
     // for tests
     void setValue (P p, float v, bool broadcast = true);
@@ -80,7 +88,7 @@ private:
 
     void onFootswitch (int sw, int event);
     void handleMessageInner (const std::string& line, const std::function<void (const std::string&)>& reply);
-    void applySong (int i);
+    void applySong (int i, bool keepGoing = false);   // keepGoing: a part of the same song
     void saveSetlist() const;
     void saveSettings() const;
     void queue (const std::string& msg);

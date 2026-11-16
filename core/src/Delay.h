@@ -73,7 +73,7 @@ public:
         swellPos = 1; swellG = 1; tail = 0; drift = 0;
     }
 
-    void update (const Vals& v, float zone3, bool bloomActive, bool heelBack, bool cutTails)
+    void update (const Vals& v, float zone3, bool bloomActive, bool heelBack, bool cutTails, bool spillWindow = false)
     {
         const bool on = Vb (v, P::DlOn);
         pendingType = std::max (0, std::min ((int) kTypes - 1, Vi (v, P::DlType)));
@@ -88,6 +88,12 @@ public:
         }
         if (hold) fb = 1.0f;
         if (! on && ! hold && ! (bloomActive && on && zone3 > 0)) fb = std::min (fb, 0.6f);   // tails die away naturally
+        // tails ring over a part change: switched off in the window, the wet stays up and
+        // the tail dies away on its own (nothing new goes in)
+        if (mix > 0.0f) { spilling = false; spillMix = mix; }
+        else if (spillWindow && mixS.target > 0.0f) spilling = true;
+        if (spilling && tail < 1.0e-4f && mixS.value > 0.0f && mixS.settled()) spilling = false;
+        if (spilling) mix = spillMix;
         mixS.set (mix);
         fbS.set (fb);
 
@@ -136,7 +142,7 @@ public:
         static const float trims[kTypes] = { 1.0f, 1.12f, 1.1f, 0.95f, 1.0f, 1.0f, 1.05f, 1.1f, 1.15f, 1.2f, 1.05f, 1.0f };
         trimS.set (trims[pendingType]);
 
-        gateS.set (heelBack && cutTails && ! on ? 0.0f : 1.0f);
+        gateS.set (heelBack && cutTails && ! on && ! spilling ? 0.0f : 1.0f);
         feeding = (on && ! hold) || (bloomActive && on && zone3 > 0);
         anyOn = on || (bloomActive && on && zone3 > 0);
         updateFilters();
@@ -469,6 +475,8 @@ private:
     PitchUp ice;
     LoopLimiter lim, lim2;
     Follower duckEnv, fastEnv, slowEnv;
+    bool spilling = false;
+    float spillMix = 0;
     Smoothed smearS, tapeS, extraModS, crinkleShiftS, timeS, time2S, mixS, fbS, gateS, trimS, inS, crinkleS;
     Rng rng;
 };

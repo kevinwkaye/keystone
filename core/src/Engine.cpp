@@ -44,6 +44,7 @@ struct Engine::Impl
     Preamp preamp;
     OutputIron iron;
     EnvFilter filter;
+    EnvFilter wah;                 // the pedal wah, its own filter so it stacks with the envelope one
     MonoDimension dim;
     Grains grains;
     Delay delay;
@@ -54,7 +55,7 @@ struct Engine::Impl
     Limiter limiter;
     PlayLevel play;
 
-    Smoothed lowLevel, highLevel, outLevel, tunerGate, bitrotOn, preOn, filtOn, dimOn;
+    Smoothed lowLevel, highLevel, outLevel, tunerGate, bitrotOn, preOn, filtOn, dimOn, wahOn, volume;
     Smoothed bloomS;
     std::vector<float> lowBuf, highBuf, cleanBuf, droneBuf, synthBuf, lowMul, synthG;
     Smoothed bitrotClean;
@@ -72,8 +73,13 @@ struct Engine::Impl
     std::chrono::steady_clock::time_point lastTunerRun {};
 
     // bloom
-    std::atomic<bool> bloomActive { false };
     float lastBloom = 0;
+
+    // tails ring over a part change: a short window in which delay and reverb switched
+    // off keep their tails instead of fading them out
+    std::atomic<int> spillRequests { 0 };
+    int spillSeen = 0;
+    int64_t spillLeft = 0;
 
     // meters
     std::atomic<float> inPeak { 0 }, outPeak { 0 }, outRms { 0 }, limRed { 0 };
@@ -98,6 +104,7 @@ struct Engine::Impl
 Engine::Engine() : impl (std::make_unique<Impl>())
 {
     for (int i = 0; i < kNumParams; ++i) values[(size_t) i].store (paramTable()[i].def);
+    resetPedalJobs();
 }
 
 Engine::~Engine() = default;
@@ -135,6 +142,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.preamp.prepare (s);
     d.iron.prepare (s);
     d.filter.prepare (s);
+    d.wah.prepare (s);
     d.dim.prepare (s);
     d.grains.prepare (s);
     d.delay.prepare (s);
@@ -158,12 +166,14 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.paLp.lowPass (5500, 0.707f, s);
     d.limiter.prepare (s);
     d.play.prepare (s, 0.045f);
-    for (auto* sm : { &d.lowLevel, &d.highLevel, &d.outLevel, &d.tunerGate, &d.bitrotOn, &d.preOn, &d.filtOn, &d.dimOn })
+    for (auto* sm : { &d.lowLevel, &d.highLevel, &d.outLevel, &d.tunerGate, &d.bitrotOn, &d.preOn, &d.filtOn, &d.dimOn, &d.wahOn })
         sm->setTime (0.015f, s);
+    d.volume.setTime (0.012f, s); d.volume.reset (1);
+    d.wahOn.reset (0);
     d.bloomS.setTime (0.02f, s);
     d.lowLevel.reset (1); d.highLevel.reset (1); d.outLevel.reset (1); d.tunerGate.reset (1);
     d.bitrotOn.reset (0); d.preOn.reset (1); d.filtOn.reset (0); d.dimOn.reset (1);
-    d.bloomS.reset (bloomPos.load());
+    d.bloomS.reset (job[3].value.load());
     d.lowBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.highBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.cleanBuf.assign ((size_t) d.maxBlock, 0.0f);
@@ -187,10 +197,61 @@ void Engine::setParam (P p, float value)
     values[(size_t) p].store (clampf (value, inf.min, inf.max), std::memory_order_relaxed);
 }
 
-void Engine::setBloom (float pos01)
+// ---------------------------------------------------------------------------------------
+// The expression pedal's jobs
+// ---------------------------------------------------------------------------------------
+int Engine::pedalTarget() const
 {
-    bloomPos.store (clampf (pos01, 0.0f, 1.0f));
-    impl->bloomActive.store (true);
+    switch (pedalBank.load())
+    {
+        case 0: return (int) PedalJob::Dirt;
+        case 1: return getParam (P::WahOn) > 0.5f ? (int) PedalJob::Wah : (int) PedalJob::Volume;
+        default: return (int) PedalJob::Bloom;
+    }
+}
+
+void Engine::setPedal (float pos)
+{
+    pos = clampf (pos, 0.0f, 1.0f);
+    const int t = pedalTarget();
+    auto& j = job[(size_t) t];
+    const float last = lastPedal.load();
+    // the pedal has just started working for this job (bank change, or wah switched in
+    // or out): a job it set earlier waits for the pedal to come back to it
+    if (lastTarget.exchange (t) != t) j.caught.store (false);
+    const bool waits = t == (int) PedalJob::Volume || j.active.load();
+    if (! waits) { j.value.store (pos); j.active.store (true); j.caught.store (true); }
+    else
+    {
+        if (! j.caught.load())
+        {
+            const float v = j.value.load();
+            const bool crossed = last >= 0 && (last - v) * (pos - v) <= 0.0f;
+            if (crossed || std::fabs (pos - v) < 0.03f) j.caught.store (true);
+        }
+        if (j.caught.load()) { j.value.store (pos); j.active.store (true); }
+    }
+    lastPedal.store (pos);
+}
+
+void Engine::setPedalBank (int bank) { pedalBank.store (std::clamp (bank, 0, 2)); }
+
+void Engine::resetPedalJobs()
+{
+    for (auto& j : job) { j.active.store (false); j.caught.store (false); }
+    job[(size_t) PedalJob::Dirt].value.store (1.0f);
+    job[(size_t) PedalJob::Wah].value.store (0.5f);
+    job[(size_t) PedalJob::Volume].value.store (1.0f);
+    lastTarget.store (-1);
+}
+
+void Engine::setJob (PedalJob which, float v)
+{
+    auto& j = job[(size_t) which];
+    j.value.store (clampf (v, 0.0f, 1.0f));
+    j.active.store (true);
+    j.caught.store (false);   // the pedal catches up with what the phone set
+    if ((int) which == pedalTarget()) lastTarget.store ((int) which);
 }
 
 void Engine::action (Action a)
@@ -204,6 +265,7 @@ void Engine::action (Action a)
         case Action::TunerOff: d.tunerOn.store (false); break;
         case Action::TunerToggle: d.tunerOn.store (! d.tunerOn.load()); break;
         case Action::DelayTap: d.tapRequests.fetch_add (1); break;
+        case Action::Spill: d.spillRequests.fetch_add (1); break;
     }
 }
 
@@ -223,7 +285,18 @@ Meters Engine::meters() const
     m.tunerCents = d.tunerCents.load();
     m.tunerFreq = d.tunerFreq.load();
     m.clipped = d.clipped.exchange (false);
-    m.bloom = bloomPos.load();
+    m.bloom = job[3].value.load();
+    m.pedalBank = pedalBank.load();
+    m.pedalTarget = pedalTarget();
+    m.pedal = lastPedal.load();
+    m.dirt = job[0].value.load(); m.dirtActive = job[0].active.load();
+    m.wah = job[1].value.load(); m.wahActive = job[1].active.load();
+    m.volume = job[2].value.load(); m.volumeActive = job[2].active.load();
+    m.bloomActive = job[3].active.load();
+    {
+        const auto& j = job[(size_t) m.pedalTarget];
+        m.waiting = (m.pedalTarget == 2 || j.active.load()) && ! j.caught.load();
+    }
     m.cpuLoad = cpuLoad.load();
     m.light = d.light.load();
     return m;
@@ -257,8 +330,8 @@ void Engine::process (const float* in, float* out, int numSamples)
 
         // bloom zones: heel to halfway brings in grains, halfway to toe the wash.
         // The drone is not on the sweep: footswitch D and the Drone page run it.
-        const bool bloomOn = d.bloomActive.load();
-        d.bloomS.set (bloomPos.load());
+        const bool bloomOn = job[3].active.load();
+        d.bloomS.set (job[3].value.load());
         const float bl = d.bloomS.target;
         const float z2 = clampf (bl * 2.0f, 0.0f, 1.0f);
         const float z3 = clampf ((bl - 0.5f) * 2.0f, 0.0f, 1.0f);
@@ -280,6 +353,34 @@ void Engine::process (const float* in, float* out, int numSamples)
         }
         d.sampleClock += n;
 
+        // ---- the other pedal jobs ----
+        // dirt blend: heel clean, the drive fully in by halfway, Bitrot from "joins at" to
+        // its full level at the toe. A job the pedal hasn't taken plays the saved sound.
+        const float dirt = job[0].active.load() ? job[0].value.load() : 1.0f;
+        const float driveMix = clampf (dirt * 2.0f, 0.0f, 1.0f);
+        const float bitAt = V (v, P::PedalBitrotAt);
+        const float bitMix = clampf ((dirt - bitAt) / std::max (0.05f, 1.0f - bitAt), 0.0f, 1.0f);
+        const float wahPos = job[1].active.load() ? job[1].value.load() : 0.5f;
+        float volGain = 1.0f;
+        if (job[2].active.load())
+        {
+            // a volume pedal's taper: -24 dB at a quarter, -12 dB at halfway; the heel is
+            // silent, or the song's floor
+            const float vp = job[2].value.load();
+            volGain = vp * vp;
+            const float floorDb = V (v, P::PedalVolFloor);
+            if (floorDb > -59.5f) volGain = std::max (volGain, dbToGain (floorDb));
+        }
+        d.volume.set (volGain);
+        // the second preamp blend, flipped to by tap C in Grit
+        if (Vb (v, P::PreFlip)) d.v[(size_t) P::PreBlend] = V (v, P::PreBlendB);
+
+        // tails ring over a part change: the window stays open for a quarter of a second
+        const int sr2 = d.spillRequests.load();
+        if (sr2 != d.spillSeen) { d.spillSeen = sr2; d.spillLeft = (int64_t) (0.25f * d.sr); }
+        const bool spillWindow = d.spillLeft > 0;
+        d.spillLeft = std::max<int64_t> (0, d.spillLeft - n);
+
         // ---- module updates ----
         const float splitF = V (v, P::SplitFreq);
         d.split.set (splitF, d.sr);
@@ -298,22 +399,24 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.low.update (v);
         d.drone.update (v, d.play.level);
         d.drone.block (n);
-        d.drive.update (v, bloomOn, bl, subCut, d.haveCapture.load());
+        d.drive.update (v, bloomOn, bl, subCut, d.haveCapture.load(), driveMix);
         auto* cap = d.capture.take();
         d.bitrot.update (v);
         d.preamp.update (v, d.play.level);
         d.iron.set (V (v, P::OutIron));
         d.filter.update (v);
+        d.wah.updateWah (v, wahPos);
+        d.wahOn.set (Vb (v, P::WahOn) ? 1.0f : 0.0f);
         d.dim.setMode (Vi (v, P::DimMode));
         d.dim.setMix (V (v, P::DimMix));
         d.grains.update (v, z2, bloomOn, light);
-        d.delay.update (v, z3, bloomOn, heelBack, cutTails);
-        d.reverb.update (v, z3, bloomOn, heelBack, cutTails, light);
+        d.delay.update (v, z3, bloomOn, heelBack, cutTails, spillWindow);
+        d.reverb.update (v, z3, bloomOn, heelBack, cutTails, light, spillWindow);
         d.reverb.block();
         d.lowLevel.set (dbToGain (V (v, P::SplitLowLevel)));
         d.highLevel.set (dbToGain (V (v, P::SplitHighLevel)));
         d.outLevel.set (dbToGain (V (v, P::OutLevel)));
-        d.bitrotOn.set (Vb (v, P::BitrotOn) ? 1.0f : 0.0f);
+        d.bitrotOn.set (Vb (v, P::BitrotOn) ? bitMix : 0.0f);
         d.bitrotClean.set (V (v, P::BitrotClean));
         d.preOn.set (Vb (v, P::PreOn) ? 1.0f : 0.0f);
         d.filtOn.set (Vb (v, P::FiltOn) ? 1.0f : 0.0f);
@@ -390,12 +493,17 @@ void Engine::process (const float* in, float* out, int numSamples)
             if (sg[i] > 0.0f) h = h * lm[i] + d.synthBuf[(size_t) i] * sg[i];
             const float fg = filtHigh ? d.filtOn.next() : 0.0f;
             if (fg > 1.0e-4f) h = h + (d.filter.process (h) - h) * fg;
+            // the pedal wah on the full sound, so the bottom end stays solid under it
+            const float wg = d.wahOn.next();
+            if (wg > 1.0e-4f) h = h + (d.wah.process (h) - h) * wg;
             const float dg = d.dimOn.next();
             if (! dimLow && dg > 1.0e-4f) h = h + (d.dim.process (h) - h) * dg;
-            h *= d.highLevel.next();
+            // the volume pedal sits before the ambient section, so tails ring as you pull back
+            const float vg = d.volume.next();
+            h *= d.highLevel.next() * vg;
 
             // ---- ambient ----
-            const float grainSrc = d.grains.sourceDirty() ? h : d.fullBuf[(size_t) i];
+            const float grainSrc = d.grains.sourceDirty() ? h : d.fullBuf[(size_t) i] * vg;
             const float gr = d.grains.process (grainSrc, playLevel);
             const float dr = d.droneBuf[(size_t) i];
             const float droneSend = dr * V (v, P::DroneSend);
@@ -407,7 +515,7 @@ void Engine::process (const float* in, float* out, int numSamples)
             d.lowAlign.push (d.lowBuf[(size_t) i]);
             // bottom end dry, bottom end wet (Dimension), full sound
             const float lowA = d.lowAlign.at (Drive::kLatency + Preamp::kLatency);
-            float bottom = lowA * d.lowLevel.next();
+            float bottom = lowA * d.lowLevel.next() * vg;
             const float wl = d.wetLevel.next();
             if (dimLow && dg > 1.0e-4f) bottom += (d.dim.process (lowA) - lowA) * dg * wl;
             float core = bottom * lm[i] + h;

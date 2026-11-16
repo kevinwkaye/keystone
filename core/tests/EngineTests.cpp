@@ -816,7 +816,8 @@ static void testClicks()
     struct Case { const char* name; P p; float a, b; };
     for (const auto& c : { Case { "Edge to Drive", P::DriveVoice, 0, 1 }, Case { "Bitrot on", P::BitrotOn, 0, 1 },
                            Case { "Filter on", P::FiltOn, 0, 1 }, Case { "Slap on", P::CompSlap, 0, 1 },
-                           Case { "Drive on", P::DriveOn, 0, 1 } })
+                           Case { "Drive on", P::DriveOn, 0, 1 }, Case { "Wah on", P::WahOn, 0, 1 },
+                           Case { "Growl/Cut flip", P::PreFlip, 0, 1 } })
     {
         Engine e;
         e.prepare (kSr, 64);
@@ -895,6 +896,152 @@ static void testTuner()
 }
 
 // ---------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------------------
+// The pedal's jobs: dirt blend, wah, volume, Bloom, with soft takeover between banks.
+static double bandDb (const std::vector<float>& y, double f, size_t from)
+{
+    // Goertzel power at one frequency over the steady part
+    const double w = 2 * M_PI * f / kSr, c = 2 * std::cos (w);
+    double s1 = 0, s2 = 0;
+    for (size_t i = from; i < y.size(); ++i) { const double s0 = y[i] + c * s1 - s2; s2 = s1; s1 = s0; }
+    return 10 * std::log10 (s1 * s1 + s2 * s2 - c * s1 * s2 + 1e-20);
+}
+
+static double maxDiff (const std::vector<float>& a, const std::vector<float>& b)
+{
+    double m = 0;
+    for (size_t i = 0; i < std::min (a.size(), b.size()); ++i) m = std::max (m, (double) std::fabs (a[i] - b[i]));
+    return m;
+}
+
+static void testPedalJobs()
+{
+    std::printf ("Pedal jobs: dirt blend, wah, volume, takeover\n");
+    auto in = bassLine (2.0, 0.5);
+    auto setup = [] (Engine& e) { e.prepare (kSr, 64); neutral (e); e.setParam (P::DroneOn, 0); };
+
+    // dirt blend: heel is clean even with the drive and Bitrot switched on
+    {
+        Engine dirty, clean;
+        setup (dirty); setup (clean);
+        dirty.setParam (P::DriveOn, 1); dirty.setParam (P::DriveVoice, 1); dirty.setParam (P::BitrotOn, 1);
+        dirty.setPedalBank (0); dirty.setPedal (0.0f);
+        const double d = maxDiff (render (dirty, in), render (clean, in));
+        CHECK (d < 1.0e-4, "Grit, heel: drive and Bitrot on but blended out, same as clean (%.6f)", d);
+        Engine toe; setup (toe);
+        toe.setParam (P::DriveOn, 1); toe.setParam (P::DriveVoice, 1); toe.setParam (P::BitrotOn, 1);
+        toe.setPedalBank (0); toe.setPedal (1.0f);
+        Engine clean2; setup (clean2);
+        const double d2 = maxDiff (render (toe, in), render (clean2, in));
+        CHECK (d2 > 0.05, "Grit, toe: fully dirty (differs from clean by %.3f)", d2);
+        Engine half, driveOnly;
+        setup (half); setup (driveOnly);
+        for (Engine* e : { &half, &driveOnly }) { e->setParam (P::DriveOn, 1); e->setParam (P::DriveVoice, 1); }
+        half.setParam (P::BitrotOn, 1); half.setParam (P::PedalBitrotAt, 0.5f);
+        half.setPedalBank (0); half.setPedal (0.5f);
+        const double d3 = maxDiff (render (half, in), render (driveOnly, in));
+        CHECK (d3 < 1.0e-4, "Grit, halfway with Bitrot joining at 50%%: the drive is fully in, Bitrot not yet (%.6f)", d3);
+    }
+
+    // soft takeover between banks
+    {
+        Engine e; setup (e);
+        e.setPedalBank (0); e.setPedal (0.6f);
+        e.setPedalBank (2); e.setPedal (0.2f);
+        auto m = e.meters();
+        CHECK (std::fabs (m.dirt - 0.6f) < 1e-6 && std::fabs (m.bloom - 0.2f) < 1e-6, "Glow: Bloom takes the pedal on its first move, the dirt stays at 60%%");
+        e.setPedalBank (0); e.setPedal (0.3f);
+        m = e.meters();
+        CHECK (std::fabs (m.dirt - 0.6f) < 1e-6 && m.waiting, "back in Grit: the dirt waits at 60%% while the pedal is at 30%%");
+        e.setPedal (0.5f);
+        CHECK (std::fabs (e.meters().dirt - 0.6f) < 1e-6, "still waiting at 50%%");
+        e.setPedal (0.7f);
+        m = e.meters();
+        CHECK (std::fabs (m.dirt - 0.7f) < 1e-6 && ! m.waiting, "the pedal passes 60%%: the dirt follows it again");
+        e.resetPedalJobs();
+        m = e.meters();
+        CHECK (! m.dirtActive && ! m.bloomActive && m.volume == 1.0f, "a new song: every job back to its saved sound");
+    }
+
+    // volume: starts full and waits, heel silent, or the song's floor
+    {
+        Engine e; setup (e);
+        e.setParam (P::DriveOn, 0);
+        e.setPedalBank (1); e.setPedal (0.0f);
+        auto m = e.meters();
+        CHECK (m.pedalTarget == (int) PedalJob::Volume && m.volume == 1.0f && m.waiting, "Groove with the heel down: volume stays full until the pedal reaches it");
+        const double full = rms (render (e, in).data(), in.size());
+        e.setPedal (0.5f); e.setPedal (1.0f); e.setPedal (0.0f);
+        auto heel = render (e, in);
+        const double heelDb = 20 * std::log10 (rms (heel.data() + heel.size() / 4, heel.size() * 3 / 4) / full + 1e-12);
+        CHECK (heelDb < -80, "once caught, heel down is silent (%.1f dB)", heelDb);
+        e.setParam (P::PedalVolFloor, -18);
+        auto fl = render (e, in);
+        const double floorDb = 20 * std::log10 (rms (fl.data() + fl.size() / 4, fl.size() * 3 / 4) / full + 1e-12);
+        CHECK (std::fabs (floorDb + 18) < 1.5, "with a -18 dB floor the heel sits at %.1f dB", floorDb);
+        e.setPedal (0.5f);
+        auto hv = render (e, in);
+        const double halfDb = 20 * std::log10 (rms (hv.data() + hv.size() / 4, hv.size() * 3 / 4) / full + 1e-12);
+        CHECK (halfDb < -10 && halfDb > -14, "halfway sits at %.1f dB, a volume pedal's taper (mark -10 to -14)", halfDb);
+    }
+
+    // wah: the peak sweeps up from heel to toe, only when switched on
+    {
+        std::vector<float> saw ((size_t) (2 * kSr));
+        for (size_t i = 0; i < saw.size(); ++i) { double t = i / kSr, x = 0; for (int k = 1; k <= 40; ++k) x += std::sin (2 * M_PI * 55 * k * t) / k; saw[i] = (float) (0.3 * x); }
+        Engine heel, toe;
+        for (Engine* e : { &heel, &toe }) { setup (*e); e->setParam (P::WahOn, 1); e->setPedalBank (1); }
+        heel.setPedal (0.0f); toe.setPedal (1.0f);
+        auto h = render (heel, saw), t = render (toe, saw);
+        const size_t from = saw.size() / 2;
+        const double up = bandDb (t, 2200, from) - bandDb (h, 2200, from), down = bandDb (h, 330, from) - bandDb (t, 330, from);
+        CHECK (up > 10 && down > 10, "wah: toe lifts 2.2 kHz by %.1f dB, heel lifts 330 Hz by %.1f dB (marks 10 dB)", up, down);
+        Engine off; setup (off); off.setPedalBank (1); off.setPedal (0.5f); off.setPedal (1.0f);
+        Engine ref; setup (ref);
+        const double d = maxDiff (render (off, in), render (ref, in));
+        CHECK (d < 1.0e-4, "wah off and volume at the toe: no change to the sound (%.6f)", d);
+    }
+
+    // the Growl/Cut flip plays the second blend
+    {
+        Engine a, b;
+        setup (a); setup (b);
+        for (Engine* e : { &a, &b }) e->setParam (P::PreOn, 1);
+        a.setParam (P::PreFlip, 1); a.setParam (P::PreBlendB, 0.9f);
+        b.setParam (P::PreBlend, 0.9f);
+        const double d = maxDiff (render (a, in), render (b, in));
+        CHECK (d < 1.0e-5, "tap C in Grit flips the preamp to its second blend (%.7f)", d);
+    }
+}
+
+// Tails ring over a part change; a plain switch-off still fades them.
+static void testPartTails()
+{
+    std::printf ("Tails over a part change\n");
+    for (int which = 0; which < 2; ++which)
+    {
+        const char* name = which == 0 ? "delay" : "reverb";
+        double after[2] = { 0, 0 };
+        for (int spill = 0; spill < 2; ++spill)
+        {
+            Engine e;
+            e.prepare (kSr, 64);
+            neutral (e);
+            e.setParam (P::DroneOn, 0);
+            if (which == 0) { e.setParam (P::DlOn, 1); e.setParam (P::DlMix, 0.5f); e.setParam (P::DlFeedback, 0.5f); e.setParam (P::DlTime, 300); }
+            else { e.setParam (P::RvOn, 1); e.setParam (P::RvMix, 0.5f); e.setParam (P::RvDecay, 4); }
+            auto note = pluck (82.4, 0.5, 0.8, 0.3);
+            render (e, note);
+            if (spill) e.action (Action::Spill);
+            e.setParam (which == 0 ? P::DlOn : P::RvOn, 0);
+            std::vector<float> sil ((size_t) (0.6 * kSr), 0.0f);
+            auto t = render (e, sil);
+            after[spill] = 20 * std::log10 (rms (t.data() + (size_t) (0.3 * kSr), (size_t) (0.3 * kSr)) + 1e-12);
+        }
+        CHECK (after[1] > -50 && after[1] > after[0] + 30, "%s: over a part change the tail still rings (%.1f dBFS, against %.1f switched off)", name, after[1], after[0]);
+    }
+}
+
 static void testController()
 {
     std::printf ("Controller: footswitches and setlist\n");
@@ -910,24 +1057,50 @@ static void testController()
     double t = 0;
     auto tap = [&] (int sw) { c.footswitchPress (sw, t); t += 0.1; c.footswitchRelease (sw, t); t += 0.5; };
     auto hold = [&] (int sw) { c.footswitchPress (sw, t); for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); } c.footswitchRelease (sw, t); t += 0.5; };
+    CHECK (c.bank() == 0, "songs open in Grit by default");
     tap (0);
-    CHECK (c.value (P::DriveVoice) == 1, "tap A: Edge to Drive");
+    CHECK (c.value (P::DriveVoice) == 1, "Grit, tap A: Edge to Drive");
     tap (0);
-    CHECK (c.value (P::DriveVoice) == 0, "tap A again: back to Edge");
+    CHECK (c.value (P::DriveVoice) == 0, "Grit, tap A again: back to Edge");
     tap (1);
-    CHECK (c.value (P::BitrotOn) == 1, "tap B: Bitrot on");
+    CHECK (c.value (P::BitrotOn) == 1, "Grit, tap B: Bitrot on");
     tap (2);
-    CHECK (c.value (P::FiltOn) == 1, "tap C: filter on");
+    CHECK (c.value (P::PreFlip) == 1, "Grit, tap C: preamp flipped to the second blend");
     CHECK (c.edited(), "stomps mark the song edited");
-    hold (1);
-    CHECK (c.currentSong() == 1 && c.value (P::BitrotOn) == 0, "hold B: next song, back to its saved state");
+    {
+        const float fBefore = c.value (P::FiltOn), dBefore = c.value (P::DimOn);
+        hold (0);
+        CHECK (c.bank() == 1 && c.value (P::FiltOn) == fBefore && c.value (P::DimOn) == dBefore && c.value (P::BitrotOn) == 1,
+               "hold A: Groove, and nothing about the sound changes");
+    }
+    tap (0);
+    CHECK (c.value (P::FiltOn) == 1, "Groove, tap A: auto filter on");
+    tap (1);
+    CHECK (c.value (P::DimOn) == 0, "Groove, tap B: Dimension off");
+    tap (2);
+    CHECK (c.value (P::WahOn) == 1 && e.meters().pedalTarget == (int) PedalJob::Wah, "Groove, tap C: wah on, the pedal sweeps it");
+    tap (2);
+    CHECK (c.value (P::WahOn) == 0 && e.meters().pedalTarget == (int) PedalJob::Volume, "Groove, tap C again: wah off, the pedal is volume");
     hold (0);
-    CHECK (c.currentSong() == 0, "hold A: previous song");
+    CHECK (c.bank() == 2 && e.meters().pedalTarget == (int) PedalJob::Bloom, "hold A again: Glow, the pedal is Bloom");
+    tap (0); tap (1); tap (2);
+    CHECK (c.value (P::GrOn) == 1 && c.value (P::DlOn) == 1 && c.value (P::RvOn) == 1, "Glow: taps A, B, C switch Speckle, delay and reverb");
+    hold (0);
+    CHECK (c.bank() == 0 && e.meters().pedalTarget == (int) PedalJob::Dirt, "hold A a third time: back to Grit, the pedal is the dirt blend");
+    hold (1);
+    CHECK (c.currentSong() == 1 && c.value (P::BitrotOn) == 0 && c.value (P::PreFlip) == 0, "hold B: next song, back to its saved state");
+    hold (1); hold (1);
+    CHECK (c.currentSong() == 3, "hold B steps on to the last song");
+    hold (1);
+    CHECK (c.currentSong() == 3 && c.lastToast() == "LAST SONG", "hold B at the last song stays put, no wrap to song one");
+    c.selectSong (0);
     hold (3);
     CHECK (c.value (P::CompSlap) == 1, "hold D: slap on");
     hold (2);
     for (int i = 0; i < 4; ++i) { e.process (std::vector<float> (64).data(), std::vector<float> (64).data(), 64); }
     CHECK (c.tunerOn(), "hold C: tuner");
+    hold (0);
+    CHECK (c.bank() == 0, "hold A does nothing while tuning");
     tap (1);
     CHECK (! c.tunerOn() && c.value (P::BitrotOn) == 0, "any tap leaves the tuner without doing its job");
     // C and D together, held a second: Keep
@@ -935,7 +1108,7 @@ static void testController()
     for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
     c.footswitchRelease (2, t); c.footswitchRelease (3, t);
     CHECK (keeps == 1 && ! c.tunerOn() && c.value (P::CompSlap) == 1, "hold C and D: Keep, nothing else fires");
-    // A then B quickly is two presses, not a combo
+    // A then B quickly is two presses, not a combo (back in Grit)
     t += 1;
     c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02); c.footswitchRelease (0, t + 0.1); c.footswitchRelease (1, t + 0.12);
     CHECK (c.value (P::DriveVoice) == 1 && c.value (P::BitrotOn) == 1, "A and B together stay two taps");
@@ -955,13 +1128,39 @@ static void testController()
     CHECK (c.songCount() == 15, "fifteen songs at most");
     msg (R"({"t":"setlist","op":"delete","i":2})");
     CHECK (c.songCount() == 14, "delete");
+
+    // parts: a song split in two, one press of B between them
+    c.selectSong (0);
+    c.setValue (P::BankStart, 2); c.setValue (P::DlOn, 1); c.setValue (P::RvOn, 1);
+    msg (R"({"t":"setlist","op":"save"})");
+    msg (R"({"t":"setlist","op":"addPart","i":0,"name":"Drop"})");
+    CHECK (c.songCount() == 15 && c.isPart (1) && c.songName (1) == "Drop" && c.songNumber (1) == 1 && c.songNumber (2) == 2 && c.songsOnly() == 14,
+           "add a part: it shares its song's number and doesn't count as a song");
+    c.selectSong (1);
+    c.setValue (P::BankStart, 0); c.setValue (P::DlOn, 0); c.setValue (P::RvOn, 0); c.setValue (P::DriveOn, 1); c.setValue (P::DriveVoice, 1);
+    msg (R"({"t":"setlist","op":"save"})");
+    c.selectSong (0);
+    CHECK (c.bank() == 2 && c.value (P::DlOn) == 1, "the song opens in Glow with the delay on");
+    hold (1);
+    CHECK (c.currentSong() == 1 && c.bank() == 0 && c.value (P::DlOn) == 0 && c.value (P::DriveVoice) == 1,
+           "hold B: one press to the part, in Grit with Drive on and the space off");
+    msg (R"({"t":"setlist","op":"add"})");
+    CHECK (c.songCount() == 16 && c.songsOnly() == 15, "fifteen songs plus a part");
+    msg (R"({"t":"setlist","op":"add"})");
+    CHECK (c.songCount() == 16 && c.lastToast() == "15 songs is the limit", "still fifteen songs at most");
+    msg (R"({"t":"setlist","op":"addPart","i":15})");
+    CHECK (c.songCount() == 17 && c.isPart (16) && c.songName (16) == "Part 2", "parts can still be added");
+    msg (R"({"t":"setlist","op":"part","i":16})");
+    CHECK (c.isPart (16) && c.songCount() == 17 && c.lastToast() == "15 songs is the limit", "a part can't become a sixteenth song");
+    msg (R"({"t":"setlist","op":"delete","i":16})");
+    msg (R"({"t":"setlist","op":"delete","i":15})");
     // reload from disk
     Engine e2;
     e2.prepare (kSr, 64);
     Controller c2 (e2, dir.string(), (dir / "caps").string());
     c2.load();
-    CHECK (c2.songCount() == 14 && c2.songName (0) == "Encore" && std::fabs (c2.value (P::CompSlap) - 0) < 1e-6 && c2.songName (1) == "New choon",
-           "setlist survives a restart");
+    CHECK (c2.songCount() == 15 && c2.songName (0) == "Encore" && c2.isPart (1) && c2.songName (1) == "Drop" && c2.songName (2) == "New choon",
+           "setlist and its parts survive a restart");
     std::filesystem::remove_all (dir);
 }
 
@@ -1116,6 +1315,8 @@ int main (int argc, char** argv)
         testClicks();
         testSteadyDrive();
         testTuner();
+        testPedalJobs();
+        testPartTails();
         testController();
         testCapture (capture);
     }

@@ -308,12 +308,13 @@ public:
             return;
         }
 
-        // Expression: the Bloom sweep, after heel and toe calibration
+        // Expression, after heel and toe calibration: the job of the bank in use (dirt, wah or
+        // volume, Bloom), with soft takeover in the engine
         if (cc == pedals.expCC && cc < 128)
         {
             lastExpRaw.store (val);
             lastExpTime.store (Time::getMillisecondCounterHiRes() * 0.001);
-            engine.setBloom (pedals.expressionValue (val));
+            engine.setPedal (pedals.expressionValue (val));
             return;
         }
         // Footswitches: plain press and release. Read directly, any channel counts.
@@ -381,8 +382,8 @@ private:
             {
                 pedals.reversed = ! pedals.reversed;
                 controller->notify (pedals.reversed ? "PEDAL REVERSED" : "PEDAL NORMAL");
-                // move Bloom straight away if the pedal has been used, so the flip is heard now
-                if (lastExpTime.load() > 0) engine.setBloom (pedals.expressionValue (lastExpRaw.load()));
+                // move the pedal job straight away if the pedal has been used, so the flip is heard now
+                if (lastExpTime.load() > 0) engine.setPedal (pedals.expressionValue (lastExpRaw.load()));
             }
             else { pedals.heel = 0; pedals.toe = 127; pedals.reversed = false; pedals.resetFootswitches(); pedals.expCC = 11; controller->notify ("PEDALS RESET"); }
             pedals.save();
@@ -411,7 +412,7 @@ public:
         if (h.fsText.isEmpty() && midi) h.fsText = midi->status();
         h.fsAgoSec = lastFsTime < 0 ? -1 : now - lastFsTime;
         h.fsLast = lastFsName;
-        h.expPos = m.bloom;
+        h.expPos = m.pedal < 0 ? 0.0f : m.pedal;
         const double et = lastExpTime.load();
         h.expAgoSec = et < 0 ? -1 : now - et;
         h.expCalibrated = pedals.heel != 0 || pedals.toe != 127 || pedals.reversed;

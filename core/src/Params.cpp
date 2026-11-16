@@ -59,10 +59,12 @@ const ModuleInfo* moduleTable (int& count)
         { "bitrot", "Bitrot", "Full sound", "Tracking synth: square, sub, oscillator" },
         { "preamp", "Preamp", "Full sound", "Valve, tone stack, Cut and tape" },
         { "filter", "Filter", "Full sound", "Envelope or manual" },
+        { "wah", "Wah", "Full sound", "Pedal wah, tap C in Groove" },
         { "dim", "Dimension", "Bottom wet", "Mono safe chorus" },
         { "grains", "Speckle", "Full sound", "Eleven effects, filter, mod and space" },
         { "delay", "Delay", "Full sound", "Twelve types, tape machine, tap" },
         { "reverb", "Reverb", "Full sound", "Twelve spaces, shimmer, your own impulses" },
+        { "pedal", "Pedal jobs", "Control", "Dirt blend, wah, volume, Bloom" },
         { "bloom", "Bloom sweep", "Control", "Grains then wash, per song" },
         { "footswitches", "Footswitches", "Control", "Tap and hold jobs" },
         { "output", "Output", "Control", "Level, limiter, amp or PA" },
@@ -100,6 +102,7 @@ std::string formatValue (P p, float v)
     if (p == P::DroneSustain && v >= 0.995f) return "Inf";
     if (p == P::EdgeGate || p == P::DriveGate) { if (v <= -89.0f) return "Off"; }
     if (p == P::RvSwell && v < 0.01f) return "Off";
+    if (p == P::PedalVolFloor && v <= -59.5f) return "Silent";
     if (p == P::DlLofiBits) return trimNum (v, 0) + " bits";
     if (u == "%") return trimNum (v * 100.0f, 0) + "%";
     if (u == "Hz") return v >= 1000.0f ? trimNum (v / 1000.0f, 1) + "k" : v < 10.0f ? trimNum (v, v < 1.0f ? 2 : 1) + "Hz" : trimNum (v, 0);
