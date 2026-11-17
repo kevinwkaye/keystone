@@ -3,7 +3,7 @@
 ; firewall so the phone can find it on the hotspot.
 
 #ifndef AppVersion
-  #define AppVersion "0.4.7"
+  #define AppVersion "0.4.8"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\build\app\Keystone_artefacts\Release"
@@ -52,6 +52,7 @@ Source: "..\tools\Set up footswitch.bat"; DestDir: "{app}\Tools"; Flags: ignorev
 Source: "..\tools\Set up gig laptop.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\tools\Set up gig laptop.bat"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\tools\Update.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
+Source: "..\tools\Keystone Wi-Fi.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Keystone"; Filename: "{app}\Keystone.exe"

@@ -54,7 +54,7 @@ var KS = (function () {
         S.values = m.values; S.songs = m.songs; S.parts = m.parts || []; S.current = m.current; S.edited = m.edited;
         S.bank = m.bank || 0; S.maxEntries = m.maxEntries || 40; S.rig = m.rig || 0; S.footMode = m.footMode || 0;
         S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile; S.spaces = m.spaces || []; S.space = m.space || ''; S.spaceFile = m.spaceFile || '';
-        S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive;
+        S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive; S.wifi = m.wifi || null;
         tunerState(m.tuner);
         try { localStorage.setItem('ks.state', JSON.stringify(m)); } catch (e) {}
         queueRender(); break;
@@ -288,7 +288,7 @@ var KS = (function () {
     return '<section class="screen" style="gap:14px">' + header('Recorder', { id: 'play', label: 'Play' }, recPill()) + live + settings +
       '<section class="group"><h2 class="label">Takes on the laptop' + (S.takesFree ? ', ' + fmtBytes(S.takesFree) + ' free' : '') + '</h2>' + list + '</section>' +
       '<div class="small">Takes are in Documents\\Keystone\\Recordings on the laptop: a WAV with your dry bass on the left and the rig on the right, the room track beside it, and the song changes and Keeps marked. When the laptop runs low on space the oldest takes go first.</div>' +
-      nav('play') + '</section>';
+      nav('health') + '</section>';
   }
 
   // ---- the listening pack: a stretch of a take through every song
@@ -370,11 +370,11 @@ var KS = (function () {
         '<span class="small" style="padding-bottom:6px">Thirty seconds of your bass from here, played through every song and part, so you can hear which sound suits it.</span>' +
         (i ? pick : '<span class="small">Loading the take</span>') + btn +
         '<span class="small">Takes about a minute on the laptop. It won\'t run while you\'re playing.</span></section>' +
-      nav('play') + '</section>';
+      nav('health') + '</section>';
   }
   function listenScreen() {
     var p = S.pack;
-    if (!p) return '<section class="screen" style="gap:12px">' + header('Listen', { id: 'take', label: 'Take' }) + '<span class="small">Loading the listening pack</span>' + nav('play') + '</section>';
+    if (!p) return '<section class="screen" style="gap:12px">' + header('Listen', { id: 'take', label: 'Take' }) + '<span class="small">Loading the listening pack</span>' + nav('health') + '</section>';
     function row(f) {
       var on = S.playing === f.file, id = rowId(f.file), loading = S.loadingFile === f.file;
       var sub = f.kind === 'dry' ? 'Straight from the instrument' : f.kind === 'played' ? (p.played || 'The rig as it was') : 'Song ' + (songNoOf(f.label) || '?');
@@ -390,10 +390,24 @@ var KS = (function () {
       '<span class="small">Tap a sound to hear your thirty seconds through it. The phone plays them one after another so you can compare.</span></section>' +
       top.map(row).join('') + '<h2 class="label" style="margin-top:6px">Through every song' + (p.making ? ' (still making)' : '') + '</h2>' + songs.map(row).join('') +
       (p.played ? '<div class="small">USE copies that sound onto the song you played (' + esc(p.played) + ') so you can try it at the next rehearsal. Save keeps it, Revert brings the old sound back.</div>' : '') +
-      nav('play') + '</section>';
+      nav('health') + '</section>';
   }
   var ICON_PLAY = '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 2 L14 8 L4 14Z" fill="currentColor"/></svg>';
   var ICON_PAUSE = '<svg width="16" height="16" viewBox="0 0 16 16"><rect x="3" y="2" width="3.5" height="12" fill="currentColor"/><rect x="9.5" y="2" width="3.5" height="12" fill="currentColor"/></svg>';
+
+  // ---- Keystone's own Wi-Fi: the phone joins the rig's network, no hotspot needed
+  function wifiCard() {
+    var w = S.wifi;
+    if (!w || !w.can) return '';
+    var st = w.status || (w.on ? 'Starting' : 'Off'), up = /^On/.test(st);
+    return '<section class="card" style="gap:8px"><div style="display:flex;justify-content:space-between;align-items:center"><h2 class="label">Keystone\'s Wi-Fi</h2>' +
+      '<button type="button" class="pill' + (w.on ? ' lit' : '') + '" data-act="wifiToggle">' + (w.on ? 'ON' : 'OFF') + '</button></div>' +
+      '<span style="font-size:15px;color:' + (up ? '#5DCAA5' : w.on ? '#F0997B' : '#B9B2A6') + '">' + esc(st) + '</span>' +
+      '<div class="wifirow"><span class="lab">Network</span><b>' + esc(w.ssid) + '</b></div>' +
+      '<div class="wifirow"><span class="lab">Password</span><b class="pw">' + esc(w.pass) + '</b></div>' +
+      (window.KeystoneNative && KeystoneNative.wifiAdd ? '<button type="button" class="wide go" data-act="wifiAdd">Save it on this phone</button>' : '') +
+      '<span class="small">Save it once and the phone joins by itself whenever the rig is on, with no hotspot. If Android asks, keep the connection even though it has no internet: the phone uses mobile data for everything else.</span></section>';
+  }
 
   // ---- Update firmware (the laptop or the Pi) and the phone app, from GitHub
   function newer(a, b) {   // is version a newer than b?
@@ -487,7 +501,7 @@ var KS = (function () {
     var inDb = h ? h['in'].db : null;
     var frac = inDb == null ? 0 : Math.max(0, Math.min(1, (inDb + 60) / 60));
     var inCol = inDb == null || inDb < -50 ? '#8A847A' : inDb > -1 ? o : g;
-    return '<section class="screen" style="gap:14px">' + header('Health', { id: 'play', label: 'Play' }, head) +
+    return '<section class="screen" style="gap:14px">' + header('Rig', { id: 'play', label: 'Play' }, head) +
       '<section class="card" style="gap:10px"><h2 class="label">Bass in</h2><div class="bar" style="height:14px"><div style="width:' + (frac * 100) + '%;background:' + inCol + '"></div></div>' +
       '<div style="display:flex;justify-content:space-between;font-size:14px"><span>' + esc(inputText()) + '</span><span class="muted">' + (h ? 'Input ' + h['in'].ch : '') + '</span></div></section>' +
       '<section class="card" style="padding:6px 16px;gap:0">' + rows.map(function (r) {
@@ -498,15 +512,19 @@ var KS = (function () {
       }).join('') + '</section>' +
       (Math.round(val('output.mode')) === 2 ? '<button type="button" class="wide" data-act="asioPanel">ASIO panel (opens on the laptop)</button>' : '') +
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
+      wifiCard() +
       updateCard() +
       '<button type="button" class="wide" data-go="recorder">Recorder' + (rec().on ? ': recording ' + clock(rec().s) : on('rec.on') ? ': ready' : ': off') + '</button>' +
       '<div class="small">If something goes wrong on stage, a warning strip appears across the top of Play. Tap it to come here.</div>' +
-      nav('play') + '</section>';
+      nav('health') + '</section>';
   }
   function nav(active) {
     function b(id, label) { return '<button type="button" data-go="' + id + '" class="' + (active === id ? 'on' : '') + '">' + label + '</button>'; }
+    // Rig: health, the recorder, updates and Keystone's Wi-Fi, with a light for how it's going
+    var r = rec(), dot = r.on ? '#E5484D' : !connected() || warnings().length ? '#F0997B' : '#5DCAA5';
+    var rig = ['health', 'recorder', 'take', 'listen'].indexOf(active) >= 0;
     return '<nav class="nav">' + b('play', 'Play') + b('tuner', 'Tuner') + b('tone', 'Tone') +
-      '<button type="button" class="keep" data-act="keep">Keep</button></nav>';
+      '<button type="button" data-go="health" class="rigbtn' + (rig ? ' on' : '') + '"><span class="rdot2' + (r.on ? ' rec' : '') + '" style="background:' + dot + '"></span>Rig</button></nav>';
   }
   function header(title, backTo, right) {
     return '<div class="top">' + (backTo ? '<button type="button" class="back" data-go="' + backTo.id + '">' + ICON.back + backTo.label + '</button>' : '') +
@@ -662,13 +680,14 @@ var KS = (function () {
 
   // needle angle from dB, matching the canvas scale: -20 left, -10, -5 top, 0, +3 right
   function dbAngle(db) {
-    var pts = [[-40, 180], [-20, 180], [-10, 135], [-5, 90], [0, 30], [3, 0]];
-    if (db <= -20) return 180;
+    // -40 at the left, -20, -12 at the top, -6, 0 into the red: playing level sits mid-scale
+    var pts = [[-60, 180], [-40, 180], [-30, 155], [-20, 122], [-12, 90], [-6, 58], [0, 25], [3, 8]];
+    if (db <= -40) return 180;
     for (var i = 1; i < pts.length; i++) if (db <= pts[i][0]) {
       var a = pts[i - 1], b = pts[i], t = (db - a[0]) / (b[0] - a[0]);
       return a[1] + (b[1] - a[1]) * t;
     }
-    return 0;
+    return 8;
   }
   function needle(angle) {
     var r = angle * Math.PI / 180;
@@ -676,13 +695,11 @@ var KS = (function () {
   }
   function meterSvg() {
     var p = needle(dbAngle(S.meter.out != null ? S.meter.out : -60));
-    return '<svg width="310" height="150" viewBox="0 0 310 150" role="img" aria-label="Output level meter">' +
-      '<path d="M35 140 A 120 120 0 0 1 259 80" fill="none" stroke="#F2EDE4" stroke-width="2"/>' +
-      '<path d="M259 80 A 120 120 0 0 1 275 140" fill="none" stroke="#F0997B" stroke-width="6"/>' +
-      '<line x1="35" y1="140" x2="23" y2="140" stroke="#F2EDE4" stroke-width="2"/><line x1="70" y1="55" x2="62" y2="47" stroke="#F2EDE4" stroke-width="2"/>' +
-      '<line x1="155" y1="20" x2="155" y2="8" stroke="#F2EDE4" stroke-width="2"/><line x1="259" y1="80" x2="269" y2="74" stroke="#F0997B" stroke-width="2"/>' +
-      '<text x="22" y="128" font-size="13" fill="#B9B2A6" text-anchor="middle">-20</text><text x="54" y="44" font-size="13" fill="#B9B2A6" text-anchor="middle">-10</text>' +
-      '<text x="155" y="6" font-size="13" fill="#B9B2A6" text-anchor="middle" dominant-baseline="hanging">-5</text><text x="276" y="68" font-size="13" fill="#F0997B" text-anchor="middle">0</text>' +
+    return '<svg width="310" height="150" viewBox="0 -14 310 164" role="img" aria-label="Output level meter">' +
+      '<path d="M35 140 A 120 120 0 0 1 263.8 89.3" fill="none" stroke="#F2EDE4" stroke-width="2"/>' +
+      '<path d="M263.8 89.3 A 120 120 0 0 1 273.8 123.3" fill="none" stroke="#F0997B" stroke-width="6"/>' +
+      '<line x1="35.0" y1="140.0" x2="24.0" y2="140.0" stroke="#F2EDE4" stroke-width="2"/><line x1="91.4" y1="38.2" x2="85.6" y2="28.9" stroke="#F2EDE4" stroke-width="2"/><line x1="155.0" y1="20.0" x2="155.0" y2="9.0" stroke="#F2EDE4" stroke-width="2"/><line x1="218.6" y1="38.2" x2="224.4" y2="28.9" stroke="#F2EDE4" stroke-width="2"/><line x1="263.8" y1="89.3" x2="273.7" y2="84.6" stroke="#F0997B" stroke-width="2"/>' +
+      '<text x="10.0" y="144.0" font-size="13" fill="#B9B2A6" text-anchor="middle">-40</text><text x="78.2" y="21.0" font-size="13" fill="#B9B2A6" text-anchor="middle">-20</text><text x="155.0" y="-1.0" font-size="13" fill="#B9B2A6" text-anchor="middle">-12</text><text x="231.8" y="21.0" font-size="13" fill="#B9B2A6" text-anchor="middle">-6</text><text x="286.4" y="82.7" font-size="13" fill="#F0997B" text-anchor="middle">0</text>' +
       '<line id="needle" x1="155" y1="140" x2="' + p.x.toFixed(1) + '" y2="' + p.y.toFixed(1) + '" stroke="#F2EDE4" stroke-width="3" stroke-linecap="round"/>' +
       '<circle cx="155" cy="140" r="9" style="fill:var(--blue)"/></svg>';
   }
@@ -718,7 +735,7 @@ var KS = (function () {
     return '<section class="screen" style="gap:20px">' +
       '<div class="top"><span class="title">Tuner</span><div class="pill"><span class="dot" style="background:' + (muted ? '#F0997B' : '#5DCAA5') + '"></span>' + (muted ? 'Output muted' : 'Output live') + '</div></div>' +
       '<div class="tnote"><span class="flip big" id="tnote">' + esc(valid ? t.note.replace('#', '\u266F') : '-') + '</span><span class="flip oct" id="toct">' + esc(valid ? t.oct : ' ') + '</span></div>' +
-      '<div class="card" style="align-items:center;gap:4px;padding:16px"><svg width="310" height="150" viewBox="0 0 310 150" role="img" aria-label="Tuning needle">' +
+      '<div class="card" style="align-items:center;gap:4px;padding:16px"><svg width="310" height="150" viewBox="0 -14 310 164" role="img" aria-label="Tuning needle">' +
       '<path d="M35 140 A 120 120 0 0 1 275 140" fill="none" stroke="#3A3A40" stroke-width="2"/>' +
       '<path d="M135 22 A 120 120 0 0 1 175 22" fill="none" stroke="#5DCAA5" stroke-width="8"/><line x1="155" y1="20" x2="155" y2="4" stroke="#5DCAA5" stroke-width="3"/>' +
       '<line x1="35" y1="140" x2="23" y2="140" stroke="#F0997B" stroke-width="2"/><line x1="275" y1="140" x2="287" y2="140" stroke="#F0997B" stroke-width="2"/>' +
@@ -1227,6 +1244,8 @@ var KS = (function () {
       case 'makePack':
         if (send({ t: 'listen', take: S.take, from: S.pickFrom || 0, secs: 30 })) { S.making = true; S.pack = null; render(true); }
         break;
+      case 'wifiToggle': if (S.wifi) send({ t: 'wifi', on: !S.wifi.on }); break;
+      case 'wifiAdd': if (S.wifi && window.KeystoneNative && KeystoneNative.wifiAdd) KeystoneNative.wifiAdd(S.wifi.ssid, S.wifi.pass); break;
       case 'recStop': send({ t: 'recStop' }); setTimeout(function () { send({ t: 'takes' }); }, 1500); break;
       case 'roomToggle':
         var N = native();

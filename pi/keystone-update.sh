@@ -88,6 +88,13 @@ switch_to "$NEXT"
 $SYSTEMCTL restart keystone
 if wait_for "$VERSION" "$SINCE"; then
     log "Keystone $VERSION is running from slot $NEXT"
+    # the Pi's helpers from the new version (the Wi-Fi network arrived in 0.4.8)
+    if [ -f "$ROOT/$NEXT/pi/keystone-wifi.sh" ]; then
+        install -m 755 "$ROOT/$NEXT/pi/keystone-wifi.sh" "$ROOT/keystone-wifi.sh"
+        install -m 644 "$ROOT/$NEXT/pi/keystone-wifi.path" /etc/systemd/system/keystone-wifi.path
+        install -m 644 "$ROOT/$NEXT/pi/keystone-wifi.service" /etc/systemd/system/keystone-wifi.service
+        $SYSTEMCTL daemon-reload; $SYSTEMCTL enable --now keystone-wifi.path >/dev/null 2>&1
+    fi
     rm -f "$PACKAGE"
     exit 0
 fi

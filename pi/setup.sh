@@ -38,7 +38,7 @@ say "Installing, with start at boot and Update firmware"
 bash "$TMP/keystone/pi/install.sh" "$TMP/keystone"
 rm -rf "$TMP"
 systemctl daemon-reload
-systemctl start keystone-performance.service keystone-update.path keystone.service
+systemctl start keystone-performance.service keystone-update.path keystone-wifi.path keystone.service
 
 say "Done"
 echo "Keystone $(basename "$URL" | sed 's/Keystone-\(.*\)-linux.*/\1/') is running. The phone finds it on the hotspot like the laptop."

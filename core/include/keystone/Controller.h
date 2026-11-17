@@ -21,7 +21,7 @@ public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
-    static constexpr const char* kVersion = "0.4.7";
+    static constexpr const char* kVersion = "0.4.8";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -50,6 +50,11 @@ public:
     std::function<void (int step)> onCalibrate;                       // 0 heel, 1 toe, 2 reset, 3 reverse
     std::function<std::string()> footswitchStatus;                   // device status line
     std::function<std::string()> audioStatus;                        // device status line
+    // Keystone's own Wi-Fi: the host starts or stops it (Windows hotspot or Wi-Fi Direct,
+    // the Pi's access point) and says how it's going
+    std::function<void (bool on, const std::string& ssid, const std::string& pass)> onWifi;
+    std::function<std::string()> wifiStatus;
+    void startWifi();   // after load(), with the saved setting
     std::function<bool()> keeperLiveTag;
     std::function<void (bool)> setKeeperLiveTag;
     std::function<int()> lastKeepNumber;

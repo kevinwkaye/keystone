@@ -211,6 +211,26 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String roomStatus() { return room.statusJson(); }
 
+        // Keystone's own Wi-Fi: save it to this phone, so it joins by itself from then on
+        @JavascriptInterface
+        public void wifiAdd(String ssid, String pass) {
+            ui.post(() -> {
+                try {
+                    if (android.os.Build.VERSION.SDK_INT >= 30) {
+                        android.net.wifi.WifiNetworkSuggestion n = new android.net.wifi.WifiNetworkSuggestion.Builder()
+                                .setSsid(ssid).setWpa2Passphrase(pass).build();
+                        android.os.Bundle b = new android.os.Bundle();
+                        b.putParcelableArrayList(android.provider.Settings.EXTRA_WIFI_NETWORK_LIST, new ArrayList<>(java.util.Collections.singletonList(n)));
+                        startActivity(new android.content.Intent(android.provider.Settings.ACTION_WIFI_ADD_NETWORKS).putExtras(b));
+                    } else {
+                        startActivity(new android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS));
+                    }
+                } catch (Exception e) {
+                    startActivity(new android.content.Intent(android.provider.Settings.ACTION_WIFI_SETTINGS));
+                }
+            });
+        }
+
         // Update firmware and the phone app
         @JavascriptInterface
         public void updateCheck() { updater.check(); }

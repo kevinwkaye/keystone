@@ -1,0 +1,7 @@
+[Unit]
+Description=Start or stop Keystone's own Wi-Fi
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/keystone/keystone-wifi.sh

@@ -232,3 +232,13 @@ body.kuddle .pill { background: #24180F; border-color: #6E5240; color: #8A6A50; 
 .stomps.phoneonly .stomp:not(:last-child) { opacity: 0.8; }
 /* your defaults */
 .defnote { border-top: 1px solid #2A2A2E; padding-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+/* Rig, in place of Keep */
+nav.nav button.rigbtn { display: flex; align-items: center; justify-content: center; gap: 8px; border: 2px solid #3A3A3A; color: var(--text); font-weight: 700; }
+nav.nav button.rigbtn.on { background: var(--flip); }
+.rdot2 { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.rdot2.rec { animation: pulse 1.2s infinite; }
+/* Keystone's Wi-Fi */
+.wifirow { display: flex; justify-content: space-between; align-items: baseline; font-size: 17px; }
+.wifirow .lab { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.wifirow .pw { font-family: monospace; letter-spacing: 0.08em; font-size: 18px; }

@@ -70,6 +70,7 @@ test -x "$MNT/opt/keystone/a/keystone"
 [ "$(readlink "$MNT/opt/keystone/current")" = "/opt/keystone/a" ]
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone.service"
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone-update.path"
+test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone-wifi.path"
 echo "Keystone $(cat "$MNT/opt/keystone/a/VERSION") is in the image and starts at boot"
 
 echo "== Packing"

@@ -9,6 +9,7 @@
 #include "Sha256.h"
 
 #include <algorithm>
+#include <random>
 #include <regex>
 #include <thread>
 #include <mutex>
@@ -42,6 +43,9 @@ struct Controller::Song
 
 struct Controller::State
 {
+    // Keystone's own Wi-Fi network
+    bool wifiOn = true;
+    std::string wifiSsid = "Keystone", wifiPass;
     // your own defaults, effect by effect (Save as my default); the factory's for the rest
     std::map<std::string, float> myDefaults;
     struct DefaultChange { std::string module; std::map<std::string, float> before, after; } lastDefault;
@@ -320,6 +324,12 @@ void Controller::load()
         startRig = st.value ("rig", 0) == 1 ? 1 : 0;
         s->footMode = st.value ("footMode", 0) == 1 ? 1 : 0;
         s->spaceFile = st.value ("space", std::string());
+        if (st.contains ("wifi") && st["wifi"].is_object())
+        {
+            s->wifiOn = st["wifi"].value ("on", true);
+            s->wifiSsid = st["wifi"].value ("ssid", std::string ("Keystone"));
+            s->wifiPass = st["wifi"].value ("pass", std::string());
+        }
         s->myDefaults.clear();
         if (st.contains ("myDefaults") && st["myDefaults"].is_object())
             for (auto it = st["myDefaults"].begin(); it != st["myDefaults"].end(); ++it)
@@ -405,6 +415,7 @@ void Controller::saveSettings() const
     j["rig"] = s->rig;
     j["footMode"] = s->footMode;
     j["myDefaults"] = s->myDefaults;
+    j["wifi"] = { { "on", s->wifiOn }, { "ssid", s->wifiSsid }, { "pass", s->wifiPass } };
     writeJsonAtomic (toPath (dataDir) / "settings.json", j);
 }
 
@@ -1052,6 +1063,7 @@ std::string Controller::stateJson() const
     j["spaces"] = listSpaces();
     j["namAvailable"] = Engine::namAvailable();
     j["keeperLive"] = keeperLiveTag ? keeperLiveTag() : false;
+    j["wifi"] = { { "on", s->wifiOn }, { "ssid", s->wifiSsid }, { "pass", s->wifiPass }, { "status", wifiStatus ? wifiStatus() : std::string() }, { "can", (bool) onWifi } };
     j["footswitch"] = footswitchStatus ? footswitchStatus() : std::string();
     j["audio"] = audioStatus ? audioStatus() : std::string();
     j["version"] = kVersion;
@@ -1476,6 +1488,22 @@ std::string Controller::defaultMessage (const std::string& line)
     return dumps (a);
 }
 
+// A password made once and kept: 12 letters and digits that read easily (no 0/O or 1/l)
+static std::string newWifiPassword()
+{
+    static const char* a = "abcdefghjkmnpqrstuvwxyz23456789";
+    std::random_device rd;
+    std::string p;
+    for (int i = 0; i < 12; ++i) p += a[rd() % 31];
+    return p;
+}
+
+void Controller::startWifi()
+{
+    if (s->wifiPass.size() < 8) { s->wifiPass = newWifiPassword(); saveSettings(); }
+    if (onWifi) onWifi (s->wifiOn, s->wifiSsid, s->wifiPass);
+}
+
 std::string Controller::updatesDir() const { return fromPath (toPath (dataDir) / "Updates"); }
 
 // Update firmware, a piece at a time: begin, chunk, chunk, ..., end
@@ -1680,6 +1708,14 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     {
         if (onKeepNote) onKeepNote (m.value ("n", lastKeepNumber ? lastKeepNumber() : 0), m.value ("text", std::string()).substr (0, 500));
         queueToast ("NOTE SAVED");
+    }
+    else if (t == "wifi")
+    {
+        s->wifiOn = m.value ("on", s->wifiOn);
+        saveSettings();
+        startWifi();
+        queueState();
+        queueToast (s->wifiOn ? "KEYSTONE WI-FI ON" : "KEYSTONE WI-FI OFF");
     }
     else if (t == "keeperLive")
     {

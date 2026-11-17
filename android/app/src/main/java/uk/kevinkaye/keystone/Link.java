@@ -85,6 +85,19 @@ final class Link {
         if (s != null) try { s.close(); } catch (Exception ignored) { }
     }
 
+    // the Wi-Fi network's gateway (the laptop or Pi when the phone is on Keystone's own Wi-Fi)
+    @SuppressWarnings("deprecation")
+    private String wifiGateway() {
+        try {
+            WifiManager wm = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            int g = wm == null ? 0 : wm.getDhcpInfo().gateway;
+            if (g == 0) return null;
+            return (g & 0xff) + "." + ((g >> 8) & 0xff) + "." + ((g >> 16) & 0xff) + "." + ((g >> 24) & 0xff);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private SharedPreferences prefs() { return context.getSharedPreferences("link", Context.MODE_PRIVATE); }
 
     private void loop() {
@@ -103,6 +116,11 @@ final class Link {
             }
             String last = prefs().getString("last", null);
             if (target == null && last != null) target = tryConnectable(last, TCP_PORT, 700);
+            // on Keystone's own Wi-Fi the rig is the network's gateway: try it straight away
+            if (target == null) {
+                String gw = wifiGateway();
+                if (gw != null && !gw.equals(last)) target = tryConnectable(gw, TCP_PORT, 700);
+            }
             if (target == null) target = discover(3000);
             if (target == null) {
                 listener.onStatus("searching", nets + " No reply to the broadcast call. Checking every address...");

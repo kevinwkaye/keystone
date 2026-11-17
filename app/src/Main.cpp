@@ -252,6 +252,7 @@ public:
         controller = std::make_unique<ks::Controller> (engine, home.getFullPathName().toStdString(), captures.getFullPathName().toStdString());
         wireController();
         controller->load();
+        controller->startWifi();   // Keystone's own network, if it's switched on
 
         audio = std::make_unique<AudioHost> (engine, keeper);
         if (args.contains ("--list-devices")) Logger::writeToLog ("Audio devices:\n" + audio->deviceList());
@@ -306,6 +307,7 @@ public:
     void shutdown() override
     {
         stopTimer();
+        stopWifi();
         watchdog.stopThread (2000);
         link.stop();
         if (audio) audio->stop();
@@ -434,6 +436,32 @@ private:
         };
         controller->footswitchStatus = [this] { return midi ? midi->status().toStdString() : std::string(); };
         controller->audioStatus = [this] { return audio ? audio->status().toStdString() : std::string(); };
+        // Keystone's own Wi-Fi. Laptop: a hidden PowerShell runs it for as long as Keystone
+        // does. Pi: wifi.json for the keystone-wifi service (pi/keystone-wifi.sh), which runs
+        // the access point as root.
+        controller->onWifi = [this] (bool on, const std::string& ssid, const std::string& pass)
+        {
+           #if JUCE_WINDOWS
+            stopWifi();
+            if (! on) { home.getChildFile ("wifi-status.txt").replaceWithText ("Off"); return; }
+            const auto script = File::getSpecialLocation (File::currentExecutableFile).getSiblingFile ("Tools").getChildFile ("Keystone Wi-Fi.ps1");
+            if (! script.existsAsFile()) { home.getChildFile ("wifi-status.txt").replaceWithText ("Off: the Wi-Fi script is missing, reinstall Keystone"); return; }
+            wifiProcess = std::make_unique<ChildProcess>();
+            StringArray cmd { "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script.getFullPathName(),
+                              "-Ssid", String (ssid), "-Pass", String (pass), "-StatusFile", home.getChildFile ("wifi-status.txt").getFullPathName(),
+                              "-ParentPid", String ((int) GetCurrentProcessId()) };
+            if (! wifiProcess->start (cmd, 0)) { wifiProcess.reset(); home.getChildFile ("wifi-status.txt").replaceWithText ("Off: couldn't start PowerShell"); }
+            else Logger::writeToLog ("Wi-Fi: starting " + String (ssid));
+           #else
+            DynamicObject::Ptr w (new DynamicObject());
+            w->setProperty ("on", on);
+            w->setProperty ("ssid", String (ssid));
+            w->setProperty ("pass", String (pass));
+            home.getChildFile ("wifi.json").replaceWithText (JSON::toString (var (w.get())));
+           #endif
+        };
+        controller->wifiStatus = [this] { return home.getChildFile ("wifi-status.txt").loadFileAsString().trim().toStdString(); };
+
        #if JUCE_WINDOWS || JUCE_LINUX
         // Update firmware. Laptop: hand the installer to the "Keystone Update" task (Tools\Update.ps1),
         // which installs it with administrator rights and puts the old version back if the
@@ -590,12 +618,18 @@ private:
         }
     }
 
+    void stopWifi()
+    {
+        if (wifiProcess) { wifiProcess->kill(); wifiProcess.reset(); }
+    }
+
     File home, captures;
     std::unique_ptr<FileLogger> logger;
     ks::Engine engine;
     Keeper keeper;
     PedalSettings pedals;
     std::unique_ptr<ks::Controller> controller;
+    std::unique_ptr<ChildProcess> wifiProcess;   // the laptop's own network (Tools\Keystone Wi-Fi.ps1)
     std::unique_ptr<AudioHost> audio;
     std::unique_ptr<DirectMidiInput> midi;
     std::unique_ptr<Housekeeping> housekeeping;

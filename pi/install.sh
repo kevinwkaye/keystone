@@ -30,6 +30,11 @@ install -m 644 "$PKG/pi/keystone.service" /etc/systemd/system/keystone.service
 install -m 644 "$PKG/pi/keystone-update.path" /etc/systemd/system/keystone-update.path
 install -m 644 "$PKG/pi/keystone-update.service" /etc/systemd/system/keystone-update.service
 
+# Keystone's own Wi-Fi network for the phone
+install -m 755 "$PKG/pi/keystone-wifi.sh" "$ROOT/keystone-wifi.sh"
+install -m 644 "$PKG/pi/keystone-wifi.path" /etc/systemd/system/keystone-wifi.path
+install -m 644 "$PKG/pi/keystone-wifi.service" /etc/systemd/system/keystone-wifi.service
+
 # real-time audio, the processor at full speed, Wi-Fi at full power
 cat > /etc/security/limits.d/keystone.conf <<'EOF'
 @audio - rtprio 95
@@ -48,5 +53,5 @@ mkdir -p /etc/NetworkManager/conf.d
 printf '[connection]\nwifi.powersave = 2\n' > /etc/NetworkManager/conf.d/keystone-wifi.conf
 
 # enable works without a running systemd (inside the image build too)
-systemctl enable keystone-performance.service keystone-update.path keystone.service
+systemctl enable keystone-performance.service keystone-update.path keystone-wifi.path keystone.service
 echo "Keystone $(cat "$ROOT/a/VERSION" 2>/dev/null || echo) installed in $ROOT/a"
