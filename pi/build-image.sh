@@ -65,10 +65,12 @@ rm -f "$MNT/etc/resolv.conf"
 mv "$MNT/etc/resolv.conf.pi" "$MNT/etc/resolv.conf" 2>/dev/null || true
 
 # check what went in
-test -x "$MNT/opt/keystone/current/keystone"
+# (current points at /opt/keystone/a inside the Pi, so check it by name, not by following it)
+test -x "$MNT/opt/keystone/a/keystone"
+[ "$(readlink "$MNT/opt/keystone/current")" = "/opt/keystone/a" ]
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone.service"
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone-update.path"
-echo "Keystone $(cat "$MNT/opt/keystone/current/VERSION") is in the image and starts at boot"
+echo "Keystone $(cat "$MNT/opt/keystone/a/VERSION") is in the image and starts at boot"
 
 echo "== Packing"
 sync
