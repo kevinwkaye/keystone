@@ -719,7 +719,7 @@ bool Controller::backup (const std::string& day)
     for (const auto& e : fs::directory_iterator (root, ec)) if (e.is_directory (ec)) days.push_back (e.path());
     std::sort (days.begin(), days.end());
     for (size_t i = 0; i + 30 < days.size(); ++i) fs::remove_all (days[i], ec);
-    if (onLog) onLog ("Backed up the setlist, Kuddle presets and settings to Backups\\" + day);
+    if (onLog) onLog ("Backed up the setlist, Kuddle presets and settings (Backups, " + day + ")");
     return true;
 }
 
