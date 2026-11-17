@@ -226,6 +226,7 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
                                                   const AudioIODeviceCallbackContext&)
 {
     const double startMs = Time::getMillisecondCounterHiRes();
+    callbacks.fetch_add (1, std::memory_order_relaxed);
     if ((size_t) n > monoIn.size())
     {
         for (int c = 0; c < numOut; ++c) if (out[c] != nullptr) FloatVectorOperations::clear (out[c], n);
@@ -287,6 +288,20 @@ void AudioHost::timerCallback()
         return;
     }
     auto* dev = deviceManager.getCurrentAudioDevice();
+    // watchdog: the device says it's running but no audio has come through for 6 s (two
+    // checks in a row): the driver has hung, so open it again
+    {
+        const int64_t c = callbacks.load();
+        stalledTicks = (dev != nullptr && isRunning.load() && c == lastCallbacks) ? stalledTicks + 1 : 0;
+        lastCallbacks = c;
+        if (stalledTicks >= 2)
+        {
+            Logger::writeToLog ("WATCHDOG: no audio for 6 s although the device says it's running, opening it again");
+            stalledTicks = 0;
+            if (tryOpen()) Logger::writeToLog ("Audio: device open again");
+            return;
+        }
+    }
     // the input stream stopped (digital silence for 2 s): open the device again
     if (dev != nullptr && isRunning.load() && openedBuffer > 0
         && silentInputBlocks.load() * (double) openedBuffer > 2.0 * currentRate.load())

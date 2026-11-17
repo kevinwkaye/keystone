@@ -20,7 +20,9 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "StatusWindow.h"
 #endif
+#include <cstdlib>
 #include <deque>
+#include <string>
 
 #if JUCE_WINDOWS
 #include <windows.h>
@@ -52,13 +54,53 @@ static void raiseProcessPriority()
 }
 static void midiSink (const MidiMessage& m);
 
-// If Keystone ever crashes, the log says where.
+// Gig watchdog: start Keystone again in a few seconds and end this one. At most three times
+// in ten minutes, so a fault that comes straight back doesn't go round for ever. On the Pi,
+// systemd starts it again, so it only needs to end.
+static void relaunchAndExit (const String& why)
+{
+    Logger::writeToLog ("WATCHDOG: " + why + ". Starting Keystone again.");
+    const auto file = File::getSpecialLocation (File::userDocumentsDirectory).getChildFile ("Keystone").getChildFile ("restarts.txt");
+    const auto now = Time::currentTimeMillis();
+    StringArray recent;
+    for (auto& l : StringArray::fromLines (file.loadFileAsString()))
+        if (l.trim().isNotEmpty() && l.getLargeIntValue() > now - 10 * 60 * 1000) recent.add (l.trim());
+    if (recent.size() >= 3)
+    {
+        Logger::writeToLog ("WATCHDOG: three restarts in ten minutes, so Keystone stays stopped. Look above for what went wrong.");
+        std::_Exit (3);
+    }
+    recent.add (String (now));
+    file.replaceWithText (recent.joinIntoString ("\n"));
+   #if JUCE_WINDOWS
+    // a hidden PowerShell waits for this copy to go, then starts a new one in the tray
+    const auto exe = File::getSpecialLocation (File::currentExecutableFile).getFullPathName();
+    const String cmd = "powershell.exe -NoProfile -WindowStyle Hidden -Command \"Start-Sleep -Seconds 3; Start-Process -FilePath '"
+                       + exe.replace ("'", "''") + "' -ArgumentList '--background','--restarted'\"";
+    std::wstring line (cmd.toWideCharPointer());
+    STARTUPINFOW si {};
+    si.cb = sizeof (si);
+    PROCESS_INFORMATION pi {};
+    if (CreateProcessW (nullptr, line.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW | DETACHED_PROCESS, nullptr, nullptr, &si, &pi))
+    {
+        CloseHandle (pi.hThread);
+        CloseHandle (pi.hProcess);
+    }
+    else Logger::writeToLog ("WATCHDOG: couldn't start the new copy (" + String ((int) GetLastError()) + ")");
+    TerminateProcess (GetCurrentProcess(), 3);
+   #endif
+    std::_Exit (3);
+}
+
+// If Keystone ever crashes, the log says where, and the watchdog starts it again.
 static void crashHandler (void*)
 {
     Logger::writeToLog ("CRASH. Stack:\n" + SystemStats::getStackBacktrace());
+    relaunchAndExit ("Keystone crashed");
 }
 
-// Notices if the main thread stops answering, so a freeze shows in the log.
+// Notices if the main thread stops answering, so a freeze shows in the log. After 20 s it
+// starts Keystone again: the phone, footswitches and pedal all go through that thread.
 class Watchdog : public Thread
 {
 public:
@@ -72,6 +114,7 @@ public:
             wait (1000);
             const auto stalled = Time::currentTimeMillis() - lastBeat.load();
             if (stalled > 5000 && ! reported) { Logger::writeToLog ("WARNING: the main thread hasn't answered for " + String (stalled / 1000) + " s"); reported = true; }
+            if (stalled > 20000) relaunchAndExit ("the main thread hasn't answered for 20 s");
             if (stalled < 2000 && reported) { Logger::writeToLog ("Main thread answering again"); reported = false; }
         }
     }
@@ -184,7 +227,8 @@ public:
                             + ". Keystone " + build + ".");
         raiseProcessPriority();
         SystemStats::setApplicationCrashHandler (crashHandler);
-        std::set_terminate ([] { Logger::writeToLog ("TERMINATE: an unhandled error stopped Keystone. Stack:\n" + SystemStats::getStackBacktrace()); std::abort(); });
+        std::set_terminate ([] { Logger::writeToLog ("TERMINATE: an unhandled error stopped Keystone. Stack:\n" + SystemStats::getStackBacktrace()); relaunchAndExit ("an unhandled error"); });
+        if (commandLine.contains ("--restarted")) Logger::writeToLog ("Started again by the watchdog");
         watchdog.startThread();
 
 #if JUCE_WINDOWS

@@ -39,6 +39,8 @@ struct Controller::Song
 
 struct Controller::State
 {
+    double backupCheckedAt = -1;
+    std::string lastBackupDay;
     // an update arriving from the phone
     struct Firmware { std::unique_ptr<std::ofstream> file; std::string path, version, sha; int64_t size = 0, got = 0; int seq = 0; } fw;
     std::vector<Song> songs;
@@ -190,6 +192,29 @@ static json readJson (const fs::path& p)
     catch (...) { return json(); }
 }
 
+// A file that's there but won't read (a power cut at the wrong moment): keep it as .broken
+// and use the newest daily backup instead
+static json readJsonOrBackup (const fs::path& dataDir, const char* name, const std::function<void (const std::string&)>& log)
+{
+    const auto p = dataDir / name;
+    auto j = readJson (p);
+    std::error_code ec;
+    if (! j.is_null() || ! fs::exists (p, ec)) return j;
+    fs::copy_file (p, fs::path (p.string() + ".broken"), fs::copy_options::overwrite_existing, ec);
+    std::vector<fs::path> days;
+    for (const auto& e : fs::directory_iterator (dataDir / "Backups", ec)) if (e.is_directory (ec)) days.push_back (e.path());
+    std::sort (days.rbegin(), days.rend());
+    for (const auto& d : days)
+    {
+        auto b = readJson (d / name);
+        if (b.is_null()) continue;
+        if (log) log (std::string (name) + " couldn't be read (kept as " + name + ".broken): using the backup from " + fromPath (d.filename()));
+        return b;
+    }
+    if (log) log (std::string (name) + " couldn't be read and there's no backup (kept as " + name + ".broken)");
+    return j;
+}
+
 static void writeJsonAtomic (const fs::path& p, const json& j)
 {
     std::error_code ec;
@@ -251,14 +276,14 @@ static std::vector<Controller::Song> readList (const json& j, const std::map<std
 void Controller::load()
 {
     // Keystone's setlist; the band's songs on a first run
-    const auto sl = readJson (toPath (dataDir) / listFile (0));
+    const auto sl = readJsonOrBackup (toPath (dataDir), listFile (0), onLog);
     s->songs = readList (sl, defaults(), "Song", kMaxEntries, true);
     if (s->songs.empty()) useBandSetlist (false);
     else s->current = std::clamp (sl.value ("current", 0), 0, (int) s->songs.size() - 1);
 
     // Kuddle's presets; the starters on a first run. Kuddle's sound is loaded too, so a
     // switch is instant.
-    const auto kj = readJson (toPath (dataDir) / listFile (1));
+    const auto kj = readJsonOrBackup (toPath (dataDir), listFile (1), onLog);
     s->other = readList (kj, kuddleDefaults(), "Preset", kMaxSongs, false);
     if (s->other.empty()) for (auto& [n, v] : kuddleStarters()) s->other.push_back ({ n, false, v });
     s->otherCurrent = std::clamp (kj.is_object() ? kj.value ("current", 0) : 0, 0, (int) s->other.size() - 1);
@@ -266,7 +291,7 @@ void Controller::load()
 
     // global settings
     int startRig = 0;
-    const auto st = readJson (toPath (dataDir) / "settings.json");
+    const auto st = readJsonOrBackup (toPath (dataDir), "settings.json", onLog);
     if (st.is_object())
     {
         if (st.contains ("globals") && st["globals"].is_object())
@@ -627,6 +652,55 @@ void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, 
 void Controller::tick (double now)
 {
     s->logic.tick (now);
+    // the daily backup: checked once a minute, made once a day
+    if (now - s->backupCheckedAt > 60.0 || s->backupCheckedAt < 0)
+    {
+        s->backupCheckedAt = now;
+        backup (today());
+    }
+}
+
+std::string Controller::today()
+{
+    const auto t = std::chrono::system_clock::to_time_t (std::chrono::system_clock::now());
+    std::tm tm {};
+   #ifdef _WIN32
+    localtime_s (&tm, &t);
+   #else
+    localtime_r (&t, &tm);
+   #endif
+    char buf[16];
+    std::strftime (buf, sizeof (buf), "%Y-%m-%d", &tm);
+    return buf;
+}
+
+// A copy of the setlist, Kuddle's presets and the settings in Backups\<day>, once a day,
+// keeping the last 30 days. Returns true when it made one.
+bool Controller::backup (const std::string& day)
+{
+    if (day == s->lastBackupDay) return false;
+    std::error_code ec;
+    const auto root = toPath (dataDir) / "Backups";
+    const auto dir = root / toPath (day);
+    s->lastBackupDay = day;
+    if (fs::exists (dir, ec)) return false;
+    bool any = false;
+    for (const char* f : { "setlist.json", "kuddle.json", "settings.json" })
+    {
+        const auto from = toPath (dataDir) / f;
+        if (! fs::exists (from, ec)) continue;
+        if (! any) fs::create_directories (dir, ec);
+        fs::copy_file (from, dir / f, fs::copy_options::overwrite_existing, ec);
+        any = any || ! ec;
+    }
+    if (! any) return false;
+    // the oldest go once there are more than 30
+    std::vector<fs::path> days;
+    for (const auto& e : fs::directory_iterator (root, ec)) if (e.is_directory (ec)) days.push_back (e.path());
+    std::sort (days.begin(), days.end());
+    for (size_t i = 0; i + 30 < days.size(); ++i) fs::remove_all (days[i], ec);
+    if (onLog) onLog ("Backed up the setlist, Kuddle presets and settings to Backups\\" + day);
+    return true;
 }
 
 bool Controller::tunerOn() const { return engine.meters().tunerOn; }
@@ -865,7 +939,12 @@ bool Controller::useCapture (const std::string& file, std::string& error)
 // ---------------------------------------------------------------------------------------
 // Link
 // ---------------------------------------------------------------------------------------
-void Controller::queue (const std::string& msg) { s->outbox.push_back (msg); }
+void Controller::queue (const std::string& msg)
+{
+    // if nothing collects them (a stalled host), keep the newest rather than grow for ever
+    if (s->outbox.size() >= 4096) s->outbox.erase (s->outbox.begin(), s->outbox.begin() + 1024);
+    s->outbox.push_back (msg);
+}
 void Controller::queueState() { queue (stateJson()); }
 void Controller::queueToast (const std::string& text)
 {

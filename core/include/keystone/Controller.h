@@ -61,6 +61,10 @@ public:
     std::function<std::string (const std::string& file, const std::string& version)> onFirmware;
     std::string updatesDir() const;
 
+    // the daily backup of the setlist, Kuddle presets and settings (Backups\<day>, 30 days kept)
+    bool backup (const std::string& day);
+    static std::string today();
+
     // songs
     int songCount() const;
     int currentSong() const;

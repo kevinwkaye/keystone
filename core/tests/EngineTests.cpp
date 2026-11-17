@@ -1454,6 +1454,35 @@ static void testFirmware()
     std::filesystem::remove_all (dir, ec);
 }
 
+static void testBackup()
+{
+    std::printf ("Daily backup\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_backup";
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
+    Engine e; e.prepare (kSr, 128);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    c.load();
+    c.handleMessage (R"({"t":"setlist","op":"save"})", [] (const std::string&) {});
+    CHECK (c.backup ("2026-01-01") && std::filesystem::exists (dir / "Backups" / "2026-01-01" / "setlist.json"), "the first backup of the day copies the setlist");
+    CHECK (! c.backup ("2026-01-01"), "only once a day");
+    for (int d = 2; d <= 40; ++d) { char n[16]; std::snprintf (n, sizeof (n), "2026-01-%02d", d); c.backup (n); }
+    int count = 0;
+    for (auto& x : std::filesystem::directory_iterator (dir / "Backups")) { (void) x; ++count; }
+    CHECK (count == 30 && ! std::filesystem::exists (dir / "Backups" / "2026-01-01") && std::filesystem::exists (dir / "Backups" / "2026-01-40"),
+           "thirty days kept, the oldest go (%d)", count);
+    // a broken setlist comes back from the newest backup
+    c.handleMessage (R"({"t":"setlist","op":"rename","i":0,"name":"Backed up"})", [] (const std::string&) {});
+    c.handleMessage (R"({"t":"setlist","op":"save"})", [] (const std::string&) {});
+    std::filesystem::remove_all (dir / "Backups" / "2026-01-40");
+    CHECK (c.backup ("2026-01-41"), "a new day's backup");
+    std::ofstream (dir / "setlist.json") << "{ \"songs\": [ half a fi";
+    Engine e2; e2.prepare (kSr, 128);
+    Controller c2 (e2, dir.string(), (dir / "caps").string());
+    c2.load();
+    CHECK (c2.songName (0) == "Backed up" && std::filesystem::exists (dir / "setlist.json.broken"), "a broken setlist comes back from the backup (%s)", c2.songName (0).c_str());
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
+}
+
 static void testBandSetlist()
 {
     std::printf ("The band's setlist\n");
@@ -1743,6 +1772,7 @@ static int soak (double minutes)
         else if (r < 0.98f) msg (R"({"t":"tap"})");
         else if (r < 0.99f) msg (R"({"t":"footMode"})");
         else msg (R"({"t":"setlist","op":"save"})");
+        c.takeBroadcasts();   // the app sends these to the phones every few milliseconds
         if (! rssAtHalf && done.load() > total / 2) rssAtHalf = rssKb();
     }
     stop.store (true);
@@ -1798,6 +1828,7 @@ int main (int argc, char** argv)
         testNewDefaults();
         testRecorder();
         testFirmware();
+        testBackup();
         testCapture (capture);
     }
     bench (capture);

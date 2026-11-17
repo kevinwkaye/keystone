@@ -63,6 +63,9 @@ private:
     float chanLevel[2] { 0, 0 };
     int chosen = 1, louderFor = 0;
     std::atomic<int> chosenChannel { 1 }, lateCallbacks { 0 }, silentInputBlocks { 0 }, xrunsBase { 0 };
+    std::atomic<int64_t> callbacks { 0 };   // the watchdog checks these keep coming
+    int64_t lastCallbacks = -1;
+    int stalledTicks = 0;
     int openedBuffer = 0, lastDropCheck = 0, dropTicks = 0, lastLate = 0, lastXrun = 0;
     juce::String openedForSetting;
     double callbackBudgetMs = 3.0;
