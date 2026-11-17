@@ -26,6 +26,7 @@ var KS = (function () {
   function send(o) {
     if (!connected() && !NAV_ONLY[o.t]) { toast('NOT CONNECTED'); return false; }
     var line = JSON.stringify(o);
+    if (S.demo && window.KSDemo) { KSDemo.send(line); return true; }   // the pretend Keystone in the phone
     if (window.KeystoneNative) window.KeystoneNative.send(line);
     else if (window.KSMock) window.KSMock.send(line);
     return true;
@@ -119,7 +120,18 @@ var KS = (function () {
     }
   }
 
+  // Demo: try every screen with no rig. The real Keystone takes over the moment it's found.
+  function demo(on) {
+    if (!window.KSDemo) return;
+    S.demo = on;
+    if (on) { KSDemo.start(); S.link = 'connected'; S.linkDetail = 'Demo: a pretend Keystone in this phone'; send({ t: 'hello', client: 'android', v: 1 }); toast('DEMO'); }
+    else { KSDemo.stop(); S.link = S.realLink || 'searching'; S.linkDetail = S.realDetail || ''; S.health = null; S.meter = { rec: { on: false } }; loadOffline(); }
+    render(true);
+  }
   function onLink(status, detail) {
+    S.realLink = status; S.realDetail = detail || '';
+    if (S.demo && status !== 'connected') return;   // stay in the demo while the real one is looking
+    if (S.demo && status === 'connected') { S.demo = false; KSDemo.stop(); toast('KEYSTONE FOUND'); }
     if (status !== 'connected') { S.health = null; S.rtt = null; }
     S.link = status; S.linkDetail = detail || '';
     if (status === 'connected') send({ t: 'hello', client: 'android', v: 1 });
@@ -455,6 +467,7 @@ var KS = (function () {
   }
 
   function pill() {
+    if (S.demo) return '<button type="button" id="linkPill" class="pill demo" data-go="health" style="border:none" aria-label="Open Rig"><span class="dot" style="background:#F0C27B"></span>Demo</button>';
     var c = S.link === 'connected', w = warnings().length;
     var label = !c ? 'Searching' : w ? w + (w > 1 ? ' problems' : ' problem') : 'Connected';
     return '<button type="button" id="linkPill" class="pill" data-go="health" style="border:none" aria-label="Open Health"><span class="dot ' + (!c ? 'searching' : w ? 'warn' : '') + '"></span>' + label + '</button>';
@@ -502,6 +515,7 @@ var KS = (function () {
     var frac = inDb == null ? 0 : Math.max(0, Math.min(1, (inDb + 60) / 60));
     var inCol = inDb == null || inDb < -50 ? '#8A847A' : inDb > -1 ? o : g;
     return '<section class="screen" style="gap:14px">' + header('Rig', { id: 'play', label: 'Play' }, head) +
+      (S.demo ? '<section class="card" style="gap:8px;border:2px solid #F0C27B"><span style="font-size:17px;font-weight:700">Demo</span><span class="small">A pretend Keystone in this phone. Switches, songs, banks, modes, the tuner and meters all work; recording, updates and captures need the real rig. It hands over to the real Keystone the moment it\'s found.</span><button type="button" class="wide" data-act="demoOff">Leave the demo</button></section>' : '') +
       '<section class="card" style="gap:10px"><h2 class="label">Bass in</h2><div class="bar" style="height:14px"><div style="width:' + (frac * 100) + '%;background:' + inCol + '"></div></div>' +
       '<div style="display:flex;justify-content:space-between;font-size:14px"><span>' + esc(inputText()) + '</span><span class="muted">' + (h ? 'Input ' + h['in'].ch : '') + '</span></div></section>' +
       '<section class="card" style="padding:6px 16px;gap:0">' + rows.map(function (r) {
@@ -654,6 +668,7 @@ var KS = (function () {
       (S.linkDetail ? '<span class="small" style="color:#F2EDE4">' + esc(S.linkDetail) + '</span>' : '') +
       '<div class="note"><input id="manualIp" inputmode="decimal" placeholder="Laptop address, e.g. 10.42.0.17" aria-label="Laptop address" value="' + esc(S.manualIp || '') + '">' +
       '<button type="button" data-act="manual">Connect</button></div>' +
+      (window.KSDemo ? '<button type="button" class="wide go" data-act="demoOn">Try the demo instead</button><span class="small">Plays with a pretend Keystone in this phone: every screen works, nothing is sent anywhere.</span>' : '') +
       '<span class="small">Type the laptop\'s address, not the phone\'s. Your hotspot settings list the laptop under Connected devices, and Keystone writes its address in Documents\\Keystone\\keystone.log.</span></div>' : '';
     var note = Date.now() < S.noteUntil ? '<div class="note"><input id="noteText" maxlength="200" placeholder="Add a note to that Keep (optional)" aria-label="Note for the last Keep"><button type="button" data-act="note">Save</button></div>' : '';
     return '<section class="screen">' +
@@ -750,7 +765,7 @@ var KS = (function () {
       '<button type="button" class="' + (drop ? 'on' : '') + '" data-set="drone.tuning" data-v="1" style="min-height:52px;font-size:17px">Drop D</button></div></div>' +
       '<label class="switch">Mute output while tuning<input type="checkbox" data-toggle="tuner.mute"' + (muted ? ' checked' : '') + '></label>' +
       '<div class="small" id="inLevel">' + inputText() + '</div>' +
-      '<div class="small">Reference A = ' + Math.round(val('tuner.ref')) + ' Hz. Hold C, or tap any footswitch, to leave the tuner.</div>' +
+      '<div class="small">Reference A = ' + Math.round(val('tuner.ref')) + ' Hz. Tap any footswitch to leave the tuner (in Grit, hold C again).</div>' +
       nav('tuner') + '</section>';
   }
 
@@ -1244,6 +1259,8 @@ var KS = (function () {
       case 'makePack':
         if (send({ t: 'listen', take: S.take, from: S.pickFrom || 0, secs: 30 })) { S.making = true; S.pack = null; render(true); }
         break;
+      case 'demoOn': demo(true); break;
+      case 'demoOff': demo(false); break;
       case 'wifiToggle': if (S.wifi) send({ t: 'wifi', on: !S.wifi.on }); break;
       case 'wifiAdd': if (S.wifi && window.KeystoneNative && KeystoneNative.wifiAdd) KeystoneNative.wifiAdd(S.wifi.ssid, S.wifi.pass); break;
       case 'recStop': send({ t: 'recStop' }); setTimeout(function () { send({ t: 'takes' }); }, 1500); break;
