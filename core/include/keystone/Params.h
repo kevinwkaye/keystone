@@ -166,7 +166,6 @@ struct ParamInfo
     P(GrScatter,      "grains.scatter",  "Movement",      "grains",  "Pitch",          Slider, 0,    1,    0.4f, "%",  "Steady|Scattered", None) \
     P(GrVolume,       "grains.volume",   "Volume",        "grains",  "Output",         Flip,   -12,  12,   0,    "dB", "",   None) \
     P(GrMix,          "grains.mix",      "Mix",           "grains",  "Output",         Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(GrSource,       "grains.source",   "Source",        "grains",  "Output",         Choice, 0,    1,    0,    "",   "Clean|Dirty", None) \
     P(BloomGrains,    "bloom.grains",    "Bloom reach",   "grains",  "Bloom reach",    Slider, 0,    1,    1,    "%",  "None|Full", None) \
     P(DlOn,           "delay.on",        "On",            "delay",   "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(DlType,         "delay.type",      "Type",          "delay",   "Type",           Choice, 0,    11,   0,    "",   "Digital|Bucket|Tape|Dual|Pattern|Reverse|Ice|Swell|Trem|Filter|Lo-fi|Galaxy", None) \

@@ -218,4 +218,5 @@ jobs:
             echo
             echo "Built from ${GITHUB_SHA::7}."
           } > notes.md
-          gh release edit "v$VERSION" --notes-file notes.md -R "$GITHUB_REPOSITORY"
+          # a full release once everything is on it, so the phone's Update firmware finds it
+          gh release edit "v$VERSION" --notes-file notes.md --prerelease=false --latest -R "$GITHUB_REPOSITORY"

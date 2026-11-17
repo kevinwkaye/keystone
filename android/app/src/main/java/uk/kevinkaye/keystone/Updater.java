@@ -55,7 +55,20 @@ final class Updater {
     void check() {
         new Thread(() -> {
             try {
-                JSONObject rel = new JSONObject(get("https://api.github.com/repos/" + REPO + "/releases/latest"));
+                // The newest Keystone release. Not /releases/latest: GitHub leaves out pre-releases
+                // there, and the Kuddle plugin's releases (kuddle-v...) share this repo.
+                JSONArray all = new JSONArray(get("https://api.github.com/repos/" + REPO + "/releases?per_page=30"));
+                // A finished release first. A pre-release only counts if there's nothing else
+                // (one still building is a pre-release until all its files are on it).
+                JSONObject rel = null, pre = null;
+                for (int i = 0; i < all.length() && rel == null; i++) {
+                    JSONObject r = all.getJSONObject(i);
+                    if (r.optBoolean("draft") || ! r.optString("tag_name").matches("v?\\d+(\\.\\d+)*")) continue;
+                    if (! r.optBoolean("prerelease")) rel = r;
+                    else if (pre == null) pre = r;
+                }
+                if (rel == null) rel = pre;
+                if (rel == null) { post(err("check", "GitHub has no Keystone release yet")); return; }
                 JSONArray in = rel.getJSONArray("assets"), assets = new JSONArray();
                 for (int i = 0; i < in.length(); i++) {
                     JSONObject a = in.getJSONObject(i);
@@ -64,8 +77,11 @@ final class Updater {
                 }
                 String tag = rel.getString("tag_name");
                 post(new JSONObject().put("t", "latest").put("version", tag.startsWith("v") ? tag.substring(1) : tag).put("assets", assets));
+            } catch (java.io.IOException e) {
+                post(err("check", e.getMessage() != null && e.getMessage().startsWith("GitHub said")
+                        ? e.getMessage() : "Couldn't reach GitHub. The phone needs mobile data or Wi-Fi with internet"));
             } catch (Exception e) {
-                post(err("check", "Couldn't reach GitHub. The phone needs mobile data or Wi-Fi with internet"));
+                post(err("check", "GitHub's answer didn't make sense: " + e.getMessage()));
             }
         }, "update check").start();
     }
@@ -220,6 +236,8 @@ final class Updater {
         c.setReadTimeout(15000);
         c.setRequestProperty("User-Agent", "Keystone");
         c.setRequestProperty("Accept", "application/vnd.github+json");
+        final int code = c.getResponseCode();
+        if (code != 200) { c.disconnect(); throw new java.io.IOException("GitHub said " + code + (code == 403 ? " (too many checks, try again in an hour)" : "")); }
         try (InputStream in = c.getInputStream()) {
             java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream();
             byte[] buf = new byte[16384];
