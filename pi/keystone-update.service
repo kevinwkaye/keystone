@@ -1,0 +1,7 @@
+[Unit]
+Description=Install a Keystone update from the phone
+
+[Service]
+Type=oneshot
+ExecStart=/opt/keystone/keystone-update.sh
+TimeoutStartSec=10min

@@ -114,6 +114,17 @@ jobs:
           ./build/keystone_tests --defaults android/app/src/main/assets/defaults.js
           git diff --exit-code android/app/src/main/assets/defaults.js || { echo "::error::defaults.js is out of date: run keystone_tests --defaults"; exit 1; }
 
+      # the Pi runs Keystone with no screen: check it starts that way (no display, no sound card)
+      - name: Starts with no screen (like the Pi)
+        continue-on-error: true
+        run: |
+          export HOME="$RUNNER_TEMP/kshome" && mkdir -p "$HOME/Documents"
+          unset DISPLAY
+          timeout 20 ./build/app/Keystone_artefacts/Release/Keystone --background > smoke.log 2>&1 || true
+          cat smoke.log | tail -20
+          cat "$HOME/Documents/Keystone/keystone.log" 2>/dev/null | tail -30 || true
+          grep -q '"version"' "$HOME/Documents/Keystone/started.json" && echo "Started with no screen"
+
       # an hour of audio with a gig's worth of footwork, the audio on its own thread
       - name: Soak test (ARM64, like the Pi)
         run: ./build/keystone_tests --soak 60 | tee soak-linux-arm64.md
@@ -126,6 +137,7 @@ jobs:
           mkdir -p dist/keystone
           cp build/app/Keystone_artefacts/Release/Keystone dist/keystone/keystone
           cp installer/README.txt dist/keystone/
+          mkdir -p dist/keystone/pi && cp pi/* dist/keystone/pi/
           tar -C dist -czf "Keystone-$VERSION-linux-arm64.tar.gz" keystone
           gh release upload "v$VERSION" "Keystone-$VERSION-linux-arm64.tar.gz" bench-linux-arm64.md soak-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
 

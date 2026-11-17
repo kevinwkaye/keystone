@@ -1,0 +1,24 @@
+# Keystone on the Pi: starts at boot, comes back by itself if it ever stops.
+[Unit]
+Description=Keystone bass rig
+After=sound.target network-online.target
+Wants=network-online.target
+
+[Service]
+User=keystone
+Group=keystone
+SupplementaryGroups=audio
+WorkingDirectory=/home/keystone
+Environment=HOME=/home/keystone
+ExecStart=/opt/keystone/current/keystone --background
+Restart=always
+RestartSec=2
+# audio first: real-time priority for its threads, memory locked so nothing pages out
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Nice=-10
+# keep the update helper's own service out of this one's way
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

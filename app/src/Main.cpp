@@ -434,20 +434,29 @@ private:
         };
         controller->footswitchStatus = [this] { return midi ? midi->status().toStdString() : std::string(); };
         controller->audioStatus = [this] { return audio ? audio->status().toStdString() : std::string(); };
-       #if JUCE_WINDOWS
-        // Update firmware: hand the installer to the "Keystone Update" task (Tools\Update.ps1),
+       #if JUCE_WINDOWS || JUCE_LINUX
+        // Update firmware. Laptop: hand the installer to the "Keystone Update" task (Tools\Update.ps1),
         // which installs it with administrator rights and puts the old version back if the
-        // new one doesn't start
+        // new one doesn't start. Pi: pi/keystone-update.sh, the same with two install slots
         controller->onFirmware = [this] (const std::string& file, const std::string& version) -> std::string
         {
             const File installer (String::fromUTF8 (file.c_str()));
+           #if JUCE_WINDOWS
             if (! installer.hasFileExtension ("exe")) return "That update is for the Pi, not the laptop";
+           #else
+            if (! installer.getFileName().endsWith ("-linux-arm64.tar.gz")) return "That update is for the laptop, not the Pi";
+           #endif
             auto* r = new DynamicObject();
             r->setProperty ("installer", installer.getFullPathName());
             r->setProperty ("version", String (version));
             r->setProperty ("from", String (ks::Controller::kVersion));
             if (! installer.getSiblingFile ("request.json").replaceWithText (JSON::toString (var (r))))
                 return "Couldn't save the update request";
+           #if JUCE_LINUX
+            // Pi: keystone-update.path sees request.json and runs the updater (A/B slots)
+            Logger::writeToLog ("Update firmware: asked the Pi's updater for " + installer.getFileName());
+            return {};
+           #else
             ChildProcess task;
             if (! task.start (StringArray { "schtasks.exe", "/run", "/tn", "Keystone Update" }, 0))
                 return "Couldn't start the updater";
@@ -459,6 +468,7 @@ private:
             }
             Logger::writeToLog ("Update firmware: handed " + installer.getFileName() + " to the updater");
             return {};
+           #endif
         };
        #endif
     }

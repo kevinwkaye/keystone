@@ -1,0 +1,11 @@
+# Update firmware on the Pi: Keystone writes request.json, this starts the updater.
+# (On the laptop the same job is the "Keystone Update" scheduled task.)
+[Unit]
+Description=Watch for a Keystone update from the phone
+
+[Path]
+PathExists=/home/keystone/Documents/Keystone/Updates/request.json
+Unit=keystone-update.service
+
+[Install]
+WantedBy=multi-user.target
