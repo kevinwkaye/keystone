@@ -127,19 +127,47 @@ jobs:
 
       # an hour of audio with a gig's worth of footwork, the audio on its own thread
       - name: Soak test (ARM64, like the Pi)
-        run: ./build/keystone_tests --soak 60 | tee soak-linux-arm64.md
+        run: ./build/keystone_tests --soak ${{ github.ref == 'refs/heads/main' && 60 || 10 }} | tee soak-linux-arm64.md
 
-      - name: Package and add to the release
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Package
         run: |
           mkdir -p dist/keystone
           cp build/app/Keystone_artefacts/Release/Keystone dist/keystone/keystone
           cp installer/README.txt dist/keystone/
+          echo "$VERSION" > dist/keystone/VERSION
           mkdir -p dist/keystone/pi && cp pi/* dist/keystone/pi/
           tar -C dist -czf "Keystone-$VERSION-linux-arm64.tar.gz" keystone
-          gh release upload "v$VERSION" "Keystone-$VERSION-linux-arm64.tar.gz" bench-linux-arm64.md soak-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: Keystone-${{ env.VERSION }}-linux-arm64.tar.gz
+          retention-days: 3
+
+      - name: Add to the release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v$VERSION" "Keystone-$VERSION-linux-arm64.tar.gz" bench-linux-arm64.md soak-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
+
+  # The ready-made Pi image: Raspberry Pi OS Lite with Keystone already in it
+  pi-image:
+    needs: linux-arm64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64
+      - name: Build the image
+        run: |
+          sudo apt-get install -y parted xz-utils >/dev/null
+          sudo pi/build-image.sh "Keystone-$VERSION-linux-arm64.tar.gz" "Keystone-$VERSION-pi.img.xz"
+      - name: Add to the release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v$VERSION" "Keystone-$VERSION-pi.img.xz" --clobber -R "$GITHUB_REPOSITORY"
 
   android:
     needs: prepare
