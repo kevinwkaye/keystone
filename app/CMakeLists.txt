@@ -26,10 +26,10 @@ target_sources(Keystone PRIVATE
     src/Main.cpp
     src/AudioHost.cpp
     src/LinkServer.cpp
-    src/PedalControl.cpp
-    src/Keeper.cpp)
+    ${PROJECT_SOURCE_DIR}/shared/PedalControl.cpp
+    ${PROJECT_SOURCE_DIR}/shared/Keeper.cpp)
 
-target_include_directories(Keystone PRIVATE src ${PROJECT_SOURCE_DIR}/core/src)
+target_include_directories(Keystone PRIVATE src ${PROJECT_SOURCE_DIR}/shared ${PROJECT_SOURCE_DIR}/core/src)
 
 # ASIO on Windows (Steinberg's ASIO SDK, used under its GPLv3 option), so interfaces whose
 # Windows driver drops data in WASAPI can run through ASIO4ALL or their own ASIO driver.

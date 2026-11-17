@@ -1106,26 +1106,57 @@ static void testController()
     CHECK (c.bank() == 0, "hold A does nothing while tuning");
     tap (1);
     CHECK (! c.tunerOn() && c.value (P::BitrotOn) == 0, "any tap leaves the tuner without doing its job");
-    // C and D together, held a second: Keep
-    c.footswitchPress (2, t); c.footswitchPress (3, t + 0.03);
-    for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
-    c.footswitchRelease (2, t); c.footswitchRelease (3, t);
-    CHECK (keeps == 1 && ! c.tunerOn() && c.value (P::CompSlap) == 1, "hold C and D: Keep, nothing else fires");
-    // A and B stomped together: next song, the moment both are down, no taps fire
-    t += 1;
+    // hold B counts from 0.3 s
     {
         const int before = c.currentSong();
-        const float dv = c.value (P::DriveVoice), br = c.value (P::BitrotOn);
-        c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02);
-        CHECK (c.currentSong() == before + 1, "A and B together: next song straight away");
-        c.footswitchRelease (0, t + 0.1); c.footswitchRelease (1, t + 0.12);
-        c.selectSong (before);
-        CHECK (c.value (P::DriveVoice) == dv && c.value (P::BitrotOn) == br, "and neither tap fires");
-        t += 1;
         c.footswitchPress (1, t); t += 0.32; c.tick (t); c.footswitchRelease (1, t); t += 0.5;
         CHECK (c.currentSong() == before + 1, "hold B counts from 0.3 s now");
         c.selectSong (before);
+        // A and B pressed together in Stomp mode: nothing, and neither tap fires
+        const float dv = c.value (P::DriveVoice), br = c.value (P::BitrotOn);
+        c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02); c.footswitchRelease (0, t + 0.1); c.footswitchRelease (1, t + 0.12); t += 0.5;
+        CHECK (c.currentSong() == before && c.value (P::DriveVoice) == dv && c.value (P::BitrotOn) == br, "A and B together: no song change, no taps");
     }
+    // C and D pressed together: Song mode, the moment both are down; Keep is off the feet
+    const float slapBefore = c.value (P::CompSlap);
+    c.footswitchPress (2, t); c.footswitchPress (3, t + 0.03);
+    CHECK (c.footMode() == 1 && c.lastToast() == "SONG MODE", "C and D together: Song mode straight away");
+    for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
+    c.footswitchRelease (2, t); c.footswitchRelease (3, t); t += 0.5;
+    CHECK (keeps == 0 && ! c.tunerOn() && c.value (P::CompSlap) == slapBefore, "holding them on doesn't Keep, tune or slap");
+    {
+        c.selectSong (0);
+        auto press = [&] (int sw) { c.footswitchPress (sw, t); t += 0.05; c.tick (t); };
+        auto lift = [&] (int sw) { c.footswitchRelease (sw, t); t += 0.5; };
+        press (2);
+        CHECK (c.currentSong() == 1, "Song mode, C: next song on the press");
+        t += 0.5; c.tick (t); lift (2);
+        CHECK (c.currentSong() == 1 && ! c.tunerOn(), "holding C neither tunes nor steps again");
+        press (0); lift (0);
+        CHECK (c.currentSong() == 0, "Song mode, A: previous song");
+        const float bit = c.value (P::BitrotOn);
+        press (1); lift (1);
+        CHECK (c.lastToast() == "LAST PART" && c.currentSong() == 0 && c.value (P::BitrotOn) == bit, "Song mode, B: no part to go to, and no Bitrot tap");
+        press (0); press (1); lift (0); lift (1);
+        CHECK (c.currentSong() == 0 && c.rig() == 0, "A then B straight after: two presses, not a combo");
+        // C first then D straight after: back to Stomp mode, and the C press is undone
+        c.footswitchPress (2, t); c.footswitchPress (3, t + 0.04);
+        CHECK (c.footMode() == 0 && c.currentSong() == 0, "C+D with C a touch first: Stomp mode, still on the same song");
+        c.footswitchRelease (2, t + 0.2); c.footswitchRelease (3, t + 0.2); t += 1;
+    }
+    // hold A and B for a second in Stomp mode: Kuddle, and back
+    c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02);
+    for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
+    c.footswitchRelease (0, t); c.footswitchRelease (1, t); t += 0.5;
+    CHECK (c.rig() == 1, "hold A and B: Kuddle");
+    c.footswitchPress (2, t); c.footswitchPress (3, t + 0.02);
+    for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
+    c.footswitchRelease (2, t); c.footswitchRelease (3, t); t += 0.5;
+    CHECK (keeps == 1, "in Kuddle, hold C and D still Keeps");
+    c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02);
+    for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
+    c.footswitchRelease (0, t); c.footswitchRelease (1, t); t += 0.5;
+    CHECK (c.rig() == 0 && c.footMode() == 0, "hold A and B again: back to Keystone in Stomp mode");
 
     // setlist
     auto msg = [&] (const std::string& m) { c.handleMessage (m, [] (const std::string&) {}); };
@@ -1300,16 +1331,6 @@ static void testBandSetlist()
         for (int i = 0; i < c.songCount(); ++i) if (c.songName (i) == "Middle 32") { c.selectSong (i); songNo = c.songNumber (i); }
         CHECK (songNo == 9 && c.value (P::DriveOn) == 0 && c.value (P::RvOn) == 1 && c.value (P::DlOn) == 1 && c.bank() == 2, "Sluts middle 32: ambient, in Glow");
     }
-    // the untouched starter list from before 0.3.4 is swapped for the band's, with a backup
-    std::filesystem::remove_all (dir);
-    std::filesystem::create_directories (dir);
-    std::ofstream (dir / "setlist.json") << R"({"version":6,"current":0,"songs":[{"name":"New choon","values":{}},{"name":"I'm Not a Robot","values":{}},{"name":"When the Circus Comes to Town","values":{}},{"name":"The Comedian and the Boxer","values":{}}]})";
-    {
-        Engine e; e.prepare (kSr, 64);
-        Controller c (e, dir.string(), (dir / "caps").string());
-        c.load();
-        CHECK (c.songCount() == 20 && std::filesystem::exists (dir / "setlist before the band setlist.json"), "the starter list becomes the band's setlist, the old one kept");
-    }
     std::filesystem::remove_all (dir);
 }
 
@@ -1405,7 +1426,10 @@ static void bench (const char* capture)
                              { "Everything on, tape delay and Haze grains", [&] (Engine& e) { everything (e); e.setParam (P::DlType, 2); e.setParam (P::DlTapeMode, 2); e.setParam (P::GrEffect, 4); }, nullptr },
                              { "Everything on, Cloud reverb", [&] (Engine& e) { everything (e); e.setParam (P::RvType, 5); }, nullptr },
                              { "Everything on, Impulse reverb (2 s)", [&] (Engine& e) { everything (e); e.setParam (P::RvType, 11); std::string err; e.loadSpace (writeTestWav (24, false, 1, 48000), err); }, nullptr },
-                             { "Everything on, Galaxy delay and Arp grains", [&] (Engine& e) { everything (e); e.setParam (P::DlType, 11); e.setParam (P::GrEffect, 9); e.setParam (P::GrPitch, 3); }, nullptr } };
+                             { "Everything on, Galaxy delay and Arp grains", [&] (Engine& e) { everything (e); e.setParam (P::DlType, 11); e.setParam (P::GrEffect, 9); e.setParam (P::GrPitch, 3); }, nullptr },
+                             { "Groove: wah, auto filter and Dimension", [] (Engine& e) { e.setParam (P::DriveSource, 1); e.setParam (P::WahOn, 1); e.setParam (P::FiltOn, 1); e.setParam (P::DimOn, 1); e.setPedalBank (1); e.setPedal (0.6f); }, nullptr },
+                             { "Kuddle, Voodoo (Keystone asleep)", [] (Engine& e) { e.setRig (1); }, nullptr },
+                             { "Kuddle with the room on", [] (Engine& e) { e.setRig (1); e.setParam (P::KRoomOn, 1); }, nullptr } };
     if (capture && Engine::namAvailable() && std::filesystem::exists (capture))
     {
         cases.insert (cases.begin(), { "Song default (Edge on the model), capture loaded", defaults, capture });

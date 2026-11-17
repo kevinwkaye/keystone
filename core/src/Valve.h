@@ -1,8 +1,8 @@
 #pragma once
 // Keystone's preamp, warm but modern:
 //
-//   learnt gain staging -> two valve stages -> passive tone stack ---\
-//                                     \-> Cut voice (tight, modern) --+-> blend -> tape -> out
+//   learnt gain staging -> two valve stages -> passive tone stack --.
+//                                     '-> Cut voice (tight, modern) --+-> blend -> tape -> out
 //
 // Valve: an asymmetric triode curve (harder on top, softer underneath, so even harmonics),
 // run with first-order antiderivative anti-aliasing so there is no digital fizz and no added
@@ -24,27 +24,6 @@ namespace ks
 {
 // Asymmetric triode curve with its antiderivative. Above zero it bends over sooner (grid
 // conduction), below zero it rounds off later (towards cutoff).
-struct Triode
-{
-    float u1 = 0;
-    static float f (float u) { return u >= 0 ? u / (1.0f + u) : std::tanh (0.7f * u) / 0.7f; }
-    static float F (float u)
-    {
-        if (u >= 0) return u - std::log1p (u);
-        const float a = std::fabs (0.7f * u);
-        const float lc = a > 12.0f ? a - 0.69314718f : std::log (std::cosh (a));
-        return lc / 0.49f;
-    }
-    float process (float u)
-    {
-        const float d = u - u1;
-        const float y = std::fabs (d) < 1.0e-4f ? f (0.5f * (u + u1)) : (F (u) - F (u1)) / d;
-        u1 = u;
-        return y;
-    }
-    void reset() { u1 = 0; }
-};
-
 // Third-order filter from an analogue prototype by the bilinear transform.
 struct ThirdOrder
 {

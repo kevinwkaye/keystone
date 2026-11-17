@@ -272,27 +272,6 @@ private:
 // same level whatever the interface gain (learnt from note peaks), with the bias shifting
 // as you dig in (Sag). Then a coupling cap, Air (a gentle top shelf) and the output
 // transformer's soft top. The level is put back afterwards, gliding (Keystone lesson).
-struct Triode
-{
-    float u1 = 0;
-    static float f (float u) { return u >= 0 ? u / (1.0f + u) : std::tanh (0.7f * u) / 0.7f; }
-    static float F (float u)
-    {
-        if (u >= 0) return u - std::log1p (u);
-        const float a = std::fabs (0.7f * u);
-        const float lc = a > 12.0f ? a - 0.69314718f : std::log (std::cosh (a));
-        return lc / 0.49f;
-    }
-    float process (float u)
-    {
-        const float d = u - u1;
-        const float y = std::fabs (d) < 1.0e-4f ? f (0.5f * (u + u1)) : (F (u) - F (u1)) / d;
-        u1 = u;
-        return y;
-    }
-    void reset() { u1 = 0; }
-};
-
 class ValveDI
 {
 public:

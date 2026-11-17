@@ -73,15 +73,26 @@ struct Engine::Impl
     int tunerLastMidi = -1;
     std::chrono::steady_clock::time_point lastTunerRun {};
 
-    // bloom
-    float lastBloom = 0;
-
     // tails ring over a part change: a short window in which delay and reverb switched
     // off keep their tails instead of fading them out
     // Kuddle
     kud::Engine kuddle;
     std::vector<float> kudL, kudR;
     Smoothed rigMix, ksIn;
+    int64_t ksQuiet = 0;       // samples Keystone has been silent while Kuddle plays
+
+    // the tuner hears the bass at a quarter of the rate, whichever rig is playing
+    void feedTuner (float raw)
+    {
+        const float t = tunerLp2.process (tunerLp1.process (raw));
+        if (++decim >= 4)
+        {
+            decim = 0;
+            const int p = (tunerPos.load (std::memory_order_relaxed) + 1) & 8191;
+            tunerRing[(size_t) p] = t;
+            tunerPos.store (p, std::memory_order_release);
+        }
+    }
     bool kuddleRunning = false;
     std::atomic<float> kudGr { 0 };
 
@@ -102,7 +113,6 @@ struct Engine::Impl
     std::atomic<int> tapRequests { 0 };
     int tapSeen = 0;
     int64_t sampleClock = 0, lastTap = -1;
-    std::atomic<float> tappedMs { -1 };
 
     std::string capName;
     mutable std::mutex capLock;
@@ -157,6 +167,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.rigMix.setTime (0.05f, s); d.rigMix.reset (rigNow.load() == 1 ? 1.0f : 0.0f);
     d.ksIn.setTime (0.05f, s); d.ksIn.reset (rigNow.load() == 1 ? 0.0f : 1.0f);
     d.kuddleRunning = false;
+    d.ksQuiet = 0;
     d.dim.prepare (s);
     d.grains.prepare (s);
     d.delay.prepare (s);
@@ -358,7 +369,6 @@ void Engine::process (const float* in, float* out, int numSamples)
         const float z3 = clampf ((bl - 0.5f) * 2.0f, 0.0f, 1.0f);
         const bool heelBack = bloomOn && bl < 0.02f;
         const bool cutTails = Vi (v, P::BloomTails) == 0;
-        d.lastBloom = bl;
 
         // tap tempo for the delay: time between two taps under 2 s
         const int tr = d.tapRequests.load();
@@ -368,7 +378,7 @@ void Engine::process (const float* in, float* out, int numSamples)
             if (d.lastTap >= 0)
             {
                 const double ms = (double) (d.sampleClock - d.lastTap) * 1000.0 / d.sr;
-                if (ms > 40 && ms < 1500) { values[(size_t) P::DlTime].store ((float) ms); d.tappedMs.store ((float) ms); }
+                if (ms > 40 && ms < 1500) values[(size_t) P::DlTime].store ((float) ms);
             }
             d.lastTap = d.sampleClock;
         }
@@ -449,114 +459,127 @@ void Engine::process (const float* in, float* out, int numSamples)
         const bool limitOn = Vb (v, P::OutLimit);
         const bool pa = Vi (v, P::OutVoicing) == 1;
 
-        // ---- split ----
-        for (int i = 0; i < n; ++i)
+        // ---- Keystone ----
+        // While Kuddle plays and Keystone's tails have died away, Keystone sleeps: only the
+        // tuner and the input meter still hear the bass, so the two rigs never cost double.
+        const bool ksAsleep = rigNow.load() == 1 && d.ksQuiet > (int64_t) (0.5f * d.sr);
+        if (ksAsleep)
         {
-            // the tuner and the input meter hear the bass whichever rig is playing; Keystone's
-            // chain stops hearing it while Kuddle plays, so its tails ring out
-            const float raw = d.dc.process (x[i]);
-            const float s = raw * d.ksIn.next();
-            d.cleanBuf[(size_t) i] = s;
-            d.inPk = std::max (d.inPk * 0.9995f, std::fabs (raw));
-            d.play.process (s);
-            float lo, hi;
-            d.split.split (s, lo, hi);
-            d.lowBuf[(size_t) i] = d.low.process (lo);
-            (void) hi;
-            const float full = d.subCut2.process (d.subCut1.process (s));
-            d.highBuf[(size_t) i] = full;
-            d.fullBuf[(size_t) i] = full;
-            d.droneBuf[(size_t) i] = d.drone.process (s);
-            // tuner feed
-            const float t = d.tunerLp2.process (d.tunerLp1.process (raw));
-            if (++d.decim >= 4)
-            {
-                d.decim = 0;
-                const int p = (d.tunerPos.load (std::memory_order_relaxed) + 1) & 8191;
-                d.tunerRing[(size_t) p] = t;
-                d.tunerPos.store (p, std::memory_order_release);
-            }
-        }
-
-        // ---- high band: Bitrot (if first), drive, Bitrot, preamp ----
-        float* hb = d.highBuf.data();
-        // Bitrot hears the whole bass (high band plus low band) and plays its synth into the
-        // high band; Clean bass sets how much of the clean signal, low band included, stays
-        float* lm = d.lowMul.data();
-        std::fill (lm, lm + n, 1.0f);
-        float* sg = d.synthG.data();
-        std::fill (sg, sg + n, 0.0f);
-        auto runBitrot = [&]()
-        {
-            const bool active = Vb (v, P::BitrotOn) || d.bitrotOn.current() > 1.0e-4f;
-            if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); return; }
-            float* sy = d.synthBuf.data();
-            for (int i = 0; i < n; ++i) sy[i] = d.cleanBuf[(size_t) i];   // the whole bass, sub included, so it tracks the fundamental
-            d.bitrot.process (sy, n);
             for (int i = 0; i < n; ++i)
             {
-                const float g = d.bitrotOn.next();
-                const float keep = 1.0f - g * (1.0f - d.bitrotClean.next());
-                lm[i] = keep;
-                // after the preamp, the synth joins the full sound later, untouched by the valve
-                if (bitrotPlace == 2) { sg[i] = g; continue; }
-                hb[i] = hb[i] * keep + sy[i] * g;
+                const float raw = d.dc.process (x[i]);
+                d.inPk = std::max (d.inPk * 0.9995f, std::fabs (raw));
+                d.feedTuner (raw);
+                y[i] = 0.0f;
             }
-        };
-        if (bitrotFirst) runBitrot();
-        d.drive.process (hb, d.lowBuf.data(), n, cap);
-        if (! bitrotFirst) runBitrot();
-
-        float playLevel = d.play.level;
-        const bool filtHigh = Vi (v, P::FiltRange) == 1;
-        for (int i = 0; i < n; ++i)
+        }
+        else
         {
-            float h = hb[i];
-            const float pg = d.preOn.next();
-            h = d.preamp.process (h, pg);   // always the same latency, on or off
-            if (sg[i] > 0.0f) h = h * lm[i] + d.synthBuf[(size_t) i] * sg[i];
-            const float fg = filtHigh ? d.filtOn.next() : 0.0f;
-            if (fg > 1.0e-4f) h = h + (d.filter.process (h) - h) * fg;
-            // the pedal wah on the full sound, so the bottom end stays solid under it
-            const float wg = d.wahOn.next();
-            if (wg > 1.0e-4f) h = h + (d.wah.process (h) - h) * wg;
-            const float dg = d.dimOn.next();
-            if (! dimLow && dg > 1.0e-4f) h = h + (d.dim.process (h) - h) * dg;
-            // the volume pedal sits before the ambient section, so tails ring as you pull back
-            const float vg = d.volume.next();
-            h *= d.highLevel.next() * vg;
-
-            // ---- ambient ----
-            const float grainSrc = d.grains.sourceDirty() ? h : d.fullBuf[(size_t) i] * vg;
-            const float gr = d.grains.process (grainSrc, playLevel);
-            const float dr = d.droneBuf[(size_t) i];
-            const float droneSend = dr * V (v, P::DroneSend);
-            float dl = 0, rv = 0;
-            if (d.delay.active()) dl = d.delay.process (h + gr);
-            if (d.reverb.active() || droneSend != 0.0f) rv = d.reverb.process (h + gr + dl + droneSend);
-
-            // ---- sum, mono out ----
-            d.lowAlign.push (d.lowBuf[(size_t) i]);
-            // bottom end dry, bottom end wet (Dimension), full sound
-            const float lowA = d.lowAlign.at (Drive::kLatency + Preamp::kLatency);
-            float bottom = lowA * d.lowLevel.next() * vg;
-            const float wl = d.wetLevel.next();
-            if (dimLow && dg > 1.0e-4f) bottom += (d.dim.process (lowA) - lowA) * dg * wl;
-            float core = bottom * lm[i] + h;
-            if (! filtHigh)
+            // ---- split ----
+            for (int i = 0; i < n; ++i)
             {
-                // the envelope filter on the whole bass, so it sweeps the note you play
-                const float wg = d.filtOn.next();
-                if (wg > 1.0e-4f) core = core + (d.filter.process (core) - core) * wg;
+                // the tuner and the input meter hear the bass whichever rig is playing; Keystone's
+                // chain stops hearing it while Kuddle plays, so its tails ring out
+                const float raw = d.dc.process (x[i]);
+                const float s = raw * d.ksIn.next();
+                d.cleanBuf[(size_t) i] = s;
+                d.inPk = std::max (d.inPk * 0.9995f, std::fabs (raw));
+                d.play.process (s);
+                float lo, hi;
+                d.split.split (s, lo, hi);
+                d.lowBuf[(size_t) i] = d.low.process (lo);
+                (void) hi;
+                const float full = d.subCut2.process (d.subCut1.process (s));
+                d.highBuf[(size_t) i] = full;
+                d.fullBuf[(size_t) i] = full;
+                d.droneBuf[(size_t) i] = d.drone.process (s);
+                d.feedTuner (raw);
             }
-            float o = core + dr * wl + gr + dl + rv;
-            o = d.iron.process (o);
-            o *= d.outLevel.next();
-            if (pa) o = d.paLp.process (d.paHp.process (o));
-            o *= d.tunerGate.next();
-            if (std::fabs (o) > 0.99f) d.clipped.store (true);
-            o = d.limiter.process (o, limitOn);
-            y[i] = o;
+
+            // ---- high band: Bitrot (if first), drive, Bitrot, preamp ----
+            float* hb = d.highBuf.data();
+            // Bitrot hears the whole bass (high band plus low band) and plays its synth into the
+            // high band; Clean bass sets how much of the clean signal, low band included, stays
+            float* lm = d.lowMul.data();
+            std::fill (lm, lm + n, 1.0f);
+            float* sg = d.synthG.data();
+            std::fill (sg, sg + n, 0.0f);
+            auto runBitrot = [&]()
+            {
+                const bool active = Vb (v, P::BitrotOn) || d.bitrotOn.current() > 1.0e-4f;
+                if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); return; }
+                float* sy = d.synthBuf.data();
+                for (int i = 0; i < n; ++i) sy[i] = d.cleanBuf[(size_t) i];   // the whole bass, sub included, so it tracks the fundamental
+                d.bitrot.process (sy, n);
+                for (int i = 0; i < n; ++i)
+                {
+                    const float g = d.bitrotOn.next();
+                    const float keep = 1.0f - g * (1.0f - d.bitrotClean.next());
+                    lm[i] = keep;
+                    // after the preamp, the synth joins the full sound later, untouched by the valve
+                    if (bitrotPlace == 2) { sg[i] = g; continue; }
+                    hb[i] = hb[i] * keep + sy[i] * g;
+                }
+            };
+            if (bitrotFirst) runBitrot();
+            d.drive.process (hb, d.lowBuf.data(), n, cap);
+            if (! bitrotFirst) runBitrot();
+
+            float playLevel = d.play.level;
+            const bool filtHigh = Vi (v, P::FiltRange) == 1;
+            for (int i = 0; i < n; ++i)
+            {
+                float h = hb[i];
+                const float pg = d.preOn.next();
+                h = d.preamp.process (h, pg);   // always the same latency, on or off
+                if (sg[i] > 0.0f) h = h * lm[i] + d.synthBuf[(size_t) i] * sg[i];
+                const float fg = filtHigh ? d.filtOn.next() : 0.0f;
+                if (fg > 1.0e-4f) h = h + (d.filter.process (h) - h) * fg;
+                // the pedal wah on the full sound, so the bottom end stays solid under it
+                const float wg = d.wahOn.next();
+                if (wg > 1.0e-4f) h = h + (d.wah.process (h) - h) * wg;
+                const float dg = d.dimOn.next();
+                if (! dimLow && dg > 1.0e-4f) h = h + (d.dim.process (h) - h) * dg;
+                // the volume pedal sits before the ambient section, so tails ring as you pull back
+                const float vg = d.volume.next();
+                h *= d.highLevel.next() * vg;
+
+                // ---- ambient ----
+                const float grainSrc = d.grains.sourceDirty() ? h : d.fullBuf[(size_t) i] * vg;
+                const float gr = d.grains.process (grainSrc, playLevel);
+                const float dr = d.droneBuf[(size_t) i];
+                const float droneSend = dr * V (v, P::DroneSend);
+                float dl = 0, rv = 0;
+                if (d.delay.active()) dl = d.delay.process (h + gr);
+                if (d.reverb.active() || droneSend != 0.0f) rv = d.reverb.process (h + gr + dl + droneSend);
+
+                // ---- sum, mono out ----
+                d.lowAlign.push (d.lowBuf[(size_t) i]);
+                // bottom end dry, bottom end wet (Dimension), full sound
+                const float lowA = d.lowAlign.at (Drive::kLatency + Preamp::kLatency);
+                float bottom = lowA * d.lowLevel.next() * vg;
+                const float wl = d.wetLevel.next();
+                if (dimLow && dg > 1.0e-4f) bottom += (d.dim.process (lowA) - lowA) * dg * wl;
+                float core = bottom * lm[i] + h;
+                if (! filtHigh)
+                {
+                    // the envelope filter on the whole bass, so it sweeps the note you play
+                    const float wg = d.filtOn.next();
+                    if (wg > 1.0e-4f) core = core + (d.filter.process (core) - core) * wg;
+                }
+                float o = core + dr * wl + gr + dl + rv;
+                o = d.iron.process (o);
+                o *= d.outLevel.next();
+                if (pa) o = d.paLp.process (d.paHp.process (o));
+                o *= d.tunerGate.next();
+                if (std::fabs (o) > 0.99f) d.clipped.store (true);
+                o = d.limiter.process (o, limitOn);
+                y[i] = o;
+            }
+            // asleep once Kuddle has the bass and nothing is left ringing
+            float pk = 0;
+            for (int i = 0; i < n; ++i) pk = std::max (pk, std::fabs (y[i]));
+            d.ksQuiet = rigNow.load() == 1 && d.ksIn.current() < 1.0e-6f && pk < 1.0e-5f ? d.ksQuiet + n : 0;
         }
 
         // ---- Kuddle: runs while it's heard, crossfaded with Keystone ----

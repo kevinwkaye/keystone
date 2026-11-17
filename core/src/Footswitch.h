@@ -20,7 +20,7 @@ public:
     std::array<double, 4> holdSeconds { kHoldSeconds, 0.3, kHoldSeconds, kHoldSeconds };
 
     // Combos a plugin doesn't use are switched off, so a quick A then B is two presses.
-    std::array<bool, 2> pairEnabled { true, true };    // Keystone: A+B next song, C+D Keep
+    std::array<bool, 2> pairEnabled { true, true };    // Keystone: A+B held swaps rig, C+D swaps mode
 
     void press (int sw, double now)
     {

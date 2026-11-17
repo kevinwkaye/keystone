@@ -20,7 +20,7 @@ public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
-    static constexpr const char* kVersion = "0.4.0";
+    static constexpr const char* kVersion = "0.4.1";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -75,6 +75,15 @@ public:
     int rig() const;
     void setRig (int r, bool announce = true);
 
+    // Keystone's feet: 0 Stomp mode (banks), 1 Song mode (A previous song, B next part,
+    // C next song, on press). C and D pressed together swap them.
+    int footMode() const;
+    void setFootMode (int m);
+    void jumpSong (int dir);   // whole songs, skipping parts
+private:
+    void syncPairs();
+public:
+
     // for tests
     void setValue (P p, float v, bool broadcast = true);
     float value (P p) const { return engine.getParam (p); }
@@ -82,8 +91,9 @@ public:
     void notify (const std::string& text) { queueToast (text); }
     std::string lastToast() const { return toast; }
 
+    struct Song;   // one entry of a list: a song, a part or a Kuddle preset
+
 private:
-    struct Song;
     struct State;
     std::unique_ptr<State> s;
     Engine& engine;

@@ -15,6 +15,7 @@ struct EngineParams
 {
     int effect = Haze, variant = 1;
     bool reverse = false;
+    bool echoOnly = false;   // Keystone's light mode: Space keeps its echo, drops its reverb
     float activity = 0.5f, repeats = 0.5f, shape = 0.5f;
     float stepSamples = 12000.0f, beatSamples = 24000.0f;
     float filter = 1.0f, resonance = 0.2f;
@@ -292,8 +293,8 @@ private:
             const float el = spaceLine[0].tap (dt), er = spaceLine[1].tap (dt);
             spaceLine[0].push (l + spaceLp[1].process (er) * 0.42f);  // ping-pong
             spaceLine[1].push (r + spaceLp[0].process (el) * 0.42f);
-            float rl, rr;
-            reverb.process (l + el * 0.6f, r + er * 0.6f, rl, rr);
+            float rl = 0, rr = 0;
+            if (! p.echoOnly) reverb.process (l + el * 0.6f, r + er * 0.6f, rl, rr);
             const float dryPart = std::cos (s * kPi * 0.5f);
             const float wetPart = std::sin (s * kPi * 0.5f);
             l = l * dryPart + (rl + el * 0.45f) * wetPart;

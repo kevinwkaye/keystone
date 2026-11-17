@@ -107,7 +107,6 @@ struct ParamInfo
     P(BitrotFmDepth,  "bitrot.fmDepth",  "Depth",         "bitrot",  "Movement",       Flip,   0,    1,    0.4f, "%",  "",   None) \
     P(BitrotCorrupt,  "bitrot.corrupt",  "Corrupt",       "bitrot",  "Tracking",       Flip,   0,    1,    0.25f, "%", "",   None) \
     P(BitrotGate,     "bitrot.gate",     "Sensitivity",   "bitrot",  "Tracking",       Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(BitrotFirst,    "bitrot.first",    "Before drive",  "bitrot",  "Order",          Toggle, 0,    1,    0,    "",   "",   Hidden) \
     P(BitrotPlace,    "bitrot.place",    "Goes",          "bitrot",  "Order",          Choice, 0,    2,    2,    "",   "Before drive|After drive|After preamp", None) \
     P(PreOn,          "preamp.on",       "On",            "preamp",  "",               Toggle, 0,    1,    1,    "",   "",   None) \
     P(PreGain,        "preamp.gain",     "Gain",          "preamp",  "Valve",          Flip,   0,    1,    0.35f,"%",  "",   None) \
@@ -229,10 +228,8 @@ struct ParamInfo
     P(RvLength,       "reverb.length",   "Length",        "reverb",  "Character",      Flip,   50,   800,  300,  "ms", "",   Log) \
     P(RvFreeze,       "reverb.freeze",   "Freeze the tail","reverb", "Freeze",         Toggle, 0,    1,    0,    "",   "",   None) \
     /* ---- Control ---- */ \
-    P(BloomDrone,     "bloom.drone",     "Drone reach",   "bloom",   "Reach",          Flip,   0,    1,    1,    "%",  "",   Hidden) \
     P(BloomWash,      "bloom.wash",      "Wash reach",    "bloom",   "Reach",          Flip,   0,    1,    0.9f, "%",  "",   None) \
     P(BloomTails,     "bloom.tails",     "Heel back",     "bloom",   "Behaviour",      Choice, 0,    1,    1,    "",   "Cut tails|Let tails ring", None) \
-    P(BloomAutoCap,   "bloom.autocap",   "Capture drone on swell", "bloom", "Behaviour", Toggle, 0,  1,    0,    "",   "",   Hidden) \
     P(PedalBitrotAt,  "pedal.bitrotAt",  "Bitrot joins at","pedal",  "Dirt blend (Grit)", Flip, 0,    0.9f, 0.25f,"%",  "",   None) \
     P(PedalVolFloor,  "pedal.volFloor",  "Heel volume",   "pedal",   "Volume (Groove, wah off)", Flip, -60, 0, -60, "dB", "", None) \
     P(BankStart,      "bank.start",      "Opens in",      "footswitches","This song",  Choice, 0,    2,    0,    "",   "Grit|Groove|Glow", None) \

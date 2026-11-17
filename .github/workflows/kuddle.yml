@@ -8,6 +8,7 @@ on:
       - "kuddle/**"
       - "core/src/Dsp.h"
       - "core/src/Footswitch.h"
+      - "shared/**"
       - "app/Resources/RobotoCondensed-Bold.ttf"
       - ".github/workflows/kuddle.yml"
   workflow_dispatch:

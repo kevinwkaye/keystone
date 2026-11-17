@@ -7,7 +7,7 @@
 // allocates or frees.
 
 #include "Dsp.h"
-#include "kdd/DspUtil.h"
+#include "spk/DspUtil.h"
 
 #include <atomic>
 #include <complex>
@@ -67,7 +67,7 @@ public:
         const int len = (int) std::min (h.size(), (size_t) ((maxParts - 1) * kHop));
         imp->parts = std::max (1, (len + kHop - 1) / kHop);
         imp->spec.assign ((size_t) imp->parts * kBins, {});
-        kdd::Fft f;
+        spk::Fft f;
         f.init (kN);
         std::vector<std::complex<float>> buf ((size_t) kN);
         for (int p = 0; p < imp->parts; ++p)
@@ -150,7 +150,7 @@ private:
         std::memmove (inHist.data(), inHist.data() + kHop, sizeof (float) * kHop);
     }
 
-    kdd::Fft fft;
+    spk::Fft fft;
     int maxParts = 1, pos = 0, head = 0;
     std::vector<std::complex<float>> fdl, frame, acc;
     std::vector<float> inHist, out;

@@ -11,10 +11,12 @@
 //
 // Defaults: footswitches A to D send momentary CC 20, 21, 22, 23 on channel 16,
 // expression sends CC 11 on channel 16. Learn remaps any of them.
-// Copied from Prism Patch (the house reference) by way of Keystone: save() keeps attributes
-// written by other plugins (Backtrack's fix), heel/toe calibration with Reverse, and the
-// portable FootswitchLogic from core/src/Footswitch.h. As a plugin, Kuddle's direct reader
-// opens only a device that looks like a footswitch when none is chosen.
+// Copied from Prism Patch (the house reference). Changes: save() keeps attributes written
+// by other plugins (Backtrack's fix), heel/toe calibration with Reverse, and the portable
+// FootswitchLogic from core/src/Footswitch.h. Shared by the Keystone app and the Kuddle
+// plugin. With no device chosen, the app opens every MIDI input (nothing else is
+// listening); the plugin (KS_PEDALS_IN_PLUGIN=1) opens only what looks like a footswitch,
+// so Ableton keeps the rest.
 struct PedalSettings
 {
     std::array<int, 4> fsChannel { 16, 16, 16, 16 };

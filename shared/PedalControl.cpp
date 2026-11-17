@@ -137,8 +137,14 @@ void DirectMidiInput::refresh()
     auto want = [this] (const String& name)
     {
         if (wanted == "none") return false;
+       #if KS_PEDALS_IN_PLUGIN
+        // in a plugin, with nothing chosen, open only what looks like a footswitch, so
+        // Ableton keeps every other MIDI device
+        return wanted.isEmpty() ? looksLikeFootswitch (name) && ! isVirtualPort (name) : name == wanted;
+       #else
         // standalone: with nothing chosen, listen to every real MIDI input
         return wanted.isEmpty() ? ! isVirtualPort (name) : name == wanted;
+       #endif
     };
 
     // close what's gone or no longer wanted
@@ -173,15 +179,24 @@ void DirectMidiInput::refresh()
 String DirectMidiInput::status() const
 {
     const ScopedLock l (lock);
+   #if KS_PEDALS_IN_PLUGIN
+    if (wanted == "none") return "Off: footswitch MIDI comes from Ableton";
+   #else
     if (wanted == "none") return "Off";
+   #endif
     if (! inputs.empty())
     {
         StringArray names;
         for (auto& in : inputs) names.add (in->getName());
         return "Connected: " + names.joinIntoString (", ");
     }
+   #if KS_PEDALS_IN_PLUGIN
+    if (! busy.isEmpty()) return busy[0] + " is in use by Ableton. Turn its Track and Remote off in Ableton's MIDI settings";
+    return wanted.isEmpty() ? "No footswitch found: plug it in, or pick it under Footswitch input"
+   #else
     if (! busy.isEmpty()) return busy[0] + " is in use by another program. Close it and Keystone will pick it up";
     return wanted.isEmpty() ? "No footswitches found: plug them in over USB"
+   #endif
                             : wanted + " isn't plugged in";
 }
 

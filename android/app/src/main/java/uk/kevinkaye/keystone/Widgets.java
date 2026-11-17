@@ -27,7 +27,7 @@ final class Widgets {
 
     // ---- what the widgets show ----
     private static boolean linked;
-    private static int rig, bank, current, droneLayers;
+    private static int rig, bank, current, droneLayers, footMode;
     private static String[] songs = new String[0];
     private static boolean[] parts = new boolean[0];
     private static final Map<String, Double> values = new HashMap<>();
@@ -49,6 +49,7 @@ final class Widgets {
                     rig = m.optInt("rig", 0);
                     bank = m.optInt("bank", 0);
                     current = m.optInt("current", 0);
+                    footMode = m.optInt("footMode", 0);
                     JSONArray s = m.optJSONArray("songs"), p = m.optJSONArray("parts");
                     songs = new String[s == null ? 0 : s.length()];
                     parts = new boolean[songs.length];
@@ -126,7 +127,7 @@ final class Widgets {
             r.setTextViewText(R.id.num, number > 0 ? String.format(java.util.Locale.UK, "%02d", number) : "--");
             r.setTextViewText(R.id.song, name);
             r.setTextColor(R.id.song, k ? 0xFFF6EBDD : 0xFFF2EDE4);
-            r.setTextViewText(R.id.sub, k ? "KUDDLE" : "KEYSTONE  ·  " + BANKS[Math.max(0, Math.min(2, bank))]);
+            r.setTextViewText(R.id.sub, k ? "KUDDLE" : "KEYSTONE  ·  " + (footMode == 1 ? "SONG MODE" : BANKS[Math.max(0, Math.min(2, bank))]));
             r.setTextViewText(R.id.linked, linked ? "● LINKED" : "NOT LINKED");
             r.setTextColor(R.id.linked, linked ? (k ? 0xFFF28C28 : 0xFF5DCAA5) : dimText);
             String[] names; String[] keys; int[] lit;

@@ -63,10 +63,11 @@ if(KUDDLE_BUILD_PLUGIN)
     target_sources(Kuddle PRIVATE
         plugin/PluginProcessor.cpp
         plugin/PluginEditor.cpp
-        plugin/PedalControl.cpp
-        plugin/Keeper.cpp)
+        ../shared/PedalControl.cpp
+        ../shared/Keeper.cpp)
 
-    target_include_directories(Kuddle PRIVATE plugin engine ${KEYSTONE_CORE})
+    target_include_directories(Kuddle PRIVATE plugin engine ../shared ${KEYSTONE_CORE})
+    target_compile_definitions(Kuddle PRIVATE KS_PEDALS_IN_PLUGIN=1)
 
     target_compile_definitions(Kuddle PUBLIC
         JUCE_WEB_BROWSER=0

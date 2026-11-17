@@ -157,41 +157,48 @@ struct LR4
 };
 
 // ---------------------------------------------------------------------------------------
-// Antiderivative anti-aliased tanh (first order), as in the Jetstream lesson.
+// Antiderivative anti-aliased saturators (first order), as in the Jetstream lesson.
+// log(cosh x), the antiderivative of tanh, written as |x| + log1p(exp(-2|x|)) - ln 2: the
+// same value with one exp and one log1p, and no overflow for large |x|.
+inline float logCosh (float x)
+{
+    const float ax = std::fabs (x);
+    return ax + std::log1p (std::exp (-2.0f * ax)) - 0.69314718f;
+}
+
+// First-order antiderivative anti-aliased tanh. F of the last sample is kept, so each
+// sample works out F once.
 struct AdaaTanh
 {
-    float x1 = 0;
-    static float F (float x)   // log cosh, stable for large |x|
-    {
-        const float ax = std::fabs (x);
-        return ax > 12.0f ? ax - 0.69314718f : std::log (std::cosh (x));
-    }
+    float x1 = 0, F1 = 0;
     float process (float x)
     {
         const float d = x - x1;
-        float y;
-        if (std::fabs (d) < 1.0e-4f) y = std::tanh (0.5f * (x + x1));
-        else y = (F (x) - F (x1)) / d;
-        x1 = x;
+        const float F = logCosh (x);
+        const float y = std::fabs (d) < 1.0e-4f ? std::tanh (0.5f * (x + x1)) : (F - F1) / d;
+        x1 = x; F1 = F;
         return y;
     }
-    void reset() { x1 = 0; }
+    void reset() { x1 = 0; F1 = 0; }
 };
 
-// Antiderivative anti-aliased hard clip at +/- 1.
-struct AdaaClip
+// A triode's grid curve, with its antiderivative: above zero it bends over sooner (grid
+// conduction), below zero it rounds off later (towards cutoff). Keystone's preamp and
+// Kuddle's Valve DI both use it.
+struct Triode
 {
-    float x1 = 0;
-    static float F (float x) { const float ax = std::fabs (x); return ax <= 1.0f ? 0.5f * x * x : ax - 0.5f; }
-    static float f (float x) { return clampf (x, -1.0f, 1.0f); }
-    float process (float x)
+    float u1 = 0, F1 = 0;
+    static float f (float u) { return u >= 0 ? u / (1.0f + u) : std::tanh (0.7f * u) / 0.7f; }
+    static float F (float u) { return u >= 0 ? u - std::log1p (u) : logCosh (0.7f * u) / 0.49f; }
+    float process (float u)
     {
-        const float d = x - x1;
-        const float y = std::fabs (d) < 1.0e-4f ? f (0.5f * (x + x1)) : (F (x) - F (x1)) / d;
-        x1 = x;
+        const float d = u - u1;
+        const float Fu = F (u);
+        const float y = std::fabs (d) < 1.0e-4f ? f (0.5f * (u + u1)) : (Fu - F1) / d;
+        u1 = u; F1 = Fu;
         return y;
     }
-    void reset() { x1 = 0; }
+    void reset() { u1 = 0; F1 = 0; }
 };
 
 // ---------------------------------------------------------------------------------------

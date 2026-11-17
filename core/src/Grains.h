@@ -5,11 +5,77 @@
 //
 // It only runs while it's switched on (plus a short fade), so it is never heard when off.
 
-#include "SpeckleFx.h"
+#include "Modules.h"
+#include "bit/Tracker.h"
 #include "spk/SpeckleEngine.h"
 
 namespace ks
 {
+// Pitches a signal up by a fixed ratio with two crossfading read heads. The input is
+// band-limited first, so nothing folds back above the new Nyquist, and the lows are cut
+// so octaves of bass notes never turn to mud (the Kevy does Devy lesson).
+class UpShifter
+{
+public:
+    void prepare (float sr_)
+    {
+        sr = sr_;
+        line.prepare ((int) (0.25f * sr));
+        hp.highPass (150.0f, 0.707f, sr);
+        setRatio (2.0f);
+        phase = 0;
+        bit::MonoTracker::Settings ts;
+        ts.range = bit::MonoTracker::Bass;
+        ts.lowestHz = 30.0f;
+        tracker.prepare (sr);
+        tracker.configure (ts);
+        win = winTarget = 0.05f * sr;
+        winGlide = 1.0f - std::exp (-1.0f / (0.03f * sr));
+    }
+    void reset() { line.reset(); hp.reset(); lp1.reset(); lp2.reset(); phase = 0; }
+    void setRatio (float r)
+    {
+        if (std::fabs (r - ratio) < 1.0e-4f) return;
+        ratio = r;
+        const float fc = std::min (0.45f * sr / ratio, 16000.0f);
+        lp1.lowPass (fc, 0.541f, sr);
+        lp2.lowPass (fc, 1.307f, sr);
+    }
+    float process (float x)
+    {
+        // Pitch synchronous windows: the two read heads sit a whole number of the note's
+        // periods apart, so when they cross they agree instead of beating against each
+        // other. A fixed 50 ms window on bass gave a warbling, crushed octave.
+        tracker.push (x);
+        const float note = tracker.currentNote();
+        if (note > 0.0f)
+        {
+            const float T = sr / (440.0f * std::exp2 ((note - 69.0f) / 12.0f));
+            const float k = std::max (1.0f, std::round (0.05f * sr / (2.0f * T)));
+            winTarget = 2.0f * k * T;
+        }
+        win += (winTarget - win) * winGlide;
+        line.push (lp2.process (lp1.process (hp.process (x))));
+        phase += (ratio - 1.0f) / win;
+        phase -= std::floor (phase);
+        float s = 0;
+        for (int k = 0; k < 2; ++k)
+        {
+            float p = phase + 0.5f * k;
+            p -= std::floor (p);
+            const float w = std::sin (kPi * p);
+            s += line.hermite ((1.0f - p) * win + 4.0f) * w * w;
+        }
+        return s;
+    }
+
+private:
+    float sr = 48000, ratio = 0, phase = 0, win = 2400, winTarget = 2400, winGlide = 0.001f;
+    DelayLine line;
+    bit::MonoTracker tracker;
+    Biquad hp, lp1, lp2;
+};
+
 class Grains
 {
 public:
@@ -31,7 +97,7 @@ public:
         idx = 0; activity = 0; running = false;
     }
 
-    void update (const Vals& v, float bloomZone2, bool bloomActive, bool /*light*/)
+    void update (const Vals& v, float bloomZone2, bool bloomActive, bool light)
     {
         const bool on = Vb (v, P::GrOn);
         const float mix = V (v, P::GrMix);
@@ -56,6 +122,7 @@ public:
         p.modDepth = V (v, P::GrModDepth);
         p.modRateHz = 0.05f * std::pow (2.0f, V (v, P::GrModRate) * 7.3f);
         p.space = V (v, P::GrSpace);
+        p.echoOnly = light;   // Keystone's own reverb is still there
         p.reverbMode = std::max (0, std::min (3, Vi (v, P::GrSpaceType)));
         p.volumeDb = V (v, P::GrVolume);
         p.hold = Vb (v, P::GrHold);

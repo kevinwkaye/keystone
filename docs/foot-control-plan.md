@@ -2,9 +2,13 @@
 
 Keystone reads the footswitch's MIDI device directly (it's a standalone app, so with nothing chosen it opens every real MIDI input). Defaults are the house ones: momentary CC 20, 21, 22, 23 for A to D and CC 11 for expression. Any channel is accepted from a device read directly, so Kevin's Chocolate Plus (which always sends on channel 1) works with no setup. Learn on the phone (Tone, Footswitches) remaps any switch or the pedal. Settings are shared with every Flip Fella plugin through `Flip Fella Pedals.xml`, and saving keeps attributes other plugins wrote.
 
-## Banks (0.3.3)
+## Two modes (0.4.1)
 
-Four footswitches and one pedal, in three banks. Hold A to step Grit, Groove, Glow and back to Grit. The bank sets what taps A, B and C do and what the pedal does. Tap D and every hold are the same in every bank.
+Press **C and D together** to swap between Stomp mode and Song mode. It happens the moment both are down. The phone's Play screen shows which mode you're in, and you can tap it there too.
+
+### Stomp mode: three banks
+
+Hold A to step Grit, Groove, Glow and back to Grit. The bank sets what taps A, B and C do and what the pedal does. Tap D and every hold are the same in every bank.
 
 | | Grit | Groove | Glow |
 |---|---|---|---|
@@ -19,16 +23,27 @@ Four footswitches and one pedal, in three banks. Hold A to step Grit, Groove, Gl
 | B | Next song or part (from 0.3 s). Forwards only, stops at the last song |
 | C | Tuner |
 | D | Slap compression |
-| C + D | Keep (held 1 s) |
-| A + B | Stomped together: next song or part, the moment both are down |
+| A + B | Held a second: Kuddle |
 
 Tap D is the drone in every bank: tap to hold the note, tap again to let it trail off.
 
-- Taps fire on release, holds at 0.45 s (B at 0.3 s), the C + D hold at 1 s. A and B pressed within 0.12 s of each other count as the A + B stomp, not two taps.
+- Taps fire on release, holds at 0.45 s (B at 0.3 s), the A + B hold at 1 s. A and B pressed within 0.12 s of each other count as the pair, not two taps.
 - While the tuner is on, any tap leaves it and does nothing else, and hold A does nothing.
 - Changing bank never changes the sound. Only taps and the pedal do.
 - Each song (and each part) saves the bank it opens in (Footswitches, This song).
-- Previous song isn't on the footswitches. Use the back arrow on the phone's Play screen.
+
+### Song mode
+
+Every switch acts the moment you press it, so a change lands on the beat.
+
+| Switch | Press |
+|---|---|
+| A | Last song (its first part) |
+| B | Next part of this song. Nothing if it has no more parts |
+| C | Next song (its first part) |
+| D | Tap: drone. Hold: slap |
+
+Nothing else holds in Song mode, so the tuner and banks wait for Stomp mode (or the phone). The pedal keeps the job it had. If C goes down a moment before D when you press them together, the song change it made is undone, so swapping modes never moves you on a song. Keep is the phone's Keep button.
 
 ### The pedal's jobs
 
@@ -45,7 +60,7 @@ A song can be split into parts (Setlist, the dots, Add part, or Part of above on
 
 Example: part 1 opens in Glow, clean, with delay and reverb on and the pedal on Bloom. Part 2 opens in Grit with Drive on and the space off, so the pedal is already the dirt blend.
 
-Every footswitch job also has an on-screen button: the bank buttons and stomp tiles and song arrows on Play, Tuner in the nav, Keep in the nav, slap on the Low compressor page.
+Every footswitch job also has an on-screen button: the mode bar, bank buttons, stomp tiles and song arrows on Play, Tuner and Keep in the nav, slap on the Low compressor page.
 
 ## Kevin's own setup
 
@@ -65,7 +80,7 @@ Tap the Keystone name on the phone's Play screen to switch to Kuddle, and tap Ku
 | B | Auto wah | Next preset (from 0.3 s) |
 | C | Room | Tuner |
 | D | Tape push | Squeeze while held |
-| A + B | Stomped together: next preset | |
+| A + B | | Held a second: back to Keystone |
 | C + D | | Keep (held 1 s) |
 
 The pedal is Melt: heel open and clear, towards the toe the mute closes in, the tape pushes and the treble rolls off. Learn and pedal calibration are shared with Keystone.

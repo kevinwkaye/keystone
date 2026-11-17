@@ -45,6 +45,9 @@ struct Controller::State
     int bank = 0;
     // the two rigs: songs and current are the playing rig's list, other the resting one's
     int rig = 0;
+    int footMode = 0;                       // Keystone's feet: 0 Stomp, 1 Song
+    int undoSong = -1;                      // Song mode: where a C press came from, in case it was half of C+D
+    double undoAt = -10;
     std::vector<Song> other;
     int otherCurrent = 0;
     bool droneHeld = false;
@@ -187,93 +190,62 @@ static void writeJsonAtomic (const fs::path& p, const json& j)
     if (ec) { fs::remove (p, ec); fs::rename (tmp, p, ec); }
 }
 
+// Puts a saved song's or preset's values into the engine
+static void applyValues (Engine& engine, const std::map<std::string, float>& values)
+{
+    for (const auto& [id, v] : values)
+    {
+        const int p = findParam (id.c_str());
+        if (p >= 0) engine.setParam ((P) p, v);
+    }
+}
+
+// A saved list: the setlist (Keystone's songs and parts) or Kuddle's presets. Values not
+// in the file, or from older versions that have since gone, get today's defaults.
+static std::vector<Controller::Song> readList (const json& j, const std::map<std::string, float>& base, const char* fallback, int max, bool parts)
+{
+    std::vector<Controller::Song> out;
+    if (! j.is_object() || ! j.contains ("songs") || ! j["songs"].is_array()) return out;
+    const int version = j.value ("version", 1);
+    for (const auto& js : j["songs"])
+    {
+        Controller::Song song { js.value ("name", std::string (fallback)), parts && ! out.empty() && js.value ("part", false), base };
+        if (js.contains ("values") && js["values"].is_object())
+            for (auto it = js["values"].begin(); it != js["values"].end(); ++it)
+                if (it.value().is_number() && song.values.count (it.key())) song.values[it.key()] = it.value().get<float>();
+        // setlist version 7 (0.4.0): quieter Bitrot, a shorter drone trail, a Blumes that cuts
+        // through. Only values still on the old defaults move; ones you'd changed stay.
+        if (parts && version < 7)
+        {
+            auto was = [&] (const char* id, float x) { return std::fabs (song.values[id] - x) < 1.0e-3f; };
+            if (was ("bitrot.vol", 0.7f)) song.values["bitrot.vol"] = 0.4f;
+            if (was ("drone.release", 4.0f)) song.values["drone.release"] = 2.0f;
+            if (was ("drive.drive.presence", 2.0f)) song.values["drive.drive.presence"] = 4.0f;
+            if (was ("drive.drive.lowcut", 70.0f)) song.values["drive.drive.lowcut"] = 110.0f;
+            if (was ("drive.drive.level", 0.0f)) song.values["drive.drive.level"] = 1.5f;
+            if (was ("preamp.blend", 0.5f) && was ("preamp.gain", 0.6f)) song.values["preamp.blend"] = 0.65f;
+        }
+        out.push_back (std::move (song));
+        if ((int) out.size() >= max) break;
+    }
+    return out;
+}
+
 void Controller::load()
 {
-    // setlist
-    const auto sl = readJson (toPath (dataDir) / "setlist.json");
-    s->songs.clear();
-    if (sl.is_object() && sl.contains ("songs") && sl["songs"].is_array())
-    {
-        for (const auto& js : sl["songs"])
-        {
-            Song song;
-            song.name = js.value ("name", std::string ("Song"));
-            song.part = js.value ("part", false) && ! s->songs.empty();
-            song.values = defaults();
-            if (js.contains ("values") && js["values"].is_object())
-                for (auto it = js["values"].begin(); it != js["values"].end(); ++it)
-                    if (it.value().is_number() && song.values.count (it.key())) song.values[it.key()] = it.value().get<float>();
-            // setlist version 2: the envelope filter quacks by default (band-pass, more
-            // resonance, works on the whole bass) and the drone left the pedal
-            if (sl.value ("version", 1) < 2)
-            {
-                song.values["filter.type"] = 1.0f;
-                song.values["filter.q"] = 0.7f;
-                song.values["filter.low"] = 200.0f;
-                song.values["bloom.autocap"] = 0.0f;
-            }
-            // setlist version 7: quieter Bitrot, a shorter drone trail, a Blumes that cuts through
-            if (sl.value ("version", 1) < 7)
-            {
-                auto was = [&] (const char* id, float x) { return std::fabs (song.values[id] - x) < 1.0e-3f; };
-                if (was ("bitrot.vol", 0.7f)) song.values["bitrot.vol"] = 0.4f;
-                if (was ("drone.release", 4.0f)) song.values["drone.release"] = 2.0f;
-                if (was ("drive.drive.presence", 2.0f)) song.values["drive.drive.presence"] = 4.0f;
-                if (was ("drive.drive.lowcut", 70.0f)) song.values["drive.drive.lowcut"] = 110.0f;
-                if (was ("drive.drive.level", 0.0f)) song.values["drive.drive.level"] = 1.5f;
-                if (was ("preamp.blend", 0.5f) && was ("preamp.gain", 0.6f)) song.values["preamp.blend"] = 0.65f;
-            }
-            // setlist version 5: Bitrot's place is a three-way choice, after the preamp by default
-            if (sl.value ("version", 1) < 5) song.values["bitrot.place"] = song.values.count ("bitrot.first") && song.values["bitrot.first"] > 0.5f ? 0.0f : 2.0f;
-            // setlist version 4: the drone sits further back
-            if (sl.value ("version", 1) < 4 && song.values["drone.level"] > 0.45f) song.values["drone.level"] = 0.4f;
-            // setlist version 3: Speckle is the whole Speckle engine (Sparkle is gone and the
-            // effects moved down one), the octave up is off, and the drive has its body back
-            if (sl.value ("version", 1) < 3)
-            {
-                const float fx = song.values["grains.effect"];
-                song.values["grains.effect"] = fx < 0.5f ? 3.0f : fx - 1.0f;   // Sparkle becomes Haze
-                song.values["grains.pitch"] = 0.0f;
-                song.values["drive.lowInto"] = 0.0f;
-                song.values["drive.edge.lowcut"] = 70.0f;
-                song.values["drive.drive.lowcut"] = 70.0f;
-            }
-            s->songs.push_back (song);
-            if ((int) s->songs.size() >= kMaxEntries) break;
-        }
-        s->current = std::clamp (sl.value ("current", 0), 0, std::max (0, (int) s->songs.size() - 1));
-    }
-    // first run, or still the untouched starter list from before 0.3.4: the band's setlist
-    {
-        static const std::vector<std::string> starter { "New choon", "I'm Not a Robot", "When the Circus Comes to Town", "The Comedian and the Boxer" };
-        bool isStarter = s->songs.size() == starter.size();
-        for (size_t k = 0; isStarter && k < starter.size(); ++k) isStarter = s->songs[k].name == starter[k] && ! s->songs[k].part;
-        if (s->songs.empty() || isStarter) useBandSetlist (! s->songs.empty());
-    }
+    // Keystone's setlist; the band's songs on a first run
+    const auto sl = readJson (toPath (dataDir) / listFile (0));
+    s->songs = readList (sl, defaults(), "Song", kMaxEntries, true);
+    if (s->songs.empty()) useBandSetlist (false);
+    else s->current = std::clamp (sl.value ("current", 0), 0, (int) s->songs.size() - 1);
 
-    // Kuddle's presets, the starters on a first run
-    {
-        s->other.clear();
-        const auto kj = readJson (toPath (dataDir) / listFile (1));
-        if (kj.is_object() && kj.contains ("songs") && kj["songs"].is_array())
-            for (const auto& js : kj["songs"])
-            {
-                Song song { js.value ("name", std::string ("Preset")), false, kuddleDefaults() };
-                if (js.contains ("values") && js["values"].is_object())
-                    for (auto it = js["values"].begin(); it != js["values"].end(); ++it)
-                        if (it.value().is_number() && song.values.count (it.key())) song.values[it.key()] = it.value().get<float>();
-                s->other.push_back (song);
-                if ((int) s->other.size() >= kMaxSongs) break;
-            }
-        if (s->other.empty()) for (auto& [n, v] : kuddleStarters()) s->other.push_back ({ n, false, v });
-        s->otherCurrent = kj.is_object() ? std::clamp (kj.value ("current", 0), 0, (int) s->other.size() - 1) : 0;
-        // Kuddle's sound is loaded too, so a switch is instant
-        for (const auto& [id, v] : s->other[(size_t) s->otherCurrent].values)
-        {
-            const int p = findParam (id.c_str());
-            if (p >= 0) engine.setParam ((P) p, v);
-        }
-    }
+    // Kuddle's presets; the starters on a first run. Kuddle's sound is loaded too, so a
+    // switch is instant.
+    const auto kj = readJson (toPath (dataDir) / listFile (1));
+    s->other = readList (kj, kuddleDefaults(), "Preset", kMaxSongs, false);
+    if (s->other.empty()) for (auto& [n, v] : kuddleStarters()) s->other.push_back ({ n, false, v });
+    s->otherCurrent = std::clamp (kj.is_object() ? kj.value ("current", 0) : 0, 0, (int) s->other.size() - 1);
+    applyValues (engine, s->other[(size_t) s->otherCurrent].values);
 
     // global settings
     int startRig = 0;
@@ -288,6 +260,7 @@ void Controller::load()
             }
         s->captureFile = st.value ("capture", std::string());
         startRig = st.value ("rig", 0) == 1 ? 1 : 0;
+        s->footMode = st.value ("footMode", 0) == 1 ? 1 : 0;
         s->spaceFile = st.value ("space", std::string());
     }
 
@@ -307,6 +280,7 @@ void Controller::load()
     if (! spaceOk && ! spaces.empty()) useSpace (spaces.front(), err);
     applySong (s->current);
     if (startRig == 1) setRig (1, false);   // the last rig used
+    syncPairs();
 }
 
 void Controller::useBandSetlist (bool backup)
@@ -358,6 +332,7 @@ void Controller::saveSettings() const
     j["capture"] = s->captureFile;
     j["space"] = s->spaceFile;
     j["rig"] = s->rig;
+    j["footMode"] = s->footMode;
     writeJsonAtomic (toPath (dataDir) / "settings.json", j);
 }
 
@@ -392,6 +367,7 @@ void Controller::setRig (int r, bool announce)
     s->rig = r;
     engine.setRig (r);
     engine.setSqueeze (false);
+    syncPairs();
     if (r == 1) { engine.action (Action::DroneClear); s->droneHeld = false; }   // a held drone trails off
     if (r == 0) engine.setPedalBank (s->bank);
     saveSettings();
@@ -415,11 +391,7 @@ void Controller::applySong (int i, bool keepGoing)
     // a part of the same song: delay and reverb switched off keep their tails, so the
     // request goes in before the new settings
     if (keepGoing) engine.action (Action::Spill);
-    for (const auto& [id, v] : s->songs[(size_t) i].values)
-    {
-        const int p = findParam (id.c_str());
-        if (p >= 0) engine.setParam ((P) p, v);
-    }
+    applyValues (engine, s->songs[(size_t) i].values);
     if (s->rig == 1) return;   // Kuddle: no banks, no drone
     engine.resetPedalJobs();
     s->bank = std::clamp ((int) std::lround (engine.getParam (P::BankStart)), 0, 2);
@@ -436,6 +408,33 @@ void Controller::selectSong (int i)
     saveSetlist();
     queueState();
     queueToast (isPart (i) ? songName (i) : songName (s->current));
+}
+
+// whole songs: to the first part of the song before or after this one
+void Controller::jumpSong (int dir)
+{
+    const int n = songCount();
+    if (n == 0) return;
+    int i = s->current;
+    while (i > 0 && isPart (i)) --i;                 // the head of this song
+    if (dir > 0) { do ++i; while (i < n && isPart (i)); }
+    else { --i; while (i > 0 && isPart (i)) --i; }
+    if (i < 0 || i >= n) { queueToast (dir > 0 ? "LAST SONG" : "FIRST SONG"); return; }
+    selectSong (i);
+}
+
+int Controller::footMode() const { return s->footMode; }
+
+// A and B are separate presses in Keystone's Song mode, a combo (held: swap rig) otherwise
+void Controller::syncPairs() { s->logic.pairEnabled = { s->rig == 1 || s->footMode == 0, true }; }
+
+void Controller::setFootMode (int m)
+{
+    s->footMode = m == 1 ? 1 : 0;
+    syncPairs();
+    saveSettings();
+    queueState();
+    queueToast (s->footMode == 1 ? "SONG MODE" : "STOMP MODE");
 }
 
 void Controller::stepSong (int delta)
@@ -583,14 +582,15 @@ void Controller::onFootswitch (int sw, int ev)
 {
     using E = FootswitchLogic::Event;
     const bool tuning = tunerOn();
-    if (ev == E::ComboHoldCD) { keep(); return; }
     auto toggle = [&] (P p) { setValue (p, value (p) > 0.5f ? 0.0f : 1.0f); };
-    // A and B stomped together: next song or part (next preset in Kuddle), the moment both are down
-    if (ev == E::ComboAB) { if (! tuning) stepSong (1); return; }
+    auto now = [] { return std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count(); };
+    // hold A and B for a second: the other rig (Stomp mode in Keystone, any time in Kuddle)
+    if (ev == E::ComboHoldAB) { if (! tuning) setRig (1 - s->rig); return; }
     if (s->rig == 1)
     {
         // Kuddle: tap A Mute, B Auto wah, C Room, D Tape. Hold A previous preset, B next,
-        // C tuner, D squeeze while held. No banks.
+        // C tuner, D squeeze while held. Hold C and D: Keep. No banks, no modes.
+        if (ev == E::ComboHoldCD) { keep(); return; }
         if (ev == E::Tap)
         {
             if (tuning) { engine.action (Action::TunerOff); queueState(); return; }
@@ -608,15 +608,45 @@ void Controller::onFootswitch (int sw, int ev)
         else if (ev == E::HoldEnd && sw == 3) engine.setSqueeze (false);
         return;
     }
+    // Keystone: C and D pressed together swap Stomp and Song mode, the moment both are down
+    if (ev == E::ComboCD)
+    {
+        // C goes first in Song mode (next song, on press): if D followed it into the combo, undo it
+        if (s->footMode == 1 && s->undoSong >= 0 && now() - s->undoAt < 0.3 && s->undoSong != s->current) selectSong (s->undoSong);
+        s->undoSong = -1;
+        setFootMode (1 - s->footMode);
+        return;
+    }
+    if (ev == E::ComboAB || ev == E::ComboHoldCD) return;
+    if (s->footMode == 1)
+    {
+        // Song mode acts on press, so changes land on the beat: A previous song, B next
+        // part, C next song. Tap D is still the drone, hold D slap. Nothing else holds.
+        if (ev == E::Down && sw <= 2)
+        {
+            if (tuning) { engine.action (Action::TunerOff); queueState(); return; }
+            if (sw == 0) jumpSong (-1);
+            else if (sw == 1)
+            {
+                if (s->current + 1 < songCount() && isPart (s->current + 1)) selectSong (s->current + 1);
+                else queueToast ("LAST PART");
+            }
+            else { s->undoSong = s->current; s->undoAt = now(); jumpSong (1); }
+            return;
+        }
+        if (sw <= 2) return;   // their release and holds do nothing in Song mode
+        if (ev == E::HoldStart) { if (! tuning) toggle (P::CompSlap); return; }
+        if (ev != E::Tap) return;
+    }
     if (ev == E::Tap)
     {
         if (tuning) { engine.action (Action::TunerOff); queueState(); return; }   // any tap leaves the tuner
         if (sw == 3)
         {
-            // tap to hold the note you're playing, tap again to let it trail off
-            const double now = std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count();
-            // a held drone that has died away on its own (Sustain under full) counts as off
-            if (s->droneHeld && now - s->lastDTap > 2.0 && engine.meters().droneLayers == 0) s->droneHeld = false;
+            // tap to hold the note you're playing, tap again to let it trail off; a held drone
+            // that has died away on its own (Sustain under full) counts as off
+            const double t = now();
+            if (s->droneHeld && t - s->lastDTap > 2.0 && engine.meters().droneLayers == 0) s->droneHeld = false;
             if (s->droneHeld)
             {
                 engine.action (Action::DroneClear);
@@ -629,7 +659,7 @@ void Controller::onFootswitch (int sw, int ev)
                 queueToast ("DRONE");
                 s->droneHeld = true;
             }
-            s->lastDTap = now;
+            s->lastDTap = t;
             return;
         }
         if (sw < 0 || sw > 2) return;
@@ -675,7 +705,7 @@ void Controller::onFootswitch (int sw, int ev)
             case 0: if (! tuning) setBank ((s->bank + 1) % 3); break;
             case 1: if (! tuning) stepSong (1); break;
             case 2: engine.action (Action::TunerToggle); queueState(); break;
-            case 3: if (! tuning) setValue (P::CompSlap, value (P::CompSlap) > 0.5f ? 0.0f : 1.0f); break;
+            case 3: if (! tuning) toggle (P::CompSlap); break;
             default: break;
         }
     }
@@ -690,6 +720,7 @@ void Controller::keep()
     e["plugin"] = "Keystone";
     e["version"] = kVersion;
     e["rig"] = s->rig == 1 ? "Kuddle" : "Keystone";
+    e["footMode"] = s->footMode == 1 ? "Song" : "Stomp";
     e["preset"] = songName (s->current);
     e["song"] = songNumber (s->current);
     e["part"] = isPart (s->current);
@@ -844,6 +875,7 @@ std::string Controller::stateJson() const
     j["current"] = s->current;
     j["bank"] = s->bank;
     j["rig"] = s->rig;
+    j["footMode"] = s->footMode;
     j["maxEntries"] = kMaxEntries;
     j["edited"] = edited();
     j["maxSongs"] = kMaxSongs;
@@ -936,12 +968,12 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     else if (t == "song") selectSong (m.value ("i", 0));
     else if (t == "songStep") stepSong (m.value ("d", 1));
     else if (t == "setlist") setlistOp (m.value ("op", std::string()), m.value ("i", s->current), m.value ("to", -1), m.value ("name", std::string()));
-    else if (t == "bloom") engine.setBloom (m.value ("v", 0.0f));
     else if (t == "pedal")   // the phone's bar
     {
         if (s->rig == 1) engine.setMelt (m.value ("v", 0.0f));
         else engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));
     }
+    else if (t == "footMode") setFootMode (m.value ("m", 1 - s->footMode));
     else if (t == "rig") setRig (m.value ("r", 1 - s->rig));
     else if (t == "bank") setBank (m.value ("i", 0));
     else if (t == "tuner")
