@@ -1763,7 +1763,7 @@ static int soak (double minutes)
 
 int main (int argc, char** argv)
 {
-    std::setvbuf (stdout, nullptr, _IOLBF, 1 << 16);   // a line at a time, so a crash shows where it was
+    std::setvbuf (stdout, nullptr, _IONBF, 0);   // unbuffered (Windows has no line buffering), so a crash shows where it was
     if (argc > 2 && std::string (argv[1]) == "--soak") return soak (std::atof (argv[2]));
     if (argc > 2 && std::string (argv[1]) == "--defaults") return writeDefaults (argv[2]);
     const char* capture = argc > 1 ? argv[1] : nullptr;
