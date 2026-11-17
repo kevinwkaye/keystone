@@ -100,6 +100,10 @@ var KS = (function () {
         if (S.screen === 'listen') queueRender(true);
         break;
       case 'listenChunk': onChunk(m); break;
+      case 'defaultAck':
+        S.defAck = m;
+        if (S.screen === 'module') queueRender(true);
+        break;
       case 'listenUseAck':
         if (m.ok) toast('ON ' + m.onto.toUpperCase() + ': SAVE OR REVERT');
         else toast(m.why || 'COULD NOT USE IT');
@@ -577,6 +581,38 @@ var KS = (function () {
   }
 
   // ---------------------------------------------------------------- screens
+  // Save as my default: what a new song starts with, and what Reset goes back to
+  function defaultsCard(mod, title) {
+    var has = S.schema && S.schema.params.some(function (p) { return p.module === mod && !p.global && !p.hidden && !/\.on$/.test(p.id); });
+    if (!has || mod === 'tempo' || mod === 'recorder' || mod === 'footswitch' || mod === 'output') return '';
+    var a = S.defAck && S.defAck.module === mod ? S.defAck : null, after = '';
+    if (a && a.op === 'save' && a.ok) after = a.stale > 0
+      ? '<div class="defnote"><span style="font-size:16px;font-weight:700">Saved. ' + a.stale + ' song' + (a.stale === 1 ? '' : 's') + ' still use' + (a.stale === 1 ? 's' : '') + ' the old ' + esc(title) + ' default.</span>' +
+        '<span class="small">Update them too? Songs where you changed ' + esc(title) + ' keep their own settings.</span>' +
+        '<div class="pair"><button type="button" class="wide go" data-def="apply">Update those ' + a.stale + '</button><button type="button" class="wide" data-def="done">Just new songs</button></div></div>'
+      : '<div class="defnote"><span class="small">Saved. New songs start with it.</span></div>';
+    else if (a && a.op === 'apply' && a.ok) after = '<div class="defnote"><span class="small">Done: ' + a.moved + ' song' + (a.moved === 1 ? '' : 's') + ' updated.</span></div>';
+    else if (a && a.op === 'reset' && a.ok) after = '<div class="defnote"><span class="small">Back to your default. Save the song to keep it, or Revert to undo.</span></div>';
+    else if (a && !a.ok) after = '<div class="defnote"><span class="small">' + esc(a.why || 'That didn\'t work') + '</span></div>';
+    return '<section class="card" style="gap:10px"><h2 class="label">Your default for ' + esc(title) + '</h2>' +
+      '<span class="small">What a new song starts with, and what Reset goes back to. Switching it on or off isn\'t part of it.</span>' +
+      '<div class="pair"><button type="button" class="wide go" data-def="save">Save as my default</button><button type="button" class="wide" data-def="reset">Reset to my default</button></div>' + after + '</section>';
+  }
+
+  // which mode the footswitches are in, big and first, so it's never in doubt
+  function modePanel() {
+    var song = S.footMode === 1, col = song ? '#4B57FF' : BANKS[S.bank].col;
+    var keys = [['A', 'LAST SONG'], ['B', 'NEXT PART'], ['C', 'NEXT SONG'], ['D', 'DRONE']];
+    return '<div class="modep" style="border-color:' + col + '"><div class="mhead"><span style="display:flex;flex-direction:column;min-width:0">' +
+      '<span class="mk">YOUR FOOTSWITCHES NOW</span><span class="mname" style="color:' + col + '">' + (song ? 'SONG MODE' : 'STOMP MODE') + '</span></span>' +
+      '<button type="button" class="mswap" data-act="footMode" aria-label="Swap to ' + (song ? 'Stomp' : 'Song') + ' mode">SWAP<span>C + D</span></button></div>' +
+      (song ? '<div class="mkeys">' + keys.map(function (k) {
+          var d = k[0] === 'D';
+          return '<div class="mkey" style="' + (d ? '' : 'background:' + col + ';color:#0E0E10') + '"><span class="l">' + k[0] + '</span><span class="w">' + k[1] + '</span></div>';
+        }).join('') + '</div><span class="small">Each press acts straight away, on the beat. The effects below switch from the phone only.</span>'
+        : '<span class="small">Tap A, B, C for the effects below, D for the drone. Hold A for the next bank.</span>') + '</div>';
+  }
+
   function playScreen() {
     var n = songsOnly(), i = S.current, head = headOf(i), K = kud();
     var song = S.songs[head] || 'No songs yet', part = isPart(i) ? S.songs[i] : '';
@@ -611,9 +647,10 @@ var KS = (function () {
       '<span style="display:flex;flex-direction:column;min-width:0"><span class="name">' + esc(song) + (part ? '<span class="partname">, ' + esc(part) + '</span>' : '') + '</span><span class="pos">' + (K ? 'Preset ' : 'Song ') + songNo(i) + ' of ' + n +
       (S.edited ? ', <span class="edited">edited</span>' : K ? '. Hold B for next.' : S.footMode === 1 ? '. C for next song.' : '. Hold B for next.') + '</span></span></button>' +
       '<button type="button" class="arrow" data-act="next" aria-label="Next song">' + ICON.right + '</button></div>' +
+      (K ? '' : modePanel()) +
       '<div class="card meter">' + meterSvg() + '<div class="label">Output</div></div>' +
-      (K ? '' : modeBar() + (S.footMode === 1 ? '' : bankBar())) +
-      '<div class="stomps">' + stomps + '</div>' + note +
+      (K ? '' : S.footMode === 1 ? '<span class="label">Effects in this song (phone only)</span>' : bankBar()) +
+      '<div class="stomps' + (!K && S.footMode === 1 ? ' phoneonly' : '') + '">' + stomps + '</div>' + note +
       (K ? '' : '<div class="card tempo"><span class="tlab">TEMPO</span><span class="tbpm" id="tbpm">' + fmtBpm() + '</span><span class="beat" id="beat"></span>' +
         '<button type="button" class="tap" data-act="tapTempo">TAP</button></div>') +
       '<div class="card pedal" id="pedal"><div class="label" style="display:flex;justify-content:space-between"><span id="pedalName">Pedal: ' + pi.name + '</span><span id="pedalPct">' + pi.text + '</span></div>' +
@@ -1001,6 +1038,7 @@ var KS = (function () {
         '<span class="small">Version ' + esc(S.schema.version) + '</span></section>';
     }
     var body = list ? renderParams(list) : '';
+    extra += defaultsCard(mod, m.title);
     return '<section class="screen" style="gap:14px">' + header(m.title, { id: 'tone', label: 'Tone' }, right) + pre + body + extra + nav('tone') + '</section>';
   }
 
@@ -1152,6 +1190,10 @@ var KS = (function () {
         render(true);
       }
       return;
+    }
+    if (d.def) {
+      if (d.def === 'done') { S.defAck = null; return render(true); }
+      send({ t: 'default', op: d.def, module: S.module }); return;
     }
     if (d.take) { if (S.take !== d.take) { S.take = d.take; S.takeInfo = null; S.pickFrom = null; S.pack = null; } return go('take'); }
     if (d.from != null) { S.pickFrom = +d.from; return render(true); }

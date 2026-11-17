@@ -8,6 +8,7 @@
 #include "Engine.h"
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -20,7 +21,7 @@ public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
-    static constexpr const char* kVersion = "0.4.5";
+    static constexpr const char* kVersion = "0.4.6";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -101,6 +102,9 @@ public:
     std::string songLabel (int i) const;   // "Circus, Verse" for a part
     std::string takesJson() const;           // the recorder's takes, for the phone
     std::string firmwareMessage (const std::string& line);
+    std::string defaultMessage (const std::string& line);
+    float myDefault (int param) const;
+    std::map<std::string, float> myDefaultsFor (int rig) const;
     static std::vector<uint8_t> fromBase64 (const std::string& in);
     static std::string toBase64 (const std::vector<uint8_t>& in);
     std::string listenMessage (const std::string& line);

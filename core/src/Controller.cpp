@@ -42,6 +42,9 @@ struct Controller::Song
 
 struct Controller::State
 {
+    // your own defaults, effect by effect (Save as my default); the factory's for the rest
+    std::map<std::string, float> myDefaults;
+    struct DefaultChange { std::string module; std::map<std::string, float> before, after; } lastDefault;
     // the listening pack being made
     std::thread listenThread;
     std::atomic<int> listenDone { 0 }, listenTotal { 0 };
@@ -317,6 +320,13 @@ void Controller::load()
         startRig = st.value ("rig", 0) == 1 ? 1 : 0;
         s->footMode = st.value ("footMode", 0) == 1 ? 1 : 0;
         s->spaceFile = st.value ("space", std::string());
+        s->myDefaults.clear();
+        if (st.contains ("myDefaults") && st["myDefaults"].is_object())
+            for (auto it = st["myDefaults"].begin(); it != st["myDefaults"].end(); ++it)
+            {
+                const int i = findParam (it.key().c_str());
+                if (i >= 0 && ! isGlobal (i) && it.value().is_number()) s->myDefaults[it.key()] = it.value().get<float>();
+            }
     }
     s->recorder->setEnabled (value (P::RecOn) > 0.5f);
 
@@ -394,6 +404,7 @@ void Controller::saveSettings() const
     j["space"] = s->spaceFile;
     j["rig"] = s->rig;
     j["footMode"] = s->footMode;
+    j["myDefaults"] = s->myDefaults;
     writeJsonAtomic (toPath (dataDir) / "settings.json", j);
 }
 
@@ -574,7 +585,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     if (op == "add")
     {
         if (full (true)) return;
-        Song ns { name.empty() ? (s->rig == 1 ? "Preset " : "Song ") + std::to_string (songsOnly() + 1) : name, false, defaultsFor (s->rig) };
+        Song ns { name.empty() ? (s->rig == 1 ? "Preset " : "Song ") + std::to_string (songsOnly() + 1) : name, false, myDefaultsFor (s->rig) };
         songs.push_back (ns);
         applySong (n);
     }
@@ -1350,6 +1361,121 @@ std::string Controller::listenMessage (const std::string& line)
 }
 void Controller::waitForListening() { if (s->listenThread.joinable()) s->listenThread.join(); }
 
+// ---------------------------------------------------------------------------------------
+// Your own defaults, an effect at a time
+// ---------------------------------------------------------------------------------------
+// The settings an effect's default covers: its own, but not whether it's on
+static std::vector<int> moduleParams (const std::string& module)
+{
+    std::vector<int> out;
+    for (int i = 0; i < kNumParams; ++i)
+    {
+        const auto& d = paramTable()[i];
+        if (module != d.module || isGlobal (i) || (d.flags & Hidden)) continue;
+        const std::string id = d.id;
+        if (id.size() > 3 && id.compare (id.size() - 3, 3, ".on") == 0) continue;
+        out.push_back (i);
+    }
+    return out;
+}
+
+float Controller::myDefault (int i) const
+{
+    const auto it = s->myDefaults.find (paramTable()[i].id);
+    return it != s->myDefaults.end() ? it->second : paramTable()[i].def;
+}
+
+std::map<std::string, float> Controller::myDefaultsFor (int rig) const
+{
+    auto m = defaultsFor (rig);
+    for (auto& [id, v] : m)
+    {
+        const auto it = s->myDefaults.find (id);
+        if (it != s->myDefaults.end()) v = it->second;
+    }
+    return m;
+}
+
+std::string Controller::defaultMessage (const std::string& line)
+{
+    const auto m = json::parse (line, nullptr, false);
+    const auto op = m.value ("op", std::string());
+    const auto module = m.value ("module", std::string());
+    const auto ps = moduleParams (module);
+    json a { { "t", "defaultAck" }, { "op", op }, { "module", module }, { "ok", false } };
+    if (ps.empty()) { a["why"] = "That effect has nothing to keep"; return dumps (a); }
+    auto same = [] (float x, float y) { return std::fabs (x - y) < 1.0e-4f; };
+    if (op == "save")
+    {
+        // what you have now becomes the default: count the songs still on the old one
+        s->lastDefault = { module, {}, {} };
+        for (int i : ps)
+        {
+            const std::string id = paramTable()[i].id;
+            s->lastDefault.before[id] = myDefault (i);
+            s->lastDefault.after[id] = value ((P) i);
+            s->myDefaults[id] = value ((P) i);
+        }
+        saveSettings();
+        int stale = 0;
+        for (int k = 0; k < songCount(); ++k)
+        {
+            bool onOld = true, onNew = true;
+            const auto& vals = s->songs[(size_t) k].values;
+            for (auto& [id, old] : s->lastDefault.before)
+            {
+                const auto f = vals.find (id);
+                const float v = f != vals.end() ? f->second : old;
+                onOld = onOld && same (v, old);
+                onNew = onNew && same (v, s->lastDefault.after[id]);
+            }
+            if (onOld && ! onNew) ++stale;
+        }
+        a["ok"] = true;
+        a["stale"] = stale;
+        if (onLog) onLog ("Saved your default for " + module);
+        return dumps (a);
+    }
+    if (op == "apply")
+    {
+        // the songs still on the old default move to the new one; ones you changed stay
+        if (s->lastDefault.module != module) { a["why"] = "Save the default first"; return dumps (a); }
+        int moved = 0;
+        bool currentMoved = false;
+        for (int k = 0; k < songCount(); ++k)
+        {
+            auto& vals = s->songs[(size_t) k].values;
+            bool onOld = true;
+            for (auto& [id, old] : s->lastDefault.before)
+            {
+                const auto f = vals.find (id);
+                onOld = onOld && same (f != vals.end() ? f->second : old, old);
+            }
+            if (! onOld) continue;
+            for (auto& [id, v] : s->lastDefault.after) vals[id] = v;
+            ++moved;
+            currentMoved = currentMoved || k == s->current;
+        }
+        if (moved) saveSetlist();
+        // the song you're on, if it moved and you haven't changed it since
+        if (currentMoved && ! edited()) applySong (s->current);
+        queueState();
+        a["ok"] = true;
+        a["moved"] = moved;
+        return dumps (a);
+    }
+    if (op == "reset")
+    {
+        // back to your default, as an edit: Save keeps it, Revert undoes it
+        for (int i : ps) setValue ((P) i, myDefault (i));
+        queueState();
+        a["ok"] = true;
+        return dumps (a);
+    }
+    a["why"] = "Unknown step";
+    return dumps (a);
+}
+
 std::string Controller::updatesDir() const { return fromPath (toPath (dataDir) / "Updates"); }
 
 // Update firmware, a piece at a time: begin, chunk, chunk, ..., end
@@ -1523,6 +1649,7 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         else engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));
     }
     else if (t == "fw") reply (firmwareMessage (line));
+    else if (t == "default") reply (defaultMessage (line));
     else if (t == "takeInfo" || t == "listenList" || t == "listenGet" || t == "listenUse") reply (listenMessage (line));
     else if (t == "listen")
     {

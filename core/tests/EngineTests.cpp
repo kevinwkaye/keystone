@@ -1542,6 +1542,46 @@ static void testBackup()
     { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
+static void testMyDefaults()
+{
+    std::printf ("Your own defaults\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_defaults";
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
+    Engine e; e.prepare (kSr, 128);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    c.load();
+    auto ask = [&] (const std::string& m) { std::string got; c.handleMessage (m, [&] (const std::string& x) { got = x; }); return got; };
+    // song 2 has its own Bitrot already
+    c.selectSong (2);
+    c.setValue (P::BitrotSquare, 0.9f);
+    ask (R"({"t":"setlist","op":"save"})");
+    c.selectSong (0);
+    const bool wasOn = c.value (P::BitrotOn) > 0.5f;
+    // square and oscillator off, sub only
+    c.setValue (P::BitrotSquare, 0); c.setValue (P::BitrotOsc, 0);
+    const auto saved = nlohmann::json::parse (ask (R"({"t":"default","op":"save","module":"bitrot"})"));
+    const int stale = saved.value ("stale", -1);
+    CHECK (saved.value ("ok", false) && stale == c.songCount() - 1, "saving counts the songs still on the old default (%d of %d)", stale, c.songCount());
+    const auto applied = nlohmann::json::parse (ask (R"({"t":"default","op":"apply","module":"bitrot"})"));
+    c.selectSong (1);
+    CHECK (applied.value ("moved", 0) == stale && c.value (P::BitrotSquare) < 0.01f && c.value (P::BitrotOsc) < 0.01f, "Update those: songs on the old default take the new one");
+    c.selectSong (2);
+    CHECK (std::fabs (c.value (P::BitrotSquare) - 0.9f) < 0.01f, "a song with its own Bitrot keeps it");
+    c.setValue (P::BitrotOsc, 0.7f);
+    ask (R"({"t":"default","op":"reset","module":"bitrot"})");
+    CHECK (c.value (P::BitrotOsc) < 0.01f && c.edited(), "Reset goes back to your default, as an edit");
+    ask (R"({"t":"setlist","op":"revert"})");
+    ask (R"({"t":"setlist","op":"add","name":"New one"})");
+    c.selectSong (c.songCount() - 1);
+    CHECK (c.value (P::BitrotSquare) < 0.01f && c.value (P::BitrotSub) > 0.5f && (c.value (P::BitrotOn) > 0.5f) == false, "a new song starts with your default, Bitrot still off");
+    (void) wasOn;
+    Engine e2; e2.prepare (kSr, 128);
+    Controller c2 (e2, dir.string(), (dir / "caps").string());
+    c2.load();
+    CHECK (std::fabs (c2.myDefault ((int) P::BitrotSquare)) < 0.01f, "your defaults are kept when Keystone starts again");
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
+}
+
 static void testBandSetlist()
 {
     std::printf ("The band's setlist\n");
@@ -1888,6 +1928,7 @@ int main (int argc, char** argv)
         testRecorder();
         testFirmware();
         testBackup();
+        testMyDefaults();
         testCapture (capture);
     }
     bench (capture);
