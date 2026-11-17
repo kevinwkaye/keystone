@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
                     try { room.onAck(new JSONObject(line)); } catch (Exception ignored) { }
                     return;
                 }
-                Widgets.onLine(MainActivity.this, line);
+                if (!line.contains("\"t\":\"listenChunk\"")) Widgets.onLine(MainActivity.this, line);   // audio pieces are only for the page
                 synchronized (inbox) {
                     inbox.add(line);
                     if (flushQueued) return;
