@@ -238,15 +238,14 @@ var KS = (function () {
   }
   function native() { return window.KeystoneNative && window.KeystoneNative.roomStart ? window.KeystoneNative : null; }
   function micOk() { var N = native(); return !!(N && N.micAllowed()); }
-  // the phone records the room while Keystone records a take, then sends it across
+  // the phone records the room while Keystone records a take, then sends it across. The
+  // phone app follows the takes itself (so it works with the screen off): this only tells it
+  // whether the room track is on.
   function roomSync(r) {
-    var N = native(); if (!N) return;
-    var want = !!(r && r.on && r.take && Math.round(val('rec.room')) === 1 && N.micAllowed());
-    if (S.roomTake && (!want || S.roomTake !== r.take)) { N.roomStop(); S.roomTake = ''; }
-    if (want && !S.roomTake && S.roomFailed !== r.take) {
-      if (N.roomStart(r.take, r.s || 0)) S.roomTake = r.take;
-      else { S.roomFailed = r.take; toast('PHONE MIC WOULD NOT START'); }
-    }
+    var N = native(); if (!N || !N.roomSetting) return;
+    if (!S.values || S.values['rec.room'] == null) return;
+    var want = Math.round(val('rec.room')) === 1;
+    if (S.roomSent !== want) { S.roomSent = want; N.roomSetting(want); }
   }
   function roomStatus() { var N = native(); try { return N ? JSON.parse(N.roomStatus()) : null; } catch (e) { return null; } }
   function fmtBytes(b) { return b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB'; }
@@ -264,7 +263,7 @@ var KS = (function () {
       '<section class="card rec-live"><div style="display:flex;align-items:center;justify-content:space-between"><span class="label" style="color:#E5484D">Recording</span>' +
         '<span class="small">' + (r.pk != null ? 'Peak ' + r.pk + ' dB' : '') + (r.clip ? ', <span style="color:#F0997B">clipped</span>' : '') + '</span></div>' +
         '<div class="rec-time">' + clock(r.s).split('').map(function (ch) { return ch === ':' ? '<span class="colon">:</span>' : flip(ch); }).join('') + '</div>' +
-        '<span class="small">' + esc(r.take ? 'Started ' + takeTitle(r.take).s.split(', ')[1] : '') + (roomOn ? (S.roomTake ? '. The phone is recording the room.' : '. Room track off: ' + (micOk() ? 'the mic didn\'t start' : 'mic not allowed')) : '') + '</span>' +
+        '<span class="small">' + esc(r.take ? 'Started ' + takeTitle(r.take).s.split(', ')[1] : '') + (roomOn ? (rs && rs.recording ? '. The phone is recording the room, screen off is fine.' : '. Room track off: ' + (micOk() ? 'the mic didn\'t start' : 'mic not allowed')) : '') + '</span>' +
         (r.marks && r.marks.length ? '<div class="marks">' + r.marks.slice(-4).map(function (mk) { return '<span><b>' + clock(mk[0]) + '</b> ' + esc(mk[1]) + '</span>'; }).join('') + '</div>' : '') +
         '<button type="button" class="wide" data-act="recStop">End this take</button></section>' :
       '<section class="card"><span style="font-size:17px;font-weight:700">' + (on('rec.on') ? 'Waiting for you to play' : 'Recorder off') + '</span>' +

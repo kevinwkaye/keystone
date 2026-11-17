@@ -69,7 +69,8 @@ public class MainActivity extends Activity {
         setContentView(web);
         web.loadUrl("file:///android_asset/index.html");
 
-        room = new RoomRecorder(this, new RoomRecorder.Sender() {
+        room = RoomRecorder.get(this);
+        room.setSender(new RoomRecorder.Sender() {
             @Override public boolean send(String line) { if (!linked) return false; link.send(line); return true; }
             @Override public boolean linked() { return linked; }
         });
@@ -88,6 +89,10 @@ public class MainActivity extends Activity {
                 if (line.contains("\"t\":\"roomAck\"")) {
                     try { room.onAck(new JSONObject(line)); } catch (Exception ignored) { }
                     return;
+                }
+                if (line.contains("\"t\":\"meter\"") && line.contains("\"rec\"")) {
+                    // the room track follows Keystone's takes here, so it works with the screen off
+                    try { room.sync(new JSONObject(line).optJSONObject("rec")); } catch (Exception ignored) { }
                 }
                 if (!line.contains("\"t\":\"listenChunk\"")) Widgets.onLine(MainActivity.this, line);   // audio pieces are only for the page
                 synchronized (inbox) {
@@ -131,7 +136,21 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        roomService();
         if (pageReady) web.evaluateJavascript("KS.refresh()", null);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        roomService();
+    }
+
+    // the background mic needs its notification started while the app is open
+    private void roomService() {
+        boolean allowed = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        if (room.wanted() && allowed) RoomService.start(this);
+        else if (!room.wanted()) RoomService.stop(this);
     }
 
     @Override
@@ -144,6 +163,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         room.stop();
+        RoomService.stop(this);
         link.stop();
         Widgets.setLinked(this, false);
         web.destroy();
@@ -165,13 +185,28 @@ public class MainActivity extends Activity {
         public boolean micAllowed() { return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED; }
 
         @JavascriptInterface
-        public void askMic() { ui.post(() -> requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, 7)); }
+        public void askMic() {
+            // the notification that lets the room record with the screen off, too (Android 13 on)
+            String[] ask = android.os.Build.VERSION.SDK_INT >= 33
+                    ? new String[] { Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS }
+                    : new String[] { Manifest.permission.RECORD_AUDIO };
+            ui.post(() -> requestPermissions(ask, 7));
+        }
+
+        // the room track setting: the recording itself follows Keystone's takes natively
+        @JavascriptInterface
+        public void roomSetting(boolean on) {
+            if (on == room.wanted()) return;
+            room.setWanted(on);
+            if (!on) room.stop();
+            ui.post(MainActivity.this::roomService);
+        }
 
         @JavascriptInterface
-        public boolean roomStart(String take, double at) { return micAllowed() && room.start(MainActivity.this, take, at); }
+        public boolean roomStart(String take, double at) { return false; }   // older pages
 
         @JavascriptInterface
-        public void roomStop() { room.stop(); }
+        public void roomStop() { }
 
         @JavascriptInterface
         public String roomStatus() { return room.statusJson(); }

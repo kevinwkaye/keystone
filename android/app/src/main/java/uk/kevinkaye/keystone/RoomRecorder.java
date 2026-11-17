@@ -26,7 +26,41 @@ final class RoomRecorder {
 
     private static final int PIECE = 48 * 1024;   // 64 KB a line once in base64
     private final File dir;
-    private final Sender out;
+    private final Context app;
+    private volatile Sender out = new Sender() {
+        @Override public boolean send(String line) { return false; }
+        @Override public boolean linked() { return false; }
+    };
+    private static RoomRecorder instance;
+    private String failedTake = "";
+
+    /** One for the whole app, so the background service and the screens share it. */
+    static synchronized RoomRecorder get(Context c) {
+        if (instance == null) instance = new RoomRecorder(c.getApplicationContext());
+        return instance;
+    }
+
+    void setSender(Sender s) { out = s; }
+
+    // the room track setting, remembered so it works with the app out of sight
+    boolean wanted() { return app.getSharedPreferences("room", 0).getBoolean("on", true); }
+    void setWanted(boolean on) { app.getSharedPreferences("room", 0).edit().putBoolean("on", on).apply(); }
+
+    /**
+     * Every meter message from Keystone: start the room with a take, stop it after. Runs on
+     * the link's thread, so it works with the screen off.
+     */
+    void sync(JSONObject rec) {
+        boolean on = rec != null && rec.optBoolean("on") && !rec.optString("take").isEmpty();
+        String t = on ? rec.optString("take") : "";
+        boolean allowed = app.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        boolean want = on && wanted() && allowed;
+        if (recording() && (!want || !t.equals(take()))) { stop(); RoomService.say(app, "Ready to record the room with your takes"); }
+        if (want && !recording() && !t.equals(failedTake)) {
+            if (start(app, t, rec.optDouble("s", 0))) RoomService.say(app, "Recording the room");
+            else failedTake = t;
+        }
+    }
     private MediaRecorder rec;
     private String take = "";
     private double startsAt;
@@ -35,9 +69,9 @@ final class RoomRecorder {
     private final LinkedBlockingQueue<JSONObject> acks = new LinkedBlockingQueue<>();
     private Thread uploader;
 
-    RoomRecorder(Context c, Sender out) {
+    private RoomRecorder(Context c) {
+        this.app = c;
         this.dir = new File(c.getFilesDir(), "room");
-        this.out = out;
         dir.mkdirs();
     }
 
