@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
         s.setAllowFileAccess(true);
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);
         s.setTextZoom(100);
+        s.setMediaPlaybackRequiresUserGesture(false);   // the listening pack plays fetched files one after another
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient() {
             @Override

@@ -13,6 +13,7 @@
 #include "Valve.h"
 #include "Recorder.h"
 #include "Sha256.h"
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1421,6 +1422,7 @@ static void testRecorder()
         int files = 0; bool loud = true;
         for (auto& f : std::filesystem::directory_iterator (folder))
         {
+            if (f.path().extension() != ".wav") continue;
             ++files;
             // each song's file has sound in it
             std::ifstream w (f.path(), std::ios::binary);
@@ -1431,6 +1433,34 @@ static void testRecorder()
         }
         CHECK (done && files == c.songCount() + 2 && loud, "a file for the dry bass, the take and each of %d songs and parts, all with sound (%d files, %.1f s)", c.songCount(), files, secs);
         CHECK (std::filesystem::exists (folder / "02 The Comedian and the Boxer.wav"), "named by song");
+        // the phone's pages
+        auto ask = [&] (const std::string& m) { std::string got; c.handleMessage (m, [&] (const std::string& x) { got = x; }); return got; };
+        const auto info = ask (R"({"t":"takeInfo","take":")" + takes[0].name + R"("})");
+        CHECK (info.find ("The Comedian and the Boxer") != std::string::npos && info.find ("\"pack\"") != std::string::npos, "the take's songs and its listening pack");
+        const auto list = ask (R"({"t":"listenList","take":")" + takes[0].name + R"("})");
+        CHECK (list.find ("\"played\":\"The Comedian and the Boxer\"") != std::string::npos && list.find ("01 As you played it.wav") != std::string::npos,
+               "the pack knows what you were playing");
+        // fetch a whole file in pieces, as the phone does
+        std::vector<uint8_t> got;
+        int64_t total = -1;
+        while (total < 0 || (int64_t) got.size() < total)
+        {
+            const auto j = nlohmann::json::parse (ask (R"({"t":"listenGet","take":")" + takes[0].name + R"(","file":"03 When the Circus Comes to Town.wav","offset":)" + std::to_string (got.size()) + "}"));
+            if (! j.value ("ok", false)) break;
+            total = j.value ("total", (int64_t) 0);
+            const auto part = Controller::fromBase64 (j.value ("data", std::string()));
+            if (part.empty()) break;
+            got.insert (got.end(), part.begin(), part.end());
+        }
+        CHECK (total > 0 && (int64_t) got.size() == total && total == (int64_t) std::filesystem::file_size (folder / "03 When the Circus Comes to Town.wav"), "a file comes across whole in pieces");
+        CHECK (ask (R"({"t":"listenGet","take":")" + takes[0].name + R"(","file":"../../setlist.json","offset":0})").find ("\"ok\":false") != std::string::npos, "only the pack's own files");
+        // USE: Circus's sound onto the Comedian, unsaved until you save
+        c.selectSong (0);
+        const auto use = ask (R"({"t":"listenUse","take":")" + takes[0].name + R"(","from":"When the Circus Comes to Town","onto":"The Comedian and the Boxer"})");
+        CHECK (use.find ("\"ok\":true") != std::string::npos && c.currentSong() == 0 && c.edited(), "USE puts that sound on the song you played, as an edit");
+        ask (R"({"t":"setlist","op":"revert"})");
+        CHECK (! c.edited(), "Revert brings the old sound back");
+
     }
     c.setValue (P::RecOn, 0);
     render (e, pluck (55.0, 2.0, 0.6, 0.6));

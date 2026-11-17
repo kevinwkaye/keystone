@@ -66,6 +66,7 @@ public:
     // Runs on its own thread; progress shows in the meter message ("listen").
     bool startListening (const std::string& take, double fromSeconds, double seconds, std::string& error);
     bool listening() const;
+    std::vector<std::pair<double, std::string>> takeMarks (const std::string& take) const;
     void waitForListening();   // tests
 
     // the daily backup of the setlist, Kuddle presets and settings (Backups\<day>, 30 days kept)
@@ -101,6 +102,8 @@ public:
     std::string takesJson() const;           // the recorder's takes, for the phone
     std::string firmwareMessage (const std::string& line);
     static std::vector<uint8_t> fromBase64 (const std::string& in);
+    static std::string toBase64 (const std::vector<uint8_t>& in);
+    std::string listenMessage (const std::string& line);
 
     // the rehearsal recorder: marks land in the take being recorded
     void mark (const std::string& what);

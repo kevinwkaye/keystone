@@ -16,6 +16,7 @@ var KS = (function () {
     noteFor: 0, noteUntil: 0, pedalDrag: null,
     health: null, rtt: null, healthAt: 0,
     takes: null, takesFree: 0, roomTake: '', roomFailed: '',
+    take: '', takeInfo: null, pickFrom: null, pack: null, making: false,
     upd: { latest: '', assets: [], checkedAt: 0, checking: false, busy: null, err: null, msg: '' }
   };
 
@@ -75,9 +76,34 @@ var KS = (function () {
         if (m.rig != null && m.rig !== S.rig) { S.rig = m.rig; queueRender(); }
         if (m.tuner) tunerState(true); else if (S.tuner) tunerState(false);
         roomSync(m.rec);
-        if (S.screen === 'recorder') queueRender(true);
+        if (S.screen === 'recorder' || (S.screen === 'take' && (m.listen || S.making))) queueRender(true);
+        else if (S.screen === 'listen') { /* the player updates its own row */ }
         else { var rp = document.getElementById('recPill'), want = recPill(); if (rp ? rp.outerHTML !== want : want) queueRender(true); }
         queueMeters(); break;
+      case 'takeInfo':
+        if (m.take !== S.take) break;
+        S.takeInfo = m;
+        if (S.pickFrom == null) S.pickFrom = m.marks && m.marks.length ? m.marks[0][0] : 0;
+        if (S.screen === 'take') queueRender(true);
+        break;
+      case 'listenAck':
+        if (!m.ok) { S.making = false; toast(m.why || 'COULD NOT START'); if (S.screen === 'take') render(true); }
+        break;
+      case 'listenDone':
+        S.making = false;
+        if (m.ok && S.take) go('listen');
+        else if (!m.ok) { toast('LISTENING PACK STOPPED'); if (S.screen === 'take') { send({ t: 'takeInfo', take: S.take }); render(true); } }
+        break;
+      case 'listenList':
+        if (m.take !== S.take) break;
+        S.pack = m.ok ? m : null;
+        if (S.screen === 'listen') queueRender(true);
+        break;
+      case 'listenChunk': onChunk(m); break;
+      case 'listenUseAck':
+        if (m.ok) toast('ON ' + m.onto.toUpperCase() + ': SAVE OR REVERT');
+        else toast(m.why || 'COULD NOT USE IT');
+        break;
       case 'takes':
         S.takes = m.list || []; S.takesFree = m.free || 0;
         if (S.screen === 'recorder') queueRender(true);
@@ -254,13 +280,117 @@ var KS = (function () {
     var list = S.takes == null ? '<span class="small">Loading takes</span>' : !S.takes.length ? '<span class="small">No takes yet.</span>' :
       S.takes.slice(0, 30).map(function (tk) {
         var tt = takeTitle(tk.name, tk.song);
-        return '<div class="row"><span><span class="t">' + esc(tt.t) + '</span><span class="s">' + esc(tt.s) + '</span></span><span class="r muted">' + clock(tk.seconds) + '</span></div>';
+        return '<button type="button" class="row" data-take="' + esc(tk.name) + '"><span><span class="t">' + esc(tt.t) + '</span><span class="s">' + esc(tt.s) + '</span></span><span class="r muted">' + clock(tk.seconds) + ' ›</span></button>';
       }).join('');
     return '<section class="screen" style="gap:14px">' + header('Recorder', { id: 'play', label: 'Play' }, recPill()) + live + settings +
       '<section class="group"><h2 class="label">Takes on the laptop' + (S.takesFree ? ', ' + fmtBytes(S.takesFree) + ' free' : '') + '</h2>' + list + '</section>' +
       '<div class="small">Takes are in Documents\\Keystone\\Recordings on the laptop: a WAV with your dry bass on the left and the rig on the right, the room track beside it, and the song changes and Keeps marked. When the laptop runs low on space the oldest takes go first.</div>' +
       nav('play') + '</section>';
   }
+
+  // ---- the listening pack: a stretch of a take through every song
+  var player = new Audio(), cache = {}, cacheOrder = [], fetching = null, fetchQueue = [];
+  function labelOf(i) { var h = headOf(i); return isPart(i) ? S.songs[h] + ', ' + S.songs[i] : S.songs[i]; }
+  function songNoOf(label) { for (var i = 0; i < S.songs.length; i++) if (labelOf(i) === label) return songNo(i); return 0; }
+  // files come from the laptop in pieces over the link, then play from the phone's memory
+  function fetchFile(file, then) {
+    if (cache[file]) { if (then) then(cache[file]); return; }
+    if (fetching && fetching.file === file) { if (then) fetching.then = then; return; }
+    if (fetching) { fetchQueue = fetchQueue.filter(function (q) { return q.file !== file; }); fetchQueue.unshift({ file: file, then: then }); return; }
+    fetching = { file: file, then: then, parts: [], got: 0, total: 0, take: S.take };
+    send({ t: 'listenGet', take: S.take, file: file, offset: 0 });
+  }
+  function onChunk(m) {
+    var f = fetching;
+    if (!f || m.file !== f.file || m.take !== f.take) return;
+    if (!m.ok) { fetching = null; toast('COULD NOT FETCH THAT ONE'); nextFetch(); return; }
+    var bin = atob(m.data || ''), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    f.parts.push(bytes); f.got += bytes.length; f.total = m.total;
+    if (bytes.length && f.got < f.total) {
+      send({ t: 'listenGet', take: f.take, file: f.file, offset: f.got });
+      var lp = document.getElementById('load-' + rowId(f.file)); if (lp) lp.textContent = 'Loading ' + Math.round(100 * f.got / f.total) + '%';
+      return;
+    }
+    var url = URL.createObjectURL(new Blob(f.parts, { type: 'audio/wav' }));
+    cache[f.file] = url; cacheOrder.push(f.file);
+    while (cacheOrder.length > 6) { var old = cacheOrder.shift(); if (S.playing !== old) { URL.revokeObjectURL(cache[old]); delete cache[old]; } }
+    fetching = null;
+    if (f.then) f.then(url);
+    nextFetch();
+  }
+  function nextFetch() { var q = fetchQueue.shift(); if (q) fetchFile(q.file, q.then); }
+  function rowId(file) { return file.replace(/[^a-z0-9]/gi, '_'); }
+  function playFile(file) {
+    if (S.playing === file && !player.paused) { player.pause(); render(true); return; }
+    S.playing = file; S.lastPlayed = file; S.loadingFile = file;
+    render(true);
+    fetchFile(file, function (url) {
+      if (S.playing !== file) return;
+      S.loadingFile = null;
+      player.src = url; player.currentTime = 0;
+      player.play().catch(function () {});
+      render(true);
+      var nx = nextSongFile(file); if (nx) fetchFile(nx);   // ready for the one after
+    });
+  }
+  function nextSongFile(file) {
+    var fs = S.pack ? S.pack.files : [];
+    for (var i = 0; i < fs.length - 1; i++) if (fs[i].file === file) return fs[i + 1].file;
+    return null;
+  }
+  // one after another, so you can compare
+  player.addEventListener('ended', function () { var nx = nextSongFile(S.playing); if (nx && S.screen === 'listen') playFile(nx); else { S.playing = null; render(true); } });
+  player.addEventListener('timeupdate', function () {
+    var el2 = document.getElementById('pos-' + rowId(S.playing || ''));
+    if (el2) el2.textContent = 'playing ' + clock(player.currentTime) + ' of ' + clock(player.duration || 0);
+  });
+  function stopListening() {
+    player.pause(); S.playing = null; fetchQueue = []; fetching = null;
+    cacheOrder.forEach(function (f) { URL.revokeObjectURL(cache[f]); }); cache = {}; cacheOrder = [];
+  }
+  function takeScreen() {
+    var i = S.takeInfo, tt = takeTitle(S.take, i && i.song), r = rec(), prog = r && S.meter.listen;
+    var marks = i && i.marks && i.marks.length ? i.marks : [[0, 'From the start']];
+    var pick = marks.map(function (mk, k) {
+      var sel = Math.round(S.pickFrom || 0) === Math.round(mk[0]);
+      return '<button type="button" class="pick' + (sel ? ' on' : '') + '" data-from="' + mk[0] + '"' + (k === marks.length - 1 ? ' style="border:none"' : '') + '><b>' + clock(mk[0]) + '</b><span>' + esc(mk[1]) + '</span><span class="rd"></span></button>';
+    }).join('');
+    var making = S.making || !!prog;
+    var btn = making ? '<button type="button" class="wide go" disabled>Making it: ' + (prog ? prog.done + ' of ' + prog.of + ' songs' : 'starting') + '</button>'
+      : '<button type="button" class="wide go" data-act="makePack">Make the listening pack</button>';
+    return '<section class="screen" style="gap:14px">' + header('Take', { id: 'recorder', label: 'Recorder' }) +
+      '<section class="card" style="gap:4px"><span style="font-size:20px;font-weight:700">' + esc(tt.t) + '</span><span class="small">' + esc(tt.s) +
+        (i ? ', ' + clock(i.seconds) + ' long' + (i.room ? ', room track included' : '') : '') + '</span></section>' +
+      (i && i.pack ? '<button type="button" class="wide" data-go="listen">Open the listening pack (from ' + clock(i.pack.from) + (i.pack.played ? ', ' + esc(i.pack.played) : '') + ')</button>' : '') +
+      '<section class="card" style="gap:2px"><h2 class="label">Listening pack: pick a stretch</h2>' +
+        '<span class="small" style="padding-bottom:6px">Thirty seconds of your bass from here, played through every song and part, so you can hear which sound suits it.</span>' +
+        (i ? pick : '<span class="small">Loading the take</span>') + btn +
+        '<span class="small">Takes about a minute on the laptop. It won\'t run while you\'re playing.</span></section>' +
+      nav('play') + '</section>';
+  }
+  function listenScreen() {
+    var p = S.pack;
+    if (!p) return '<section class="screen" style="gap:12px">' + header('Listen', { id: 'take', label: 'Take' }) + '<span class="small">Loading the listening pack</span>' + nav('play') + '</section>';
+    function row(f) {
+      var on = S.playing === f.file, id = rowId(f.file), loading = S.loadingFile === f.file;
+      var sub = f.kind === 'dry' ? 'Straight from the instrument' : f.kind === 'played' ? (p.played || 'The rig as it was') : 'Song ' + (songNoOf(f.label) || '?');
+      var use = f.kind === 'song' && p.played && f.label !== p.played && (on || S.lastPlayed === f.file);
+      return '<div class="lrow' + (on ? ' on' : '') + '"><button type="button" class="play' + (on && !loading && !player.paused ? ' on' : '') + '" data-listen="' + esc(f.file) + '" aria-label="Play ' + esc(f.label) + '">' +
+        (on && !loading && !player.paused ? ICON_PAUSE : ICON_PLAY) + '</button><span style="flex:1;min-width:0"><span class="t">' + esc(f.label) + '</span><span class="s">' + esc(sub) +
+        (loading ? ', <span id="load-' + id + '">Loading</span>' : on ? ', <span id="pos-' + id + '">playing</span>' : '') + '</span></span>' +
+        (use ? '<button type="button" class="use" data-use="' + esc(f.label) + '">USE</button>' : '') + '</div>';
+    }
+    var top = p.files.filter(function (f) { return f.kind !== 'song'; }), songs = p.files.filter(function (f) { return f.kind === 'song'; });
+    return '<section class="screen" style="gap:12px">' + header('Listen', { id: 'take', label: 'Take' }) +
+      '<section class="card" style="gap:6px"><span style="font-size:17px;font-weight:700">' + esc((p.played || 'Your take') + ', from ' + clock(p.from)) + '</span>' +
+      '<span class="small">Tap a sound to hear your thirty seconds through it. The phone plays them one after another so you can compare.</span></section>' +
+      top.map(row).join('') + '<h2 class="label" style="margin-top:6px">Through every song' + (p.making ? ' (still making)' : '') + '</h2>' + songs.map(row).join('') +
+      (p.played ? '<div class="small">USE copies that sound onto the song you played (' + esc(p.played) + ') so you can try it at the next rehearsal. Save keeps it, Revert brings the old sound back.</div>' : '') +
+      nav('play') + '</section>';
+  }
+  var ICON_PLAY = '<svg width="16" height="16" viewBox="0 0 16 16"><path d="M4 2 L14 8 L4 14Z" fill="currentColor"/></svg>';
+  var ICON_PAUSE = '<svg width="16" height="16" viewBox="0 0 16 16"><rect x="3" y="2" width="3.5" height="12" fill="currentColor"/><rect x="9.5" y="2" width="3.5" height="12" fill="currentColor"/></svg>';
 
   // ---- Update firmware (the laptop or the Pi) and the phone app, from GitHub
   function newer(a, b) {   // is version a newer than b?
@@ -921,6 +1051,8 @@ var KS = (function () {
       case 'setlist': html = setlistScreen(); break;
       case 'health': html = healthScreen(); break;
       case 'recorder': html = recorderScreen(); break;
+      case 'take': html = takeScreen(); break;
+      case 'listen': html = listenScreen(); break;
       default: html = playScreen();
     }
     document.body.classList.toggle('kuddle', kud());
@@ -999,6 +1131,9 @@ var KS = (function () {
     if (screen === 'tuner' && !S.tuner) { send({ t: 'tuner', on: true }); S.tunerAuto = false; }
     if (S.screen === 'tuner' && screen !== 'tuner' && S.tuner) { send({ t: 'tuner', on: false }); S.tuner = false; }
     if (screen === 'recorder') send({ t: 'takes' });
+    if (screen === 'take' && S.take) send({ t: 'takeInfo', take: S.take });
+    if (screen === 'listen' && S.take && !S.pack) send({ t: 'listenList', take: S.take });
+    if (S.screen === 'listen' && screen !== 'listen') stopListening();
     if (screen === 'health') updateCheck(false);
     S.screen = screen; S.sel = null; sheetEl.hidden = true; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false; S.showSpaces = false;
     render();
@@ -1019,6 +1154,10 @@ var KS = (function () {
       }
       return;
     }
+    if (d.take) { if (S.take !== d.take) { S.take = d.take; S.takeInfo = null; S.pickFrom = null; S.pack = null; } return go('take'); }
+    if (d.from != null) { S.pickFrom = +d.from; return render(true); }
+    if (d.listen) return playFile(d.listen);
+    if (d.use) { if (S.pack) send({ t: 'listenUse', take: S.take, from: d.use, onto: S.pack.played }); return; }
     if (d.bank) { if (send({ t: 'bank', i: +d.bank })) { S.bank = +d.bank; render(true); } return; }
     if (d.onoff) { setParam(d.onoff, on(d.onoff) ? 0 : 1); return render(true); }
     if (d.module) { S.module = d.module; return go('module'); }
@@ -1043,6 +1182,9 @@ var KS = (function () {
       case 'updateApp':
         var ap = asset(/\.apk$/);
         if (ap) { S.upd.err = null; S.upd.busy = { what: 'app', stage: 'Downloading', pct: 0 }; KeystoneNative.updateApp(ap.url, ap.size); render(true); }
+        break;
+      case 'makePack':
+        if (send({ t: 'listen', take: S.take, from: S.pickFrom || 0, secs: 30 })) { S.making = true; S.pack = null; render(true); }
         break;
       case 'recStop': send({ t: 'recStop' }); setTimeout(function () { send({ t: 'takes' }); }, 1500); break;
       case 'roomToggle':
@@ -1176,6 +1318,8 @@ var KS = (function () {
   function back() {
     if (S.sel) { S.sel = null; sheetEl.hidden = true; render(true); return true; }
     if (S.screen === 'module') { go('tone'); return true; }
+    if (S.screen === 'listen') { go('take'); return true; }
+    if (S.screen === 'take') { go('recorder'); return true; }
     if (S.screen === 'recorder') { go('play'); return true; }
     if (S.screen !== 'play') { go('play'); return true; }
     return false;

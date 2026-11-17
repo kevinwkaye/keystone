@@ -1048,6 +1048,22 @@ std::string Controller::stateJson() const
 }
 
 // base64 as the phone sends it (standard alphabet, padding optional, whitespace ignored)
+std::string Controller::toBase64 (const std::vector<uint8_t>& in)
+{
+    static const char* a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve ((in.size() + 2) / 3 * 4);
+    for (size_t i = 0; i < in.size(); i += 3)
+    {
+        const uint32_t v = (uint32_t) in[i] << 16 | (i + 1 < in.size() ? (uint32_t) in[i + 1] << 8 : 0) | (i + 2 < in.size() ? in[i + 2] : 0);
+        out += a[(v >> 18) & 63];
+        out += a[(v >> 12) & 63];
+        out += i + 1 < in.size() ? a[(v >> 6) & 63] : '=';
+        out += i + 2 < in.size() ? a[v & 63] : '=';
+    }
+    return out;
+}
+
 std::vector<uint8_t> Controller::fromBase64 (const std::string& in)
 {
     static const auto table = [] { std::array<int, 256> t {}; t.fill (-1);
@@ -1156,6 +1172,21 @@ bool Controller::startListening (const std::string& take, double fromSeconds, do
     const std::string space = s->spaceFile.empty() ? std::string() : fromPath (toPath (spacesDir()) / toPath (s->spaceFile));
     const auto folder = recDir / "Listening" / toPath (take);
 
+    // what you were playing at the start of the stretch: the last song marker before it
+    std::string playedLabel;
+    for (const auto& mk : takeMarks (take))
+        if (mk.first <= fromSeconds + 0.5 && mk.second.rfind ("Song: ", 0) == 0) playedLabel = mk.second.substr (6);
+    json pack { { "take", take }, { "from", fromSeconds }, { "secs", seconds }, { "played", playedLabel }, { "files", json::array() } };
+    pack["files"].push_back ({ { "file", "00 Dry bass.wav" }, { "label", "Dry bass" }, { "kind", "dry" } });
+    pack["files"].push_back ({ { "file", "01 As you played it.wav" }, { "label", "As you played it" }, { "kind", "played" } });
+    for (size_t j = 0; j < jobs.size(); ++j)
+    {
+        char num[8];
+        std::snprintf (num, sizeof (num), "%02d ", (int) j + 2);
+        pack["files"].push_back ({ { "file", num + safeFileName (jobs[j].label) + ".wav" }, { "label", jobs[j].label }, { "kind", "song" } });
+    }
+    const std::string packText = pack.dump (2);
+
     std::vector<float> dry, played;
     double rate = 48000;
     if (! readTakeChannel (wav, 0, fromSeconds, seconds, dry, rate, error)) return false;
@@ -1171,11 +1202,12 @@ bool Controller::startListening (const std::string& take, double fromSeconds, do
     auto* st = s.get();
     auto log = onLog;
     const Recorder* rec = s->recorder.get();
-    s->listenThread = std::thread ([st, rec, jobs, globals, capture, space, folder, dry = std::move (dry), played = std::move (played), rate, log]
+    s->listenThread = std::thread ([st, rec, packText, jobs, globals, capture, space, folder, dry = std::move (dry), played = std::move (played), rate, log]
     {
         std::error_code ec;
         fs::remove_all (folder, ec);
         fs::create_directories (folder, ec);
+        std::ofstream (folder / "pack.json") << packText;
         bool ok = writeWav16 (folder / "00 Dry bass.wav", dry, rate);
         if (! played.empty()) writeWav16 (folder / "01 As you played it.wav", played, rate);
         const int block = 256;
@@ -1219,6 +1251,103 @@ bool Controller::startListening (const std::string& take, double fromSeconds, do
 }
 
 bool Controller::listening() const { return s->listenBusy.load(); }
+
+// a take's markers from its JSON: seconds into the take, and what happened
+std::vector<std::pair<double, std::string>> Controller::takeMarks (const std::string& take) const
+{
+    std::vector<std::pair<double, std::string>> out;
+    if (take.find ("..") != std::string::npos || take.find_first_of ("/\\:") != std::string::npos) return out;
+    const auto j = readJson (toPath (s->recorder->folderPath()) / toPath (take + ".json"));
+    if (j.is_object() && j.contains ("marks") && j["marks"].is_array())
+        for (const auto& m : j["marks"])
+            if (m.is_object()) out.emplace_back (m.value ("t", 0.0), m.value ("what", std::string()));
+    return out;
+}
+
+// The phone's Take and Listen pages
+std::string Controller::listenMessage (const std::string& line)
+{
+    const auto m = json::parse (line, nullptr, false);
+    const auto t = m.value ("t", std::string());
+    const auto take = m.value ("take", std::string());
+    if (take.empty() || take.find ("..") != std::string::npos || take.find_first_of ("/\\:") != std::string::npos)
+        return dumps (json { { "t", t + "Ack" }, { "ok", false }, { "why", "That isn't a take" } });
+    const auto recDir = toPath (s->recorder->folderPath());
+    const auto packDir = recDir / "Listening" / toPath (take);
+    if (t == "takeInfo")
+    {
+        json j { { "t", "takeInfo" }, { "take", take }, { "song", s->recorder->firstSong (take) }, { "marks", json::array() } };
+        std::error_code ec;
+        const auto bytes = (int64_t) fs::file_size (recDir / toPath (take + ".wav"), ec);
+        const auto side = readJson (recDir / toPath (take + ".json"));
+        const double rate = side.is_object() ? side.value ("rate", 48000.0) : 48000.0;
+        j["seconds"] = ec ? 0.0 : std::round (std::max<int64_t> (0, bytes - 44) / 6.0 / rate);
+        j["room"] = side.is_object() && side.contains ("room");
+        for (auto& [sec, what] : takeMarks (take))
+            if (what.rfind ("Song: ", 0) == 0) j["marks"].push_back ({ std::round (sec), what.substr (6) });
+        const auto pack = readJson (packDir / "pack.json");
+        if (pack.is_object()) j["pack"] = { { "from", pack.value ("from", 0.0) }, { "played", pack.value ("played", std::string()) } };
+        return dumps (j);
+    }
+    if (t == "listenList")
+    {
+        auto pack = readJson (packDir / "pack.json");
+        if (! pack.is_object()) return dumps (json { { "t", "listenList" }, { "take", take }, { "ok", false } });
+        std::error_code ec;
+        json files = json::array();
+        for (auto& f : pack["files"])
+        {
+            const auto p = packDir / toPath (f.value ("file", std::string()));
+            if (! fs::exists (p, ec)) continue;
+            f["bytes"] = (int64_t) fs::file_size (p, ec);
+            files.push_back (f);
+        }
+        pack["files"] = files;
+        pack["t"] = "listenList";
+        pack["ok"] = true;
+        pack["making"] = s->listenBusy.load();
+        return dumps (pack);
+    }
+    if (t == "listenGet")
+    {
+        // a piece of one file, for the phone to play
+        const auto file = m.value ("file", std::string());
+        const int64_t offset = std::max<int64_t> (0, m.value ("offset", (int64_t) 0));
+        json a { { "t", "listenChunk" }, { "take", take }, { "file", file }, { "offset", offset } };
+        if (file.empty() || file.find ("..") != std::string::npos || file.find_first_of ("/\\:") != std::string::npos) { a["ok"] = false; return dumps (a); }
+        std::ifstream f (packDir / toPath (file), std::ios::binary);
+        if (! f) { a["ok"] = false; return dumps (a); }
+        f.seekg (0, std::ios::end);
+        const int64_t total = (int64_t) f.tellg();
+        std::vector<uint8_t> buf ((size_t) std::clamp<int64_t> (total - offset, 0, 96 * 1024));
+        f.seekg (offset);
+        f.read ((char*) buf.data(), (std::streamsize) buf.size());
+        a["ok"] = true;
+        a["total"] = total;
+        a["data"] = toBase64 (buf);
+        return dumps (a);
+    }
+    if (t == "listenUse")
+    {
+        // that song's sound onto the song you were playing, as an unsaved edit: Save keeps it,
+        // Revert brings the old one back
+        if (s->rig != 0) return dumps (json { { "t", "listenUseAck" }, { "ok", false }, { "why", "Switch to Keystone first" } });
+        const auto from = m.value ("from", std::string()), onto = m.value ("onto", std::string());
+        int src = -1, dst = -1;
+        for (int i = 0; i < songCount(); ++i)
+        {
+            if (src < 0 && songLabel (i) == from) src = i;
+            if (dst < 0 && songLabel (i) == onto) dst = i;
+        }
+        if (src < 0 || dst < 0) return dumps (json { { "t", "listenUseAck" }, { "ok", false }, { "why", src < 0 ? "That song isn't in the setlist any more" : "The song you played isn't in the setlist any more" } });
+        if (dst != s->current) selectSong (dst);
+        applyValues (engine, s->songs[(size_t) src].values);
+        queueState();
+        queueToast ("TRY IT, THEN SAVE OR REVERT");
+        return dumps (json { { "t", "listenUseAck" }, { "ok", true }, { "onto", onto } });
+    }
+    return {};
+}
 void Controller::waitForListening() { if (s->listenThread.joinable()) s->listenThread.join(); }
 
 std::string Controller::updatesDir() const { return fromPath (toPath (dataDir) / "Updates"); }
@@ -1394,6 +1523,7 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         else engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));
     }
     else if (t == "fw") reply (firmwareMessage (line));
+    else if (t == "takeInfo" || t == "listenList" || t == "listenGet" || t == "listenUse") reply (listenMessage (line));
     else if (t == "listen")
     {
         std::string why;
