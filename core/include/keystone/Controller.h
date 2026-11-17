@@ -61,6 +61,13 @@ public:
     std::function<std::string (const std::string& file, const std::string& version)> onFirmware;
     std::string updatesDir() const;
 
+    // The listening pack: a stretch of a take's dry bass played through every song and part,
+    // one .wav each in Recordings\Listening\<take>, beside the dry bass and the take as played.
+    // Runs on its own thread; progress shows in the meter message ("listen").
+    bool startListening (const std::string& take, double fromSeconds, double seconds, std::string& error);
+    bool listening() const;
+    void waitForListening();   // tests
+
     // the daily backup of the setlist, Kuddle presets and settings (Backups\<day>, 30 days kept)
     bool backup (const std::string& day);
     static std::string today();

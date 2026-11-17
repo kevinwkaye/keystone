@@ -10,6 +10,9 @@
 
 #include <algorithm>
 #include <regex>
+#include <thread>
+#include <mutex>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -39,6 +42,12 @@ struct Controller::Song
 
 struct Controller::State
 {
+    // the listening pack being made
+    std::thread listenThread;
+    std::atomic<int> listenDone { 0 }, listenTotal { 0 };
+    std::atomic<bool> listenBusy { false }, listenFinished { false };
+    std::string listenFolder, listenError;
+    std::mutex listenLock;
     double backupCheckedAt = -1;
     std::string lastBackupDay;
     // an update arriving from the phone
@@ -176,7 +185,11 @@ Controller::Controller (Engine& e, std::string data, std::string caps)
     engine.setRecorder (s->recorder.get());
 }
 
-Controller::~Controller() { engine.setRecorder (nullptr); }
+Controller::~Controller()
+{
+    if (s->listenThread.joinable()) s->listenThread.join();
+    engine.setRecorder (nullptr);
+}
 
 void Controller::mark (const std::string& what) { s->recorder->mark (what); }
 Recorder& Controller::recorder() { return *s->recorder; }
@@ -652,6 +665,13 @@ void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, 
 void Controller::tick (double now)
 {
     s->logic.tick (now);
+    if (s->listenFinished.exchange (false))
+    {
+        std::string folder, err;
+        { const std::lock_guard<std::mutex> l (s->listenLock); folder = s->listenFolder; err = s->listenError; }
+        queue (dumps (json { { "t", "listenDone" }, { "ok", err.empty() }, { "why", err }, { "folder", folder } }));
+        queueToast (err.empty() ? "LISTENING PACK READY" : "LISTENING PACK FAILED");
+    }
     // the daily backup: checked once a minute, made once a day
     if (now - s->backupCheckedAt > 60.0 || s->backupCheckedAt < 0)
     {
@@ -1053,6 +1073,154 @@ static json recentMarks (const Recorder& r)
     return a;
 }
 
+// ---------------------------------------------------------------------------------------
+// The listening pack
+// ---------------------------------------------------------------------------------------
+namespace
+{
+// One channel of one of the recorder's own takes (24-bit stereo, 44-byte header)
+bool readTakeChannel (const fs::path& p, int channel, double from, double seconds, std::vector<float>& out, double& rate, std::string& error)
+{
+    std::ifstream f (p, std::ios::binary);
+    if (! f) { error = "Couldn't open that take"; return false; }
+    uint8_t h[44] {};
+    f.read ((char*) h, 44);
+    auto u16 = [&] (int o) { return (uint32_t) h[o] | ((uint32_t) h[o + 1] << 8); };
+    auto u32 = [&] (int o) { return u16 (o) | (u16 (o + 2) << 16); };
+    if (std::memcmp (h, "RIFF", 4) != 0 || u16 (22) != 2 || u16 (34) != 24 || std::memcmp (h + 36, "data", 4) != 0) { error = "That isn't one of Keystone's takes"; return false; }
+    rate = (double) u32 (24);
+    const int64_t frames = (int64_t) u32 (40) / 6;
+    const int64_t start = std::clamp ((int64_t) (from * rate), (int64_t) 0, frames);
+    const int64_t n = std::min (frames - start, (int64_t) (seconds * rate));
+    if (n < (int64_t) rate) { error = "There's less than a second of the take there"; return false; }
+    std::vector<uint8_t> raw ((size_t) n * 6);
+    f.seekg (44 + start * 6);
+    f.read ((char*) raw.data(), (std::streamsize) raw.size());
+    out.assign ((size_t) n, 0.0f);
+    for (int64_t i = 0; i < n; ++i)
+    {
+        const uint8_t* b = raw.data() + i * 6 + channel * 3;
+        out[(size_t) i] = (float) ((int32_t) (((uint32_t) b[0] << 8) | ((uint32_t) b[1] << 16) | ((uint32_t) b[2] << 24)) >> 8) / 8388608.0f;
+    }
+    return true;
+}
+
+// 16-bit mono, small enough for the phone, with 10 ms fades so nothing clicks
+bool writeWav16 (const fs::path& p, std::vector<float> x, double rate)
+{
+    const size_t fade = std::min (x.size() / 2, (size_t) (0.01 * rate));
+    for (size_t i = 0; i < fade; ++i) { const float g = (float) i / (float) fade; x[i] *= g; x[x.size() - 1 - i] *= g; }
+    std::ofstream f (p, std::ios::binary);
+    if (! f) return false;
+    const uint32_t data = (uint32_t) x.size() * 2, r = (uint32_t) std::lround (rate);
+    auto w32 = [&] (uint32_t v) { f.put ((char) v); f.put ((char) (v >> 8)); f.put ((char) (v >> 16)); f.put ((char) (v >> 24)); };
+    auto w16 = [&] (uint16_t v) { f.put ((char) v); f.put ((char) (v >> 8)); };
+    f.write ("RIFF", 4); w32 (36 + data); f.write ("WAVEfmt ", 8); w32 (16); w16 (1); w16 (1); w32 (r); w32 (r * 2); w16 (2); w16 (16);
+    f.write ("data", 4); w32 (data);
+    for (float v : x) w16 ((uint16_t) (int16_t) std::lrint (std::clamp (v, -1.0f, 1.0f) * 32767.0f));
+    return (bool) f;
+}
+
+std::string safeFileName (std::string n)
+{
+    for (auto& ch : n) if (std::string ("\\/:*?\"<>|").find (ch) != std::string::npos) ch = '-';
+    return n;
+}
+} // namespace
+
+bool Controller::startListening (const std::string& take, double fromSeconds, double seconds, std::string& error)
+{
+    if (s->listenBusy.load()) { error = "A listening pack is already being made"; return false; }
+    if (take.empty() || take.find ("..") != std::string::npos || take.find_first_of ("/\\:") != std::string::npos) { error = "That isn't a take"; return false; }
+    const auto recDir = toPath (s->recorder->folderPath());
+    const auto wav = recDir / toPath (take + ".wav");
+    if (s->recorder->recording() && s->recorder->takeName() == take) { error = "That take is still recording"; return false; }
+    // it works the laptop hard for a minute: never while you play
+    if (s->recorder->quietSeconds() < 20.0) { error = "You're playing. Try again once the bass has been quiet for 20 seconds"; return false; }
+
+    // everything the thread needs, copied now: it never touches the controller or the engine
+    struct Job { std::string label; std::map<std::string, float> values; };
+    std::vector<Job> jobs;
+    const auto& list = s->rig == 1 ? s->other : s->songs;   // always Keystone's songs
+    for (size_t i = 0; i < list.size(); ++i)
+    {
+        size_t head = i;
+        while (head > 0 && list[head].part) --head;
+        jobs.push_back ({ list[i].part ? list[head].name + ", " + list[i].name : list[i].name, list[i].values });
+    }
+    std::map<std::string, float> globals;
+    for (int p = 0; p < kNumParams; ++p)
+        if (paramTable()[p].flags & Global) globals[paramTable()[p].id] = engine.getParam ((P) p);
+    globals["output.quality"] = 0;   // full effects, whatever the laptop is doing
+    const std::string capture = s->captureFile.empty() ? std::string() : fromPath (toPath (capturesDir) / toPath (s->captureFile));
+    const std::string space = s->spaceFile.empty() ? std::string() : fromPath (toPath (spacesDir()) / toPath (s->spaceFile));
+    const auto folder = recDir / "Listening" / toPath (take);
+
+    std::vector<float> dry, played;
+    double rate = 48000;
+    if (! readTakeChannel (wav, 0, fromSeconds, seconds, dry, rate, error)) return false;
+    readTakeChannel (wav, 1, fromSeconds, seconds, played, rate, error);
+    error.clear();
+
+    if (s->listenThread.joinable()) s->listenThread.join();
+    s->listenBusy.store (true);
+    s->listenFinished.store (false);
+    s->listenDone.store (0);
+    s->listenTotal.store ((int) jobs.size());
+    { const std::lock_guard<std::mutex> l (s->listenLock); s->listenFolder = fromPath (folder); s->listenError.clear(); }
+    auto* st = s.get();
+    auto log = onLog;
+    const Recorder* rec = s->recorder.get();
+    s->listenThread = std::thread ([st, rec, jobs, globals, capture, space, folder, dry = std::move (dry), played = std::move (played), rate, log]
+    {
+        std::error_code ec;
+        fs::remove_all (folder, ec);
+        fs::create_directories (folder, ec);
+        bool ok = writeWav16 (folder / "00 Dry bass.wav", dry, rate);
+        if (! played.empty()) writeWav16 (folder / "01 As you played it.wav", played, rate);
+        const int block = 256;
+        std::vector<float> out (dry.size()), tail ((size_t) (2 * rate));
+        bool stopped = false;
+        for (size_t j = 0; j < jobs.size() && ok; ++j)
+        {
+            if (rec->quietSeconds() < 1.0) { stopped = true; break; }   // you've started playing: stop and leave the laptop to you
+            Engine e;
+            e.prepare (rate, block);
+            applyValues (e, globals);
+            std::string err;
+            if (! capture.empty()) e.loadCapture (capture, err);
+            if (! space.empty()) e.loadSpace (space, err);
+            applyValues (e, jobs[j].values);
+            e.resetPedalJobs();
+            e.setPedalBank (std::clamp ((int) std::lround (e.getParam (P::BankStart)), 0, 2));
+            // a second of silence so loads and smoothing settle, then the take, then its tails
+            std::vector<float> pre ((size_t) rate), sink ((size_t) rate);
+            for (size_t i = 0; i < pre.size(); i += block) { const int n = (int) std::min<size_t> (block, pre.size() - i); e.process (pre.data() + i, sink.data() + i, n); e.idle(); }
+            for (size_t i = 0; i < dry.size(); i += block) { const int n = (int) std::min<size_t> (block, dry.size() - i); e.process (dry.data() + i, out.data() + i, n); e.idle(); }
+            std::vector<float> silence (tail.size(), 0.0f);
+            for (size_t i = 0; i < tail.size(); i += block) { const int n = (int) std::min<size_t> (block, tail.size() - i); e.process (silence.data() + i, tail.data() + i, n); }
+            std::vector<float> whole (out);
+            whole.insert (whole.end(), tail.begin(), tail.end());
+            char num[8];
+            std::snprintf (num, sizeof (num), "%02d ", (int) j + 2);
+            ok = writeWav16 (folder / toPath (num + safeFileName (jobs[j].label) + ".wav"), whole, rate);
+            st->listenDone.store ((int) j + 1);
+        }
+        {
+            const std::lock_guard<std::mutex> l (st->listenLock);
+            if (! ok) st->listenError = "Couldn't save the listening pack on this device";
+            else if (stopped) st->listenError = "Stopped because you started playing. The songs done so far are saved";
+        }
+        if (log) log (ok ? "Listening pack ready in " + fromPath (folder) : "Listening pack failed");
+        st->listenFinished.store (true);
+        st->listenBusy.store (false);
+    });
+    return true;
+}
+
+bool Controller::listening() const { return s->listenBusy.load(); }
+void Controller::waitForListening() { if (s->listenThread.joinable()) s->listenThread.join(); }
+
 std::string Controller::updatesDir() const { return fromPath (toPath (dataDir) / "Updates"); }
 
 // Update firmware, a piece at a time: begin, chunk, chunk, ..., end
@@ -1150,6 +1318,7 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
                                          { "clip", r.clipped() }, { "take", r.takeName() }, { "marks", recentMarks (r) } }
                                  : json { { "on", false } };
     }
+    if (s->listenBusy.load()) j["listen"] = { { "done", s->listenDone.load() }, { "of", s->listenTotal.load() } };
     j["out"] = std::round (gainToDb (m.outPeak) * 10) / 10;
     j["rms"] = std::round (gainToDb (m.outRms) * 10) / 10;
     j["in"] = std::round (gainToDb (m.inPeak) * 10) / 10;
@@ -1225,6 +1394,12 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         else engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));
     }
     else if (t == "fw") reply (firmwareMessage (line));
+    else if (t == "listen")
+    {
+        std::string why;
+        const bool ok = startListening (m.value ("take", std::string()), m.value ("from", 0.0), std::clamp (m.value ("secs", 30.0), 5.0, 120.0), why);
+        reply (dumps (json { { "t", "listenAck" }, { "ok", ok }, { "why", why } }));
+    }
     else if (t == "recStop") { s->recorder->stopTake(); queueToast ("TAKE STOPPED"); }
     else if (t == "takes") reply (takesJson());
     else if (t == "room")

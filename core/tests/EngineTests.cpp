@@ -1403,6 +1403,35 @@ static void testRecorder()
         const auto bad = msg (R"({"t":"room","take":"../evil","seq":0,"last":true,"ext":"m4a","data":"aGk="})");
         CHECK (bad.find ("\"ok\":false") != std::string::npos, "a room file can't be written anywhere else");
     }
+    // the listening pack: that take's bass through every song and part
+    if (takes.size() == 1)
+    {
+        std::string why;
+        auto t0 = std::chrono::steady_clock::now();
+        CHECK (c.startListening (takes[0].name, 0, 30, why) && c.listening(), "a listening pack starts (%s)", why.c_str());
+        std::string other;
+        CHECK (! c.startListening (takes[0].name, 0, 30, other), "only one at a time");
+        c.waitForListening();
+        const double secs = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+        c.tick (100);
+        const auto out = c.takeBroadcasts();
+        bool done = false;
+        for (auto& b : out) if (b.find ("listenDone") != std::string::npos && b.find ("\"ok\":true") != std::string::npos) done = true;
+        const auto folder = dir / "Recordings" / "Listening" / takes[0].name;
+        int files = 0; bool loud = true;
+        for (auto& f : std::filesystem::directory_iterator (folder))
+        {
+            ++files;
+            // each song's file has sound in it
+            std::ifstream w (f.path(), std::ios::binary);
+            std::vector<char> d ((std::istreambuf_iterator<char> (w)), std::istreambuf_iterator<char>());
+            int peak = 0;
+            for (size_t i = 44; i + 1 < d.size(); i += 2) peak = std::max (peak, std::abs ((int) (int16_t) ((uint8_t) d[i] | ((uint8_t) d[i + 1] << 8))));
+            if (peak < 300) { loud = false; std::printf ("    quiet: %s (%d)\n", f.path().filename().string().c_str(), peak); }
+        }
+        CHECK (done && files == c.songCount() + 2 && loud, "a file for the dry bass, the take and each of %d songs and parts, all with sound (%d files, %.1f s)", c.songCount(), files, secs);
+        CHECK (std::filesystem::exists (folder / "02 The Comedian and the Boxer.wav"), "named by song");
+    }
     c.setValue (P::RecOn, 0);
     render (e, pluck (55.0, 2.0, 0.6, 0.6));
     r.flushForTests();
