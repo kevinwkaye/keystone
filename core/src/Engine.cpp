@@ -529,7 +529,8 @@ void Engine::process (const float* in, float* out, int numSamples)
                 h *= d.highLevel.next() * vg;
 
                 // ---- ambient ----
-                const float grainSrc = d.grains.sourceDirty() ? h : d.fullBuf[(size_t) i] * vg;
+                // Speckle always takes the clean full sound, so its pitch effects never shift the dirt
+                const float grainSrc = d.fullBuf[(size_t) i] * vg;
                 const float gr = d.grains.process (grainSrc, playLevel);
                 const float dr = d.droneBuf[(size_t) i];
                 const float droneSend = dr * V (v, P::DroneSend);

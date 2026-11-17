@@ -105,7 +105,6 @@ public:
         // the expression pedal pushes Speckle further in when it's on; it never brings it in
         if (on && bloomActive) m = mix + (1.0f - mix) * bloomZone2 * V (v, P::BloomGrains);
         mixS.set (m);
-        dirty = Vi (v, P::GrSource) == 1;
 
         p.effect = std::max (0, std::min ((int) spk::kNumEffects - 1, Vi (v, P::GrEffect)));
         p.variant = Vi (v, P::GrVariant);
@@ -143,11 +142,10 @@ public:
         }
     }
 
-    bool sourceDirty() const { return dirty; }
     bool active() const { return mixS.value > 1.0e-4f || mixS.target > 0; }
     float activityLevel() const { return activity; }
 
-    // source: the clean or dirty full sound. Returns the wet signal, already scaled by mix.
+    // source: the clean full sound. Returns the wet signal, already scaled by mix.
     // A block of 32 samples at a time, under a millisecond late.
     float process (float source, float /*playLevel*/)
     {
@@ -183,6 +181,6 @@ private:
     float inL[kBlock] = {}, outM[kBlock] = {};
     int idx = 0, pitchMode = 0, scatterTick = 0;
     float activity = 0;
-    bool dirty = false, running = false;
+    bool running = false;
 };
 } // namespace ks
