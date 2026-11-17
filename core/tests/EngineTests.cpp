@@ -447,7 +447,7 @@ static void testTempo()
     {
         // four taps 500 ms apart: 120 BPM; a free delay follows the tap
         const auto dir = std::filesystem::temp_directory_path() / "keystone_tap";
-        std::filesystem::remove_all (dir);
+        { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
         Engine e; e.prepare (kSr, 64);
         Controller c (e, dir.string(), (dir / "caps").string());
         c.load();
@@ -460,7 +460,7 @@ static void testTempo()
         CHECK (sent > 0, "and the phone hears the new tempo");
         for (int i = 0; i < 3; ++i) c.tapTempo (20.0 + 0.4 * i);
         CHECK (std::fabs (c.value (P::Tempo) - 150) < 0.06f, "after a pause the taps start afresh: %.1f BPM (mark 150)", c.value (P::Tempo));
-        std::filesystem::remove_all (dir);
+        { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     }
 }
 
@@ -1102,7 +1102,7 @@ static void testController()
 {
     std::printf ("Controller: footswitches and setlist\n");
     const auto dir = std::filesystem::temp_directory_path() / "keystone_test";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     Engine e;
     e.prepare (kSr, 64);
     Controller c (e, dir.string(), (dir / "caps").string());
@@ -1262,14 +1262,14 @@ static void testController()
     c2.load();
     CHECK (c2.songCount() == 15 && c2.songName (0) == "Encore" && c2.isPart (1) && c2.songName (1) == "Drop" && c2.songName (2) == "New choon",
            "setlist and its parts survive a restart");
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
 static void testKuddle()
 {
     std::printf ("Kuddle, the home rig\n");
     const auto dir = std::filesystem::temp_directory_path() / "keystone_kuddle";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     auto in = bassLine (2.0, 0.5);
     {
         Engine e; e.prepare (kSr, 64);
@@ -1331,7 +1331,7 @@ static void testKuddle()
         // the bass no longer reaches Keystone: after the tail, only Kuddle plays
         CHECK (e.meters().rig == 1, "Kuddle is the rig playing");
     }
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
 static void testNewDefaults()
@@ -1341,7 +1341,7 @@ static void testNewDefaults()
     CHECK (info (P::DrivePresence).def == 4.0f && info (P::DriveLowCut).def == 110.0f && info (P::DriveLevel).def == 1.5f,
            "the Drive voice cuts through: presence +4 dB, low cut 110 Hz, level +1.5 dB");
     const auto dir = std::filesystem::temp_directory_path() / "keystone_v7";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     std::filesystem::create_directories (dir);
     std::ofstream (dir / "setlist.json") << R"({"version":6,"current":0,"songs":[{"name":"Old","values":{"bitrot.vol":0.7,"drone.release":4,"drive.drive.presence":2,"drive.drive.lowcut":70,"drive.drive.level":0}},{"name":"Tweaked","values":{"bitrot.vol":0.55,"drone.release":6}}]})";
     Engine e; e.prepare (kSr, 64);
@@ -1352,14 +1352,14 @@ static void testNewDefaults()
     CHECK (std::fabs (c.value (P::Tempo) - 142.9f) < 0.05f, "and gets a tempo from its delay time (%.1f BPM from 420 ms)", c.value (P::Tempo));
     c.selectSong (1);
     CHECK (std::fabs (c.value (P::BitrotVol) - 0.55f) < 1e-4 && c.value (P::DroneRelease) == 6.0f, "a song you'd changed keeps your settings");
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
 static void testRecorder()
 {
     std::printf ("The rehearsal recorder\n");
     const auto dir = std::filesystem::temp_directory_path() / "keystone_rec";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     Engine e; e.prepare (kSr, 128);
     Controller c (e, dir.string(), (dir / "caps").string());
     c.load();
@@ -1407,14 +1407,14 @@ static void testRecorder()
     render (e, pluck (55.0, 2.0, 0.6, 0.6));
     r.flushForTests();
     CHECK (! r.recording(), "switched off: playing doesn't record");
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
 static void testFirmware()
 {
     std::printf ("Update firmware from the phone\n");
     const auto dir = std::filesystem::temp_directory_path() / "keystone_fw";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     Engine e; e.prepare (kSr, 128);
     Controller c (e, dir.string(), (dir / "caps").string());
     c.load();
@@ -1441,21 +1441,24 @@ static void testFirmware()
     msg (R"({"t":"fw","op":"chunk","seq":1,"data":"cm9vbQ=="})");
     const auto end = msg (R"({"t":"fw","op":"end"})");
     CHECK (end.find ("\"ok\":true") != std::string::npos && gotVersion == "0.4.9" && std::filesystem::file_size (gotFile) == 10, "a whole update goes to the updater");
-    // not while playing
+    // not while playing (recording off: it still notices playing, and leaves no take open)
+    c.setValue (P::RecOn, 0);
     render (e, pluck (55.0, 1.0, 0.6, 0.6));
     c.recorder().flushForTests();
     CHECK (msg (begin + real + "\"}").find ("playing") != std::string::npos, "never while you're playing");
     std::ifstream st (dir / "started.json");
     const std::string started ((std::istreambuf_iterator<char> (st)), std::istreambuf_iterator<char>());
     CHECK (started.find (Controller::kVersion) != std::string::npos, "started.json tells the updater which version is running");
-    std::filesystem::remove_all (dir);
+    st.close();
+    std::error_code ec;
+    std::filesystem::remove_all (dir, ec);
 }
 
 static void testBandSetlist()
 {
     std::printf ("The band's setlist\n");
     const auto dir = std::filesystem::temp_directory_path() / "keystone_band";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     {
         Engine e; e.prepare (kSr, 64);
         Controller c (e, dir.string(), (dir / "caps").string());
@@ -1484,7 +1487,7 @@ static void testBandSetlist()
         for (int i = 0; i < c.songCount(); ++i) if (c.songName (i) == "Middle 32") { c.selectSong (i); songNo = c.songNumber (i); }
         CHECK (songNo == 9 && c.value (P::DriveOn) == 0 && c.value (P::RvOn) == 1 && c.value (P::DlOn) == 1 && c.bank() == 2, "Sluts middle 32: ambient, in Glow");
     }
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1603,7 +1606,7 @@ static void bench (const char* capture)
 static int writeDefaults (const char* path)
 {
     const auto dir = std::filesystem::temp_directory_path() / "keystone_defaults";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     Engine e;
     e.prepare (kSr, 64);
     Controller c (e, dir.string(), (dir / "caps").string());
@@ -1611,7 +1614,7 @@ static int writeDefaults (const char* path)
     std::string state = c.stateJson();
     std::ofstream (path) << "// Generated by keystone_tests --defaults. Do not edit.\nwindow.KS_DEFAULT = { schema: " << c.schemaJson()
                          << ", state: " << state << " };\n";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     return 0;
 }
 
@@ -1635,7 +1638,7 @@ static int soak (double minutes)
 {
     std::printf ("Soak: %.0f minutes of audio with a gig's worth of footwork\n", minutes);
     const auto dir = std::filesystem::temp_directory_path() / "keystone_soak";
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     Engine e; e.prepare (kSr, 128);
     Controller c (e, dir.string(), (dir / "caps").string());
     c.load();
@@ -1752,7 +1755,7 @@ static int soak (double minutes)
     std::printf ("\n");
     std::printf ("  memory %ld KB at the start, %ld KB halfway, %ld KB at the end\n", rssStart, rssAtHalf, rssEnd);
     if (rssAtHalf > 0 && rssEnd - rssAtHalf > 8192) fail ("memory grew by " + std::to_string ((rssEnd - rssAtHalf) / 1024) + " MB in the second half");
-    std::filesystem::remove_all (dir);
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
     if (bad.load()) { std::printf ("  FAIL  %s (%d problems)\n", firstBad.c_str(), bad.load()); return 1; }
     std::printf ("  Soak passed\n");
     return 0;
@@ -1760,6 +1763,7 @@ static int soak (double minutes)
 
 int main (int argc, char** argv)
 {
+    std::setvbuf (stdout, nullptr, _IOLBF, 1 << 16);   // a line at a time, so a crash shows where it was
     if (argc > 2 && std::string (argv[1]) == "--soak") return soak (std::atof (argv[2]));
     if (argc > 2 && std::string (argv[1]) == "--defaults") return writeDefaults (argv[2]);
     const char* capture = argc > 1 ? argv[1] : nullptr;
