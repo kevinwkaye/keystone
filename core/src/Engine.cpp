@@ -55,6 +55,7 @@ struct Engine::Impl
     std::string spacePath, spaceName;
     Biquad paHp, paLp;
     Limiter limiter;
+    VinylBrake brake;
     PlayLevel play;
 
     Smoothed lowLevel, highLevel, outLevel, tunerGate, bitrotOn, preOn, filtOn, dimOn, wahOn, volume;
@@ -189,6 +190,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.paHp.highPass (45, 0.707f, s);
     d.paLp.lowPass (5500, 0.707f, s);
     d.limiter.prepare (s);
+    d.brake.prepare ((float) s);
     d.play.prepare (s, 0.045f);
     for (auto* sm : { &d.lowLevel, &d.highLevel, &d.outLevel, &d.tunerGate, &d.bitrotOn, &d.preOn, &d.filtOn, &d.dimOn, &d.wahOn })
         sm->setTime (0.015f, s);
@@ -425,8 +427,15 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.dim.setMode (Vi (v, P::DimMode));
         d.dim.setMix (V (v, P::DimMix));
         d.grains.update (v, z2, bloomOn, light);
-        d.delay.update (v, z3, bloomOn, heelBack, cutTails, spillWindow);
-        d.reverb.update (v, z3, bloomOn, heelBack, cutTails, light, spillWindow);
+        const bool braking = brakeHeld.load();
+        // runaway: up over a second and a half, down in a third of a second
+        {
+            const float blockSec = (float) n / d.sr;
+            runAmt = runawayHeld.load() ? std::min (1.0f, runAmt + blockSec / 1.5f) : std::max (0.0f, runAmt - blockSec / 0.35f);
+            runawayNow.store (runAmt);
+        }
+        d.delay.update (v, z3, bloomOn, heelBack, cutTails, spillWindow, runAmt);
+        d.reverb.update (v, z3, bloomOn, heelBack, cutTails, light, spillWindow, runAmt);
         d.reverb.block();
         d.lowLevel.set (dbToGain (V (v, P::SplitLowLevel)));
         d.highLevel.set (dbToGain (V (v, P::SplitHighLevel)));
@@ -557,6 +566,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                 o *= d.outLevel.next();
                 if (pa) o = d.paLp.process (d.paHp.process (o));
                 o *= d.tunerGate.next();
+                o = d.brake.process (o, braking);
                 if (std::fabs (o) > 0.99f) d.clipped.store (true);
                 o = d.limiter.process (o, limitOn);
                 y[i] = o;

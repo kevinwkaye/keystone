@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -854,7 +855,10 @@ static void testBloomSafety()
     std::vector<float> sil ((size_t) (1.0 * kSr), 0.0f);
     auto t = render (e, sil);
     const double after = 20 * std::log10 (rms (t.data() + t.size() / 2, t.size() / 2) + 1e-12);
-    CHECK (after < -60, "heel back with Cut: %.1f dBFS half a second later (mark -60)", after);
+    if (getenv ("KS_DEBUG")) for (int k = 0; k < 10; ++k) std::printf ("      cut %d00 ms: %.1f dB\n", k, 20 * std::log10 (rms (t.data() + (size_t) (k * 0.1 * kSr), (size_t) (0.1 * kSr)) + 1e-12));
+    // the wash is gone; what's left is the reverb's own short tail of it, which rings on
+    // because the reverb is switched on (the delay's repeats no longer die off by themselves)
+    CHECK (after < -50, "heel back with Cut: %.1f dBFS half a second later (mark -50)", after);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1582,6 +1586,64 @@ static void testMyDefaults()
     { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
+static double rmsOf (const std::vector<float>& x, size_t a, size_t b) { return rms (x.data() + a, b - a); }
+// energy below a frequency: a simple 2-pole low-pass, then rms
+static double lowBandRms (const std::vector<float>& x, double hz)
+{
+    Biquad lp; lp.lowPass ((float) hz, 0.707f, (float) kSr);
+    double acc = 0; for (float v : x) { const float y = lp.process (v); acc += (double) y * y; }
+    return std::sqrt (acc / std::max<size_t> (1, x.size()));
+}
+
+static void testRunaway()
+{
+    std::printf ("Runaway (Glow, hold C)\n");
+    Engine e; e.prepare (kSr, 128);
+    e.setParam (P::DlOn, 1); e.setParam (P::DlType, 0); e.setParam (P::DlFeedback, 0.3f); e.setParam (P::DlMix, 0.3f);
+    auto note = pluck (55.0, 0.8, 0.6, 0.6);
+    auto run = [&] (bool held, double secs) { e.setRunaway (held); std::vector<float> q ((size_t) (secs * kSr), 0.0f); return render (e, q); };
+    render (e, note);
+    auto quiet = run (false, 4.0);
+    const double before = rmsOf (quiet, quiet.size() - (size_t) kSr, quiet.size());
+    e.setRunaway (true);
+    render (e, note);   // play into it, then stop and let it sing
+    auto sing = run (true, 5.0);
+    if (getenv ("KS_DEBUG")) for (int k = 0; k < 10; ++k) std::printf ("      run %.1f s: %.5f (amount %.2f)\n", k * 0.5, rmsOf (sing, (size_t) (k * 0.5 * kSr), (size_t) ((k + 1) * 0.5 * kSr)), e.runawayAmount());
+    const double during = rmsOf (sing, sing.size() - (size_t) kSr, sing.size());
+    auto after = run (false, 3.0);
+    const double later = rmsOf (after, after.size() - (size_t) kSr, after.size());
+    double peak = 0; for (float x : sing) peak = std::max (peak, (double) std::fabs (x));
+    CHECK (during > 0.01 && during > before * 20, "held, the repeats sing on their own (%.4f, %.6f without)", during, before);
+    CHECK (peak < 1.0, "the loop limiter holds it (peak %.2f)", peak);
+    CHECK (later < during * 0.05, "let go, it falls back (%.5f)", later);
+    // no sub build-up on bass
+    const std::vector<float> lastTwo (sing.end() - (long) (2 * kSr), sing.end());
+    const double sub = lowBandRms (lastTwo, 60.0), all = rmsOf (lastTwo, 0, lastTwo.size());
+    CHECK (sub < all * 0.35, "a runaway doesn't fill up with sub (%.2f)", sub / all);
+}
+
+static void testBrake()
+{
+    std::printf ("Vinyl brake (Groove, hold C)\n");
+    Engine e; e.prepare (kSr, 128);
+    auto tone = [] (double secs) { std::vector<float> v ((size_t) (secs * kSr)); for (size_t i = 0; i < v.size(); ++i) v[i] = 0.3f * (float) std::sin (2 * M_PI * 110.0 * i / kSr); return v; };
+    render (e, tone (1.0));
+    e.setBrake (true);
+    auto held = render (e, tone (2.0));
+    e.setBrake (false);
+    auto back = render (e, tone (2.0));
+    // the pitch falls: count zero crossings early and late in the hold
+    auto crossings = [] (const std::vector<float>& v, size_t a, size_t b) { int c = 0; for (size_t i = a + 1; i < b; ++i) if ((v[i - 1] < 0) != (v[i] < 0)) ++c; return c; };
+    const int early = crossings (held, 0, (size_t) (0.25 * kSr)), late = crossings (held, (size_t) (0.75 * kSr), (size_t) (1.0 * kSr));
+    CHECK (late < early * 0.7, "holding, the pitch falls (%d crossings, then %d)", early, late);
+    CHECK (rmsOf (held, (size_t) (1.6 * kSr), held.size()) < 0.01, "then it stops");
+    const double r = rmsOf (back, (size_t) (1.0 * kSr), back.size()), want = 0.3 / std::sqrt (2.0);
+    CHECK (r > want * 0.5, "let go, it spins back up and you're live again (%.3f)", r);
+    // live again: no lag left behind
+    auto later = render (e, tone (0.5));
+    CHECK (crossings (later, 0, later.size()) > 105 && crossings (later, 0, later.size()) < 115, "back at the right pitch");
+}
+
 static void testBandSetlist()
 {
     std::printf ("The band's setlist\n");
@@ -1890,11 +1952,69 @@ static int soak (double minutes)
     return 0;
 }
 
+// --render in.wav out.wav "id=value,id=value": a recording's first channel through a fresh
+// engine with those settings, plus 5 s of tails. For before-and-after listening.
+static int renderFile (const char* inPath, const char* outPath, const std::string& settings)
+{
+    std::ifstream f (inPath, std::ios::binary);
+    std::vector<char> d ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
+    if (d.size() < 44) { std::printf ("can't read %s\n", inPath); return 1; }
+    auto u16 = [&] (size_t o) { return (uint32_t) (uint8_t) d[o] | ((uint32_t) (uint8_t) d[o + 1] << 8); };
+    auto u32 = [&] (size_t o) { return u16 (o) | (u16 (o + 2) << 16); };
+    // find fmt and data chunks
+    size_t pos = 12, dataAt = 0, dataLen = 0; int ch = 1, bits = 16; double rate = 48000;
+    while (pos + 8 <= d.size())
+    {
+        const std::string id (d.data() + pos, 4); const uint32_t len = u32 (pos + 4);
+        if (id == "fmt ") { ch = (int) u16 (pos + 10); rate = u32 (pos + 12); bits = (int) u16 (pos + 22); }
+        if (id == "data") { dataAt = pos + 8; dataLen = std::min<size_t> (len, d.size() - pos - 8); break; }
+        pos += 8 + len + (len & 1);
+    }
+    const int bps = bits / 8;
+    const size_t frames = dataLen / (size_t) (bps * ch);
+    std::vector<float> in (frames + (size_t) (5 * rate), 0.0f);
+    for (size_t i = 0; i < frames; ++i)
+    {
+        const char* b = d.data() + dataAt + i * (size_t) (bps * ch);
+        int32_t v = 0;
+        if (bps == 3) v = (int32_t) (((uint32_t) (uint8_t) b[0] << 8) | ((uint32_t) (uint8_t) b[1] << 16) | ((uint32_t) (uint8_t) b[2] << 24)) >> 8, in[i] = v / 8388608.0f;
+        else in[i] = (int16_t) ((uint8_t) b[0] | ((uint8_t) b[1] << 8)) / 32768.0f;
+    }
+    Engine e;
+    e.prepare (rate, 128);
+    // everything at its default, then the settings asked for
+    std::stringstream ss (settings);
+    std::string kv;
+    while (std::getline (ss, kv, ','))
+    {
+        const auto eq = kv.find ('=');
+        if (eq == std::string::npos) continue;
+        const int i = findParam (kv.substr (0, eq).c_str());
+        if (i < 0) { std::printf ("no such setting %s\n", kv.substr (0, eq).c_str()); return 1; }
+        e.setParam ((P) i, (float) std::atof (kv.substr (eq + 1).c_str()));
+    }
+    std::vector<float> out (in.size());
+    for (size_t i = 0; i < in.size(); i += 128)
+    {
+        const int n = (int) std::min<size_t> (128, in.size() - i);
+        e.process (in.data() + i, out.data() + i, n);
+        e.idle();
+    }
+    std::ofstream o (outPath, std::ios::binary);
+    const uint32_t r = (uint32_t) rate, bytes = (uint32_t) out.size() * 3;
+    auto w32 = [&] (uint32_t v) { o.put ((char) v); o.put ((char) (v >> 8)); o.put ((char) (v >> 16)); o.put ((char) (v >> 24)); };
+    auto w16 = [&] (uint16_t v) { o.put ((char) v); o.put ((char) (v >> 8)); };
+    o.write ("RIFF", 4); w32 (36 + bytes); o.write ("WAVEfmt ", 8); w32 (16); w16 (1); w16 (1); w32 (r); w32 (r * 3); w16 (3); w16 (24); o.write ("data", 4); w32 (bytes);
+    for (float v : out) { const int32_t q = (int32_t) std::lrint (std::clamp (v, -1.0f, 1.0f) * 8388607.0f); o.put ((char) q); o.put ((char) (q >> 8)); o.put ((char) (q >> 16)); }
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
     std::setvbuf (stdout, nullptr, _IONBF, 0);   // unbuffered (Windows has no line buffering), so a crash shows where it was
     if (argc > 2 && std::string (argv[1]) == "--soak") return soak (std::atof (argv[2]));
     if (argc > 2 && std::string (argv[1]) == "--defaults") return writeDefaults (argv[2]);
+    if (argc > 3 && std::string (argv[1]) == "--render") return renderFile (argv[2], argv[3], argc > 4 ? argv[4] : "");
     const char* capture = argc > 1 ? argv[1] : nullptr;
     const bool benchOnly = argc > 2 && std::string (argv[2]) == "--bench";
     std::printf ("Keystone %s engine tests\n", Controller::kVersion);
@@ -1929,6 +2049,8 @@ int main (int argc, char** argv)
         testFirmware();
         testBackup();
         testMyDefaults();
+        testRunaway();
+        testBrake();
         testCapture (capture);
     }
     bench (capture);

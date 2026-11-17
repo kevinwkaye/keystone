@@ -628,7 +628,7 @@ var KS = (function () {
           var d = k[0] === 'D';
           return '<div class="mkey" style="' + (d ? '' : 'background:' + col + ';color:#0E0E10') + '"><span class="l">' + k[0] + '</span><span class="w">' + k[1] + '</span></div>';
         }).join('') + '</div><span class="small">Each press acts straight away, on the beat. The effects below switch from the phone only.</span>'
-        : '<span class="small">Tap A, B, C for the effects below, D for the drone. Hold A for the next bank.</span>') + '</div>';
+        : '<span class="small">Tap A, B, C for the effects below, D for the drone. Hold A for the next bank. Hold C: ' + ['tuner', 'vinyl brake', 'runaway'][S.bank] + '.</span>') + '</div>';
   }
 
   function playScreen() {
@@ -1032,7 +1032,7 @@ var KS = (function () {
     }
     else if (mod === 'footswitches') {
       var jobs = [['A', 'Grit: Edge / Drive. Groove: auto filter. Glow: Speckle', 'Next bank. Song mode: last song, on the press'], ['B', 'Grit: Bitrot. Groove: Dimension. Glow: delay', 'Next song or part. Song mode: next part, on the press'],
-                  ['C', 'Grit: Growl/Cut flip. Groove: wah. Glow: reverb', 'Tuner. Song mode: next song, on the press'], ['D', 'Drone hold / trail off, in every bank', 'Slap']];
+                  ['C', 'Grit: Growl/Cut flip. Groove: wah. Glow: reverb', 'Grit: tuner. Groove: vinyl brake. Glow: runaway. Song mode: next song, on the press'], ['D', 'Drone hold / trail off, in every bank', 'Slap']];
       pre = '<section class="card"><h2 class="label">Banks</h2>' + bankBar() +
         '<span class="small">Hold A to step Grit, Groove, Glow. The bank sets what A, B and C do and what the pedal does: dirt blend in Grit, wah in Groove (volume with the wah off), Bloom in Glow. Changing bank never changes the sound. Each song opens in its own bank (This song, below).</span></section>' +
         '<section class="card"><h2 class="label">Tap and hold</h2>' + jobs.map(function (j, i) {

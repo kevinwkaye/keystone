@@ -92,7 +92,7 @@ public:
     // ---- impulses: the housekeeping thread loads, the audio thread picks up ----
     Convolver& convolver() { return conv; }
 
-    void update (const Vals& v, float zone3, bool bloomActive, bool heelBack, bool cutTails, bool light, bool spillWindow = false)
+    void update (const Vals& v, float zone3, bool bloomActive, bool heelBack, bool cutTails, bool light, bool spillWindow = false, float run = 0.0f)
     {
         const bool on = Vb (v, P::RvOn);
         pendingType = std::max (0, std::min ((int) kTypes - 1, Vi (v, P::RvType)));
@@ -105,6 +105,9 @@ public:
             decay = decay + (40.0f * reach - decay) * zone3;
             mix = std::max (mix, zone3 * 0.35f * reach);
         }
+        // runaway: the space stops dying and grows until the loop limiter holds it
+        runAmt = on && ! freeze ? run : 0.0f;
+        if (runAmt > 0.0f) { decay = decay + (60.0f - decay) * runAmt; mix = std::max (mix, 0.32f * runAmt); }
         // tails ring over a part change: switched off in the window, the wet stays up and
         // the tail dies away on its own (nothing new goes in)
         if (mix > 0.0f) { spilling = false; spillMix = mix; }
@@ -253,7 +256,7 @@ private:
         for (int i = 0; i < kLines; ++i)
         {
             const float g = std::pow (10.0f, -3.0f * len[i] / (std::max (0.2f, decaySec) * sr));
-            gains[i] = freeze ? 1.0f : std::min (g, 0.9995f);
+            gains[i] = freeze ? 1.0f : std::min (g, 0.9995f + 0.0055f * runAmt);
         }
     }
 
@@ -262,7 +265,7 @@ private:
         for (int i = 0; i < kLines; ++i)
         {
             damp[i].setLowPass (freeze ? 0.45f * sr : dampHz, sr);
-            hpf[i].setLowPass (freeze ? 10.0f : lowCut * 0.5f, sr);
+            hpf[i].setLowPass (freeze ? 10.0f : std::max (lowCut * 0.5f, 130.0f * runAmt), sr);
         }
     }
 
@@ -450,6 +453,7 @@ private:
     }
 
     float sr = 48000;
+    float runAmt = 0.0f;
     int type = Hall, pendingType = Hall, nLines = kLines, springs = 2, vowel = 0, shape = 0;
     bool feeding = false, freeze = false, lightMode = false;
     float len[kLines] {}, lenNow[kLines] {}, gains[kLines] {}, lenGlide = 0.0002f;

@@ -450,6 +450,8 @@ int Controller::rig() const { return s->rig; }
 
 void Controller::setRig (int r, bool announce)
 {
+    engine.setRunaway (false);   // never left running
+    engine.setBrake (false);
     r = r == 1 ? 1 : 0;
     if (r == s->rig) return;
     saveSetlist();                           // the resting rig's list as it was
@@ -468,6 +470,8 @@ void Controller::setRig (int r, bool announce)
 
 void Controller::setBank (int b)
 {
+    engine.setRunaway (false);   // never left running
+    engine.setBrake (false);
     s->bank = std::clamp (b, 0, 2);
     engine.setPedalBank (s->bank);
     static const char* names[] = { "GRIT", "GROOVE", "GLOW" };
@@ -541,6 +545,8 @@ void Controller::syncPairs() { s->logic.pairEnabled = { s->rig == 1 || s->footMo
 
 void Controller::setFootMode (int m)
 {
+    engine.setRunaway (false);   // never left running
+    engine.setBrake (false);
     s->footMode = m == 1 ? 1 : 0;
     syncPairs();
     saveSettings();
@@ -867,13 +873,31 @@ void Controller::onFootswitch (int sw, int ev)
         }
         return;
     }
+    if (ev == E::HoldEnd && sw == 2) { engine.setRunaway (false); engine.setBrake (false); return; }
     if (ev == E::HoldStart)
     {
         switch (sw)
         {
             case 0: if (! tuning) setBank ((s->bank + 1) % 3); break;
             case 1: if (! tuning) stepSong (1); break;
-            case 2: engine.action (Action::TunerToggle); queueState(); break;
+            case 2:
+                // Glow: runaway while held (Grotto's footswitch B). Groove: the vinyl brake
+                // (Lathe's). Grit: the tuner
+                if (s->bank == 1 && ! tuning)
+                {
+                    engine.setBrake (true);
+                    queueToast ("BRAKE");
+                    mark ("Vinyl brake");
+                }
+                else if (s->bank == 2 && ! tuning)
+                {
+                    engine.setRunaway (true);
+                    const bool any = value (P::DlOn) > 0.5f || value (P::RvOn) > 0.5f;
+                    queueToast (any ? "RUNAWAY" : "RUNAWAY NEEDS DELAY OR REVERB ON");
+                    mark ("Runaway");
+                }
+                else { engine.action (Action::TunerToggle); queueState(); }
+                break;
             case 3: if (! tuning) toggle (P::CompSlap); break;
             default: break;
         }

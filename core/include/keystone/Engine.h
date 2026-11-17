@@ -93,6 +93,12 @@ public:
     int rig() const { return rigNow.load(); }
     void setMelt (float pos01);            // Kuddle's pedal, from the phone
     void setSqueeze (bool on) { squeezeHeld.store (on); }   // Kuddle: hold D
+    // Runaway (Glow: hold C): the delay and reverb that are on climb past self-oscillation
+    // over a second and a half, then fall back when you let go. Grotto's footswitch B.
+    void setRunaway (bool on) { runawayHeld.store (on); }
+    float runawayAmount() const { return runawayNow.load(); }
+    // Vinyl brake (Groove: hold C): Lathe's brake on the whole sound
+    void setBrake (bool on) { brakeHeld.store (on); }
 
     // the rehearsal recorder hears the dry bass and the output of every block
     void setRecorder (Recorder* r) { recorder.store (r); }
@@ -136,7 +142,9 @@ private:
     std::atomic<int> rigNow { 0 };
     std::atomic<Recorder*> recorder { nullptr };
     std::atomic<float> meltPos { 0.0f };
-    std::atomic<bool> squeezeHeld { false };
+    std::atomic<bool> squeezeHeld { false }, runawayHeld { false }, brakeHeld { false };
+    std::atomic<float> runawayNow { 0.0f };
+    float runAmt = 0.0f;
     int pedalTarget() const;
     std::atomic<bool> lightRequest { false };
 };

@@ -28,7 +28,8 @@ public:
         sr = sr_;
         line.prepare ((int) (1.7f * sr) + 16);
         line2.prepare ((int) (1.7f * sr) + 16);
-        for (auto& a : smear) a.prepare ((int) (0.04f * sr));
+        for (auto& a : smear) a.prepare ((int) (0.03f * sr));
+        for (auto& a : cloud) a.prepare ((int) (0.05f * sr));
         for (auto& a : spring) a.prepare ((int) (0.01f * sr));
         springComb.prepare ((int) (0.06f * sr));
         rev.prepare ((int) (1.6f * sr));
@@ -45,6 +46,10 @@ public:
         crinkleShiftS.setTime (0.006f, sr);
         extraModS.setTime (0.2f, sr);
         smearS.setTime (0.05f, sr);
+        cloudS.setTime (0.05f, sr);
+        driveS.setTime (0.05f, sr);
+        cutFall = onePoleCoef (0.003f, sr);
+        driftCoef = 1.0f - onePoleCoef (0.6f, sr);   // the drift wanders over about a second
         tapeS.setTime (0.15f, sr);
         lim.prepare (sr);
         lim2.prepare (sr);
@@ -60,20 +65,24 @@ public:
     {
         line.reset(); line2.reset();
         for (auto& a : smear) a.reset();
+        for (auto& a : cloud) a.reset();
+        loopLp.reset(); loopHp.reset(); loopLp2.reset(); loopHp2.reset(); inHp.reset();
+        driftA = driftB = driftTarget = 0;
         for (auto& a : spring) a.reset();
         springComb.reset();
         rev.clear(); ice.clear();
-        lp.reset(); hp.reset(); lp2.reset(); hp2.reset(); springLp.reset();
+        springLp.reset();
         svf.reset(); crush.reset();
         duckEnv.reset(); fastEnv.reset(); slowEnv.reset();
         lfo = lfo2 = wowPhase = flutterPhase = tremPhase = sweepPhase = 0;
+        driveS.reset (1); cloudS.reset (0); cutNow = hpfNow = 0;
         mixS.reset (0); fbS.reset (0); gateS.reset (1); trimS.reset (1); inS.reset (1); crinkleS.reset (1);
         timeS.reset (0.42f * sr); time2S.reset (0.21f * sr);
         headNow = headNext = 0.42f * sr; xf = 1;
         swellPos = 1; swellG = 1; tail = 0; drift = 0;
     }
 
-    void update (const Vals& v, float zone3, bool bloomActive, bool heelBack, bool cutTails, bool spillWindow = false)
+    void update (const Vals& v, float zone3, bool bloomActive, bool heelBack, bool cutTails, bool spillWindow = false, float run = 0.0f)
     {
         const bool on = Vb (v, P::DlOn);
         pendingType = std::max (0, std::min ((int) kTypes - 1, Vi (v, P::DlType)));
@@ -86,6 +95,9 @@ public:
             fb = fb + (1.02f * reach - fb) * zone3;   // past 1 only with the loop limiter
             mix = std::max (mix, zone3 * 0.45f * reach);
         }
+        // runaway: past the point where it sings on its own; the loop limiter holds the level
+        runAmt = on ? run : 0.0f;
+        if (runAmt > 0.0f) { fb = fb + (1.8f - fb) * runAmt; mix = std::max (mix, 0.42f * runAmt); }
         if (hold) fb = 1.0f;
         if (! on && ! hold && ! (bloomActive && on && zone3 > 0)) fb = std::min (fb, 0.6f);   // tails die away naturally
         // tails ring over a part change: switched off in the window, the wet stays up and
@@ -144,7 +156,12 @@ public:
         static const float trims[kTypes] = { 1.0f, 1.12f, 1.1f, 0.95f, 1.0f, 1.0f, 1.05f, 1.1f, 1.15f, 1.2f, 1.05f, 1.0f };
         trimS.set (trims[pendingType]);
 
-        gateS.set (heelBack && cutTails && ! on && ! spilling ? 0.0f : 1.0f);
+        // heel back with Cut: the wash the pedal built is cleared once, as the heel lands
+        // (the repeats of a delay that's on carry on from there as normal)
+        const bool cutNowEdge = heelBack && cutTails && ! spilling;
+        if (cutNowEdge && ! wasCut && on) cutLeft = (int) std::min (3.5f * sr, 2.0f * timeTarget + 0.3f * sr);   // long enough to empty the line
+        wasCut = cutNowEdge;
+        gateS.set (cutNowEdge && ! on ? 0.0f : 1.0f);
         feeding = (on && ! hold) || (bloomActive && on && zone3 > 0);
         anyOn = on || (bloomActive && on && zone3 > 0);
         updateFilters();
@@ -167,7 +184,7 @@ public:
         if ((count++ & 15) == 0) updateLoopFilters (fb);
 
         // ---- input ----
-        float in = feeding ? x * inS.next() : 0.0f;
+        float in = feeding ? inHp.process (x * inS.next()) : (inHp.process (0.0f), 0.0f);
         const float dEnv = duckEnv.process (x);
         const float sw = swell (x);   // always listening, so switching to Swell is smooth
         if (type == Swell || type == Galaxy) in *= sw;
@@ -177,7 +194,12 @@ public:
         if (lfo >= 1) lfo -= 1;
         lfo2 += 0.37f / sr;
         if (lfo2 >= 1) lfo2 -= 1;
-        float modSamples = modDepth * 0.003f * sr * std::sin (kTwoPi * lfo);
+        // the TimeLine's kind of movement: a gentle sine plus a slow wandering drift, so the
+        // repeats shimmer without a regular wobble
+        if ((count & 255) == 0) driftTarget = rng.bi();
+        driftA += (driftTarget - driftA) * driftCoef;
+        driftB += (driftA - driftB) * driftCoef;
+        float modSamples = modDepth * sr * (0.0016f * std::sin (kTwoPi * lfo) + 0.0022f * driftB);
         // built-in chorus for the bucket brigade and Galaxy, faded in and out with the type
         extraModS.set (type == Bucket ? 0.0006f * sr : (type == Galaxy ? 0.0009f * sr : 0.0f));
         modSamples += extraModS.next() * std::sin (kTwoPi * lfo2);
@@ -207,7 +229,10 @@ public:
         const float up = ice.process (loop, iceR);   // always fed, so switching to Ice is smooth
         if (type == Ice) loop = loop + (up - loop) * iceBlend;
         loop = lim.process (loop * fb);
-        const float g = gateS.next();
+        // the heel's cut is quick (20 ms), so the reverb after it isn't fed the old wash
+        cutG = cutLeft > 0 ? cutG * cutFall : 1.0f - (1.0f - cutG) * cutFall;
+        if (cutLeft > 0) --cutLeft;
+        const float g = gateS.next() * cutG;
         line.push (in + loop * g * swS);
 
         // ---- output colour ----
@@ -257,11 +282,18 @@ private:
         svfRes = 0.2f + 0.75f * filtRes;
     }
 
+    // the analogue types: their repeats darken and grain up as they go round
+    bool analogue() const { return type == Bucket || type == Tape || type == Lofi; }
+
     void updateLoopFilters (float fb)
     {
         const float f = std::max (fb, 0.0f);
-        float cut = 12000.0f * std::pow (0.1f, tone);
-        float hpf = lowCut + (hold ? 0.0f : 200.0f * std::min (1.0f, f));
+        float cut = 16000.0f * std::pow (0.08f, tone);
+        // Low cut works once, on the way in; inside the loop only a gentle one, so repeats of a
+        // bass keep their body instead of thinning to nothing by the third echo
+        float hpf = std::max (35.0f, 0.35f * lowCut) + (hold ? 0.0f : (analogue() ? 90.0f : 20.0f) * std::min (1.0f, f));
+        inHp.highPass (lowCut, 0.6f, sr);
+        hpf = std::max (hpf, 130.0f * runAmt);   // a runaway on bass never fills up with sub
         if (type == Bucket)
         {
             // a bucket brigade gets darker the longer the delay
@@ -274,19 +306,27 @@ private:
             hpf += 120.0f * tapeAge;
         }
         if (type == Lofi) cut = std::min (cut, 0.45f * lofiRate);
-        if (! hold) cut *= 1.0f - 0.35f * std::min (1.0f, f);   // darker as repeats rise
-        lp.setLowPass (cut, sr);
-        lp2.setLowPass (cut, sr);
-        hp.setLowPass (hpf, sr);
-        hp2.setLowPass (hpf, sr);
+        if (! hold && analogue()) cut *= 1.0f - 0.35f * std::min (1.0f, f);   // darker as repeats rise
+        // two-pole filters: a clean slope, so long tails stay full instead of thinning to a buzz
+        cut = std::min (cut, 0.45f * sr);
+        // glide the corners (in octaves), so a type change or a Tone move never steps the loop
+        if (cutNow <= 0) { cutNow = cut; hpfNow = hpf; }
+        const float glide = 16.0f / (0.05f * sr);
+        cutNow *= std::pow (cut / cutNow, std::min (1.0f, glide));
+        hpfNow *= std::pow (std::max (5.0f, hpf) / std::max (5.0f, hpfNow), std::min (1.0f, glide));
+        loopLp.lowPass (cutNow, 0.6f, sr);
+        loopLp2.lowPass (cutNow, 0.6f, sr);
+        loopHp.highPass (hpfNow, 0.6f, sr);
+        loopHp2.highPass (hpfNow, 0.6f, sr);
     }
 
     float loopProcess (float s)
     {
-        s = hp.hp (lp.lp (s));
-        // grit: tape bias, bucket clipping or plain warmth
-        float drive = 1.0f + 5.0f * grit;
-        if (type == Bucket) drive += 1.5f;
+        s = loopHp.process (loopLp.process (s));
+        // grit: the clean types stay clean until you ask for it; Bucket and Tape always
+        // colour a little, the way the real machines do
+        driveS.set (analogue() ? 1.6f + 4.0f * grit : 1.0f + 4.0f * grit * grit * std::sqrt (grit));
+        float drive = driveS.next();
         if (type == Tape)
         {
             drive *= 1.0f + 2.5f * std::max (0.0f, 0.5f - bias);   // under-biased tape crunches
@@ -294,14 +334,39 @@ private:
         }
         if (drive > 1.01f) s = std::tanh (s * drive) / drive;   // unity for small signals, rounds off the peaks
         if (type == Lofi) s = crush.process (s, lofiRate / sr, bits);
-        smearS.set (type == Galaxy ? std::max (smearAmt, 0.6f) : smearAmt);
+        smearS.set (smearAmt);
         const float sm = smearS.next();
         if (sm > 0.01f)
         {
-            const float k = 0.7f * sm;
-            static const float lens[3] = { 7.3f, 11.9f, 17.3f };
-            const float scale = 1.0f;
-            for (int i = 0; i < 3; ++i) s = smear[i].process (s, lens[i] * 0.001f * sr * scale, k);
+            // four longer diffusers that drift a little each, so repeats soften into a wash
+            // instead of ringing
+            const float k = 0.62f * sm;
+            static const float lens[4] = { 4.7f, 7.9f, 12.3f, 18.1f };
+            static const float rates[4] = { 0.31f, 0.43f, 0.57f, 0.71f };
+            for (int i = 0; i < 4; ++i)
+            {
+                apPhase[i] += rates[i] / sr;
+                if (apPhase[i] >= 1) apPhase[i] -= 1;
+                const float wob = 0.00015f * sr * std::sin (kTwoPi * apPhase[i]);
+                s = smear[i].process (s, lens[i] * 0.001f * sr + wob, k);
+            }
+        }
+        // Galaxy: every repeat blooms into a cloud, a small reverb inside the loop
+        cloudS.set (type == Galaxy ? 1.0f : 0.0f);
+        const float cg = cloudS.next();
+        // always fed, so switching to Galaxy is smooth
+        {
+            static const float lens[6] = { 9.1f, 13.7f, 19.3f, 27.1f, 33.7f, 41.9f };
+            static const float rates[6] = { 0.23f, 0.29f, 0.37f, 0.41f, 0.53f, 0.61f };
+            float c = s;
+            for (int i = 0; i < 6; ++i)
+            {
+                cloudPhase[i] += rates[i] / sr;
+                if (cloudPhase[i] >= 1) cloudPhase[i] -= 1;
+                const float wob = 0.0004f * sr * std::sin (kTwoPi * cloudPhase[i]);
+                c = cloud[i].process (c, lens[i] * 0.001f * sr + wob, 0.68f);
+            }
+            s += (c - s) * cg;
         }
         return s;
     }
@@ -383,8 +448,7 @@ private:
     }
     float loop2 (float s)
     {
-        s = hp2.hp (lp2.lp (s));
-        return s;
+        return loopHp2.process (loopLp2.process (s));
     }
 
     void readPattern (float t, float mod, float& y, float& fbSig)
@@ -469,8 +533,16 @@ private:
     float crinkleDepth = 0, crinkleShift = 0;
     unsigned count = 0;
     DelayLine line, line2, springComb;
-    Allpass smear[3], spring[4];
-    OnePole lp, hp, lp2, hp2, springLp;
+    Allpass smear[4], spring[4], cloud[6];
+    float apPhase[4] { 0.1f, 0.35f, 0.6f, 0.85f }, cloudPhase[6] { 0.0f, 0.17f, 0.33f, 0.5f, 0.67f, 0.83f };
+    Biquad loopLp, loopHp, loopLp2, loopHp2, inHp;
+    float driftA = 0, driftB = 0, driftTarget = 0, driftCoef = 0.0005f;
+    Smoothed cloudS, driveS;
+    float runAmt = 0.0f, cutNow = 0.0f, hpfNow = 0.0f;
+    int cutLeft = 0;
+    float cutG = 1.0f, cutFall = 0.999f;
+    bool wasCut = false;
+    OnePole springLp;
     Svf svf;
     kdd::Crusher crush;
     kdd::ReverseReader rev;
