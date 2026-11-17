@@ -10,6 +10,7 @@
 #include "Valve.h"
 #include "Modules.h"
 #include "KuddleEngine.h"
+#include "Recorder.h"
 
 #include <chrono>
 #include <filesystem>
@@ -140,6 +141,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     sr = sampleRate;
     auto& d = *impl;
     d.sr = (float) sampleRate;
+    if (auto* r = recorder.load()) r->setRate (sampleRate);
     d.maxBlock = std::max (16, maxBlockSize);
     const float s = d.sr;
     d.dc.prepare (s); d.dc.reset();
@@ -607,6 +609,7 @@ void Engine::process (const float* in, float* out, int numSamples)
             d.outPk = std::max (d.outPk * 0.9995f, std::fabs (o));
             d.outMs += (o * o - d.outMs) * 0.0005f;
         }
+        if (auto* r = recorder.load()) r->push (x, y, n);   // the dry bass as it came in, and what goes out
         d.inPeak.store (d.inPk);
         d.outPeak.store (d.outPk);
         d.outRms.store (std::sqrt (d.outMs));

@@ -49,7 +49,8 @@ add_library(keystone_core STATIC
     core/src/Engine.cpp
     core/src/Params.cpp
     core/src/Analysis.cpp
-    core/src/Controller.cpp)
+    core/src/Controller.cpp
+    core/src/Recorder.cpp)
 target_include_directories(keystone_core PUBLIC core/include PRIVATE core/src kuddle/engine)
 if(KEYSTONE_WITH_NAM)
     # NAM registers its model types from static initialisers, which a static library

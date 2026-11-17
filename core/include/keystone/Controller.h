@@ -81,6 +81,13 @@ public:
     void setFootMode (int m);
     void jumpSong (int dir);   // whole songs, skipping parts
     void tapTempo (double nowSeconds);   // the phone's Tap, sets the song's tempo
+    std::string songLabel (int i) const;   // "Circus, Verse" for a part
+    std::string takesJson() const;           // the recorder's takes, for the phone
+    static std::vector<uint8_t> fromBase64 (const std::string& in);
+
+    // the rehearsal recorder: marks land in the take being recorded
+    void mark (const std::string& what);
+    class Recorder& recorder();
 private:
     void syncPairs();
 public:

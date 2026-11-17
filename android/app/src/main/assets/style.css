@@ -185,3 +185,14 @@ body.kuddle .pill { background: #24180F; border-color: #6E5240; color: #8A6A50; 
 .tempo .beat.on { background: var(--green); }
 .tempo .tap { width: 96px; height: 52px; border: none; border-radius: 10px; background: var(--btn); color: var(--text); font-size: 18px; font-weight: 700; letter-spacing: 0.12em; }
 .tempo .tap.hit { background: var(--green); color: #0E0E10; }
+
+/* the rehearsal recorder */
+.tops { display: flex; align-items: center; gap: 8px; }
+.recpill { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; border: 1px solid #5A1E20; background: #2A1213; color: #F2B8B5; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; min-width: 0; height: auto; white-space: nowrap; }
+.rdot { width: 8px; height: 8px; border-radius: 50%; background: #E5484D; animation: pulse 1.2s infinite; }
+.rec-live { border: 2px solid #5A1E20; }
+.rec-time { display: flex; align-items: center; gap: 4px; }
+.rec-time .flip { width: 40px; height: 52px; font-size: 32px; }
+.rec-time .colon { font-size: 30px; font-weight: 700; color: var(--muted); padding: 0 2px; }
+.marks { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
+.marks b { color: var(--text); font-weight: 700; margin-right: 6px; }

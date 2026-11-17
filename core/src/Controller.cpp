@@ -5,6 +5,7 @@
 #include "Footswitch.h"
 
 #include <nlohmann/json.hpp>
+#include "Recorder.h"
 
 #include <algorithm>
 #include <chrono>
@@ -45,6 +46,7 @@ struct Controller::State
     int bank = 0;
     // the two rigs: songs and current are the playing rig's list, other the resting one's
     int rig = 0;
+    std::unique_ptr<Recorder> recorder;     // rehearsal takes, in Recordings beside the setlist
     int footMode = 0;                       // Keystone's feet: 0 Stomp, 1 Song
     double lastTap = 0;                     // tap tempo
     std::array<double, 4> tapGaps {};
@@ -164,9 +166,14 @@ Controller::Controller (Engine& e, std::string data, std::string caps)
     : s (std::make_unique<State>()), engine (e), dataDir (std::move (data)), capturesDir (std::move (caps))
 {
     s->logic.onEvent = [this] (int sw, FootswitchLogic::Event ev) { onFootswitch (sw, (int) ev); };
+    s->recorder = std::make_unique<Recorder> (fromPath (toPath (dataDir) / "Recordings"));
+    engine.setRecorder (s->recorder.get());
 }
 
-Controller::~Controller() = default;
+Controller::~Controller() { engine.setRecorder (nullptr); }
+
+void Controller::mark (const std::string& what) { s->recorder->mark (what); }
+Recorder& Controller::recorder() { return *s->recorder; }
 
 // ---------------------------------------------------------------------------------------
 // Persistence
@@ -269,6 +276,7 @@ void Controller::load()
         s->footMode = st.value ("footMode", 0) == 1 ? 1 : 0;
         s->spaceFile = st.value ("space", std::string());
     }
+    s->recorder->setEnabled (value (P::RecOn) > 0.5f);
 
     // the capture: the saved one, else the first in the folder
     std::string err;
@@ -285,6 +293,7 @@ void Controller::load()
         spaceOk = useSpace (s->spaceFile, err);
     if (! spaceOk && ! spaces.empty()) useSpace (spaces.front(), err);
     applySong (s->current);
+    mark ("Song: " + songLabel (s->current));   // the context for the first take
     if (startRig == 1) setRig (1, false);   // the last rig used
     syncPairs();
 }
@@ -349,6 +358,14 @@ int Controller::songCount() const { return (int) s->songs.size(); }
 int Controller::currentSong() const { return s->current; }
 std::string Controller::songName (int i) const { return i >= 0 && i < songCount() ? s->songs[(size_t) i].name : std::string(); }
 
+// "Circus, Verse" for a part, "Circus" for a song
+std::string Controller::songLabel (int i) const
+{
+    int head = i;
+    while (head > 0 && isPart (head)) --head;
+    return isPart (i) ? songName (head) + ", " + songName (i) : songName (i);
+}
+
 bool Controller::isPart (int i) const { return i > 0 && i < songCount() && s->songs[(size_t) i].part; }
 
 int Controller::songNumber (int i) const
@@ -378,6 +395,7 @@ void Controller::setRig (int r, bool announce)
     if (r == 0) engine.setPedalBank (s->bank);
     saveSettings();
     if (announce) { queueState(); queueToast (r == 1 ? "KUDDLE" : "KEYSTONE"); }
+    mark (r == 1 ? "Kuddle: " + songName (s->current) : "Keystone: " + songLabel (s->current));
 }
 
 void Controller::setBank (int b)
@@ -387,6 +405,7 @@ void Controller::setBank (int b)
     static const char* names[] = { "GRIT", "GROOVE", "GLOW" };
     queueState();
     queueToast (names[s->bank]);
+    mark (std::string ("Bank: ") + names[s->bank]);
 }
 
 void Controller::applySong (int i, bool keepGoing)
@@ -409,6 +428,7 @@ void Controller::selectSong (int i)
 {
     if (s->songs.empty()) return;
     i = std::clamp (i, 0, songCount() - 1);
+    if (s->rig == 0) mark ("Song: " + songLabel (i));
     const bool keepGoing = i != s->current && songNumber (i) == songNumber (s->current);
     applySong (i, keepGoing);
     saveSetlist();
@@ -458,6 +478,7 @@ void Controller::setFootMode (int m)
     saveSettings();
     queueState();
     queueToast (s->footMode == 1 ? "SONG MODE" : "STOMP MODE");
+    mark (s->footMode == 1 ? "Song mode" : "Stomp mode");
 }
 
 void Controller::stepSong (int delta)
@@ -483,6 +504,7 @@ bool Controller::edited() const
 void Controller::setValue (P p, float v, bool broadcast)
 {
     engine.setParam (p, v);
+    if (p == P::RecOn) s->recorder->setEnabled (v > 0.5f);
     if (isGlobal ((int) p)) saveSettings();
     if (broadcast)
     {
@@ -739,6 +761,7 @@ void Controller::onFootswitch (int sw, int ev)
 // ---------------------------------------------------------------------------------------
 void Controller::keep()
 {
+    mark ("Keep");
     json e;
     e["plugin"] = "Keystone";
     e["version"] = kVersion;
@@ -917,11 +940,55 @@ std::string Controller::stateJson() const
     return dumps (j);
 }
 
+// base64 as the phone sends it (standard alphabet, padding optional, whitespace ignored)
+std::vector<uint8_t> Controller::fromBase64 (const std::string& in)
+{
+    static const auto table = [] { std::array<int, 256> t {}; t.fill (-1);
+        const char* a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        for (int i = 0; i < 64; ++i) t[(size_t) (unsigned char) a[i]] = i; return t; }();
+    std::vector<uint8_t> out;
+    out.reserve (in.size() * 3 / 4);
+    uint32_t acc = 0; int bits = 0;
+    for (unsigned char c : in)
+    {
+        const int v = table[c];
+        if (v < 0) continue;
+        acc = (acc << 6) | (uint32_t) v; bits += 6;
+        if (bits >= 8) { bits -= 8; out.push_back ((uint8_t) (acc >> bits)); }
+    }
+    return out;
+}
+
+static json recentMarks (const Recorder& r)
+{
+    json a = json::array();
+    for (auto& [t, what] : r.recentMarks (4)) a.push_back ({ std::round (t), what });
+    return a;
+}
+
+std::string Controller::takesJson() const
+{
+    json j { { "t", "takes" }, { "list", json::array() }, { "free", s->recorder->freeBytes() } };
+    int n = 0;
+    for (const auto& tk : s->recorder->takes())
+    {
+        if (++n > 30) break;
+        j["list"].push_back ({ { "name", tk.name }, { "song", s->recorder->firstSong (tk.name) }, { "seconds", std::round (tk.seconds) }, { "bytes", tk.bytes } });
+    }
+    return dumps (j);
+}
+
 std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleRate, double latencyMs) const
 {
     const auto m = engine.meters();
     json j;
     j["t"] = "meter";
+    {
+        auto& r = *s->recorder;
+        j["rec"] = r.recording() ? json { { "on", true }, { "s", std::round (r.takeSeconds()) }, { "pk", std::round (r.takePeakDb()) },
+                                         { "clip", r.clipped() }, { "take", r.takeName() }, { "marks", recentMarks (r) } }
+                                 : json { { "on", false } };
+    }
     j["out"] = std::round (gainToDb (m.outPeak) * 10) / 10;
     j["rms"] = std::round (gainToDb (m.outRms) * 10) / 10;
     j["in"] = std::round (gainToDb (m.inPeak) * 10) / 10;
@@ -995,6 +1062,16 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     {
         if (s->rig == 1) engine.setMelt (m.value ("v", 0.0f));
         else engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));
+    }
+    else if (t == "recStop") { s->recorder->stopTake(); queueToast ("TAKE STOPPED"); }
+    else if (t == "takes") reply (takesJson());
+    else if (t == "room")
+    {
+        // the phone's room recording for a take, in pieces of base64
+        const bool ok = s->recorder->addRoom (m.value ("take", std::string()), m.value ("seq", 0), m.value ("last", false),
+                                              fromBase64 (m.value ("data", std::string())), m.value ("ext", std::string ("m4a")),
+                                              m.contains ("at") && m["at"].is_number() ? m["at"].get<double>() : -1.0);
+        reply (dumps (json { { "t", "roomAck" }, { "take", m.value ("take", std::string()) }, { "seq", m.value ("seq", 0) }, { "ok", ok } }));
     }
     else if (t == "footMode") setFootMode (m.value ("m", 1 - s->footMode));
     else if (t == "rig") setRig (m.value ("r", 1 - s->rig));

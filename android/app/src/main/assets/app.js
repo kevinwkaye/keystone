@@ -14,7 +14,8 @@ var KS = (function () {
     meter: {}, screen: 'play', module: null, prevScreen: 'play', tunerAuto: false,
     editVoice: null, sel: null, openRow: -1, renameRow: -1, confirmDel: -1,
     noteFor: 0, noteUntil: 0, pedalDrag: null,
-    health: null, rtt: null, healthAt: 0
+    health: null, rtt: null, healthAt: 0,
+    takes: null, takesFree: 0, roomTake: '', roomFailed: ''
   };
 
   // ---------------------------------------------------------------- transport
@@ -72,7 +73,14 @@ var KS = (function () {
         if (m.bank != null && m.bank !== S.bank) { S.bank = m.bank; queueRender(true); }
         if (m.rig != null && m.rig !== S.rig) { S.rig = m.rig; queueRender(); }
         if (m.tuner) tunerState(true); else if (S.tuner) tunerState(false);
+        roomSync(m.rec);
+        if (S.screen === 'recorder') queueRender(true);
+        else { var rp = document.getElementById('recPill'), want = recPill(); if (rp ? rp.outerHTML !== want : want) queueRender(true); }
         queueMeters(); break;
+      case 'takes':
+        S.takes = m.list || []; S.takesFree = m.free || 0;
+        if (S.screen === 'recorder') queueRender(true);
+        break;
       case 'toast':
         toast(m.text);
         if (m.text === 'KEPT') { S.noteUntil = Date.now() + 20000; nod(); render(true); }
@@ -189,10 +197,74 @@ var KS = (function () {
   function onp(mod) { return KON[mod] || (S.params[mod + '.on'] ? mod + '.on' : ''); }
   function kud() { return S.rig === 1; }
 
+  // ---- the rehearsal recorder
+  function rec() { return (S.meter && S.meter.rec) || { on: false }; }
+  function clock(sec) {
+    sec = Math.max(0, Math.round(sec || 0));
+    var h = Math.floor(sec / 3600), m = Math.floor(sec / 60) % 60, x = sec % 60;
+    return (h ? h + ':' + two(m) : m) + ':' + two(x);
+  }
+  function recPill() {
+    var r = rec();
+    if (!connected() || !r.on) return '';
+    return '<button type="button" id="recPill" class="recpill" data-go="recorder" aria-label="Open the recorder"><span class="rdot"></span>REC ' + clock(r.s) + '</button>';
+  }
+  function native() { return window.KeystoneNative && window.KeystoneNative.roomStart ? window.KeystoneNative : null; }
+  function micOk() { var N = native(); return !!(N && N.micAllowed()); }
+  // the phone records the room while Keystone records a take, then sends it across
+  function roomSync(r) {
+    var N = native(); if (!N) return;
+    var want = !!(r && r.on && r.take && Math.round(val('rec.room')) === 1 && N.micAllowed());
+    if (S.roomTake && (!want || S.roomTake !== r.take)) { N.roomStop(); S.roomTake = ''; }
+    if (want && !S.roomTake && S.roomFailed !== r.take) {
+      if (N.roomStart(r.take, r.s || 0)) S.roomTake = r.take;
+      else { S.roomFailed = r.take; toast('PHONE MIC WOULD NOT START'); }
+    }
+  }
+  function roomStatus() { var N = native(); try { return N ? JSON.parse(N.roomStatus()) : null; } catch (e) { return null; } }
+  function fmtBytes(b) { return b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB'; }
+  function takeTitle(n, song) {
+    // "2026-11-17 19-42-05" reads as "Tue 17 Nov, 19:42"
+    var m = /^(\d{4})-(\d\d)-(\d\d) (\d\d)-(\d\d)/.exec(n);
+    if (!m) return { t: song || n, s: '' };
+    var d = new Date(+m[1], +m[2] - 1, +m[3]);
+    var day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] + ' ' + (+m[3]) + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m[2] - 1];
+    return { t: song || 'Take', s: day + ', ' + m[4] + ':' + m[5] };
+  }
+  function recorderScreen() {
+    var r = rec(), c = connected(), rs = roomStatus(), roomOn = Math.round(val('rec.room')) === 1;
+    var live = !c ? '<section class="card"><span class="small">Not connected to Keystone.</span></section>' : r.on ?
+      '<section class="card rec-live"><div style="display:flex;align-items:center;justify-content:space-between"><span class="label" style="color:#E5484D">Recording</span>' +
+        '<span class="small">' + (r.pk != null ? 'Peak ' + r.pk + ' dB' : '') + (r.clip ? ', <span style="color:#F0997B">clipped</span>' : '') + '</span></div>' +
+        '<div class="rec-time">' + clock(r.s).split('').map(function (ch) { return ch === ':' ? '<span class="colon">:</span>' : flip(ch); }).join('') + '</div>' +
+        '<span class="small">' + esc(r.take ? 'Started ' + takeTitle(r.take).s.split(', ')[1] : '') + (roomOn ? (S.roomTake ? '. The phone is recording the room.' : '. Room track off: ' + (micOk() ? 'the mic didn\'t start' : 'mic not allowed')) : '') + '</span>' +
+        (r.marks && r.marks.length ? '<div class="marks">' + r.marks.slice(-4).map(function (mk) { return '<span><b>' + clock(mk[0]) + '</b> ' + esc(mk[1]) + '</span>'; }).join('') + '</div>' : '') +
+        '<button type="button" class="wide" data-act="recStop">End this take</button></section>' :
+      '<section class="card"><span style="font-size:17px;font-weight:700">' + (on('rec.on') ? 'Waiting for you to play' : 'Recorder off') + '</span>' +
+        '<span class="small">' + (on('rec.on') ? 'A take starts by itself on your first note, with the two seconds before it. A minute of quiet ends it.' : 'Switch on Record when I play below.') + '</span></section>';
+    var settings = '<section class="card" style="gap:4px">' +
+      '<label class="row" style="padding:0"><span><span class="t">Record when I play</span><span class="s">Your bass dry and through the rig, on the laptop</span></span>' +
+        '<button type="button" class="pill' + (on('rec.on') ? ' lit' : '') + '" data-onoff="rec.on">' + (on('rec.on') ? 'ON' : 'OFF') + '</button></label>' +
+      '<label class="row" style="padding:0"><span><span class="t">Room track</span><span class="s">' +
+        (!native() ? 'Needs the Keystone phone app' : roomOn && !micOk() ? 'Tap to allow the mic' : 'This phone\'s mic, sent to the laptop after the take') + '</span></span>' +
+        '<button type="button" class="pill' + (roomOn && micOk() ? ' lit' : '') + '" data-act="roomToggle">' + (roomOn && micOk() ? 'ON' : 'OFF') + '</button></label>' +
+      (rs && rs.waiting ? '<span class="small" style="padding-bottom:8px">' + esc(rs.status || 'Room track waiting to send') + (rs.pct >= 0 ? ', ' + rs.pct + '%' : '') + (rs.waiting > 1 ? ' (' + rs.waiting + ' waiting)' : '') + '</span>' : '') +
+      '</section>';
+    var list = S.takes == null ? '<span class="small">Loading takes</span>' : !S.takes.length ? '<span class="small">No takes yet.</span>' :
+      S.takes.slice(0, 30).map(function (tk) {
+        var tt = takeTitle(tk.name, tk.song);
+        return '<div class="row"><span><span class="t">' + esc(tt.t) + '</span><span class="s">' + esc(tt.s) + '</span></span><span class="r muted">' + clock(tk.seconds) + '</span></div>';
+      }).join('');
+    return '<section class="screen" style="gap:14px">' + header('Recorder', { id: 'play', label: 'Play' }, recPill()) + live + settings +
+      '<section class="group"><h2 class="label">Takes on the laptop' + (S.takesFree ? ', ' + fmtBytes(S.takesFree) + ' free' : '') + '</h2>' + list + '</section>' +
+      '<div class="small">Takes are in Documents\\Keystone\\Recordings on the laptop: a WAV with your dry bass on the left and the rig on the right, the room track beside it, and the song changes and Keeps marked. When the laptop runs low on space the oldest takes go first.</div>' +
+      nav('play') + '</section>';
+  }
+
   function pill() {
     var c = S.link === 'connected', w = warnings().length;
     var label = !c ? 'Searching' : w ? w + (w > 1 ? ' problems' : ' problem') : 'Connected';
-    return '<button type="button" class="pill" data-go="health" style="border:none" aria-label="Open Health"><span class="dot ' + (!c ? 'searching' : w ? 'warn' : '') + '"></span>' + label + '</button>';
+    return '<button type="button" id="linkPill" class="pill" data-go="health" style="border:none" aria-label="Open Health"><span class="dot ' + (!c ? 'searching' : w ? 'warn' : '') + '"></span>' + label + '</button>';
   }
 
   // ---- Health: what to check on stage, in plain words
@@ -212,7 +284,7 @@ var KS = (function () {
   function stripText(w) { return w[0] + (w.length > 1 ? ' (+' + (w.length - 1) + ' more)' : ''); }
   function strip() {
     var el = document.getElementById('warnStrip'), w = warnings();
-    var pl = document.querySelector('.pill');
+    var pl = document.getElementById('linkPill');
     if (pl) { var np = pill(); if (pl.outerHTML !== np) pl.outerHTML = np; }
     if (S.screen !== 'play' || !w.length) { if (el) el.remove(); return; }
     var html = '<button type="button" id="warnStrip" data-go="health" class="warnstrip">' + esc(stripText(w)) + '</button>';
@@ -247,6 +319,7 @@ var KS = (function () {
       }).join('') + '</section>' +
       (Math.round(val('output.mode')) === 2 ? '<button type="button" class="wide" data-act="asioPanel">ASIO panel (opens on the laptop)</button>' : '') +
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
+      '<button type="button" class="wide" data-go="recorder">Recorder' + (rec().on ? ': recording ' + clock(rec().s) : on('rec.on') ? ': ready' : ': off') + '</button>' +
       '<div class="small">If something goes wrong on stage, a warning strip appears across the top of Play. Tap it to come here.</div>' +
       nav('play') + '</section>';
   }
@@ -355,7 +428,7 @@ var KS = (function () {
     var note = Date.now() < S.noteUntil ? '<div class="note"><input id="noteText" maxlength="200" placeholder="Add a note to that Keep (optional)" aria-label="Note for the last Keep"><button type="button" data-act="note">Save</button></div>' : '';
     return '<section class="screen">' +
       '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to ' + (K ? 'Keystone' : 'Kuddle') + '">' + (K ? PEBBLE_K : PEBBLE) +
-      '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">' + (K ? 'Kuddle' : 'Keystone') + '</span><span class="swap">TAP FOR ' + (K ? 'KEYSTONE' : 'KUDDLE') + '</span></span></button>' + pill() + '</div>' +
+      '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">' + (K ? 'Kuddle' : 'Keystone') + '</span><span class="swap">TAP FOR ' + (K ? 'KEYSTONE' : 'KUDDLE') + '</span></span></button><span class="tops">' + recPill() + pill() + '</span></div>' +
       offline +
       '<div class="songbar"><button type="button" class="arrow" data-act="prev" aria-label="Previous song">' + ICON.left + '</button>' +
       '<button type="button" class="song" data-go="setlist" aria-label="Open the setlist">' + flip(n ? two(songNo(i)) : '--', 'blue') +
@@ -800,6 +873,7 @@ var KS = (function () {
       case 'module': html = S.schema ? moduleScreen() : playScreen(); break;
       case 'setlist': html = setlistScreen(); break;
       case 'health': html = healthScreen(); break;
+      case 'recorder': html = recorderScreen(); break;
       default: html = playScreen();
     }
     document.body.classList.toggle('kuddle', kud());
@@ -877,6 +951,7 @@ var KS = (function () {
   function go(screen) {
     if (screen === 'tuner' && !S.tuner) { send({ t: 'tuner', on: true }); S.tunerAuto = false; }
     if (S.screen === 'tuner' && screen !== 'tuner' && S.tuner) { send({ t: 'tuner', on: false }); S.tuner = false; }
+    if (screen === 'recorder') send({ t: 'takes' });
     S.screen = screen; S.sel = null; sheetEl.hidden = true; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false; S.showSpaces = false;
     render();
   }
@@ -912,6 +987,12 @@ var KS = (function () {
     var i2 = d.i != null ? +d.i : -1;
     switch (d.act) {
       case 'keep': send({ t: 'keep' }); break;
+      case 'recStop': send({ t: 'recStop' }); setTimeout(function () { send({ t: 'takes' }); }, 1500); break;
+      case 'roomToggle':
+        var N = native();
+        if (!N) { toast('NEEDS THE PHONE APP'); break; }
+        if (!N.micAllowed()) { setParam('rec.room', 1); N.askMic(); break; }
+        setParam('rec.room', Math.round(val('rec.room')) === 1 ? 0 : 1); render(true); break;
       case 'tapTempo': send({ t: 'tap' }); t.classList.add('hit'); setTimeout(function () { t.classList.remove('hit'); }, 120); break;
       case 'footMode': if (send({ t: 'footMode', m: S.footMode ? 0 : 1 })) { S.footMode = S.footMode ? 0 : 1; render(true); } break;
       case 'rig': if (send({ t: 'rig', r: kud() ? 0 : 1 })) { S.rig = kud() ? 0 : 1; render(); } break;
@@ -1038,6 +1119,7 @@ var KS = (function () {
   function back() {
     if (S.sel) { S.sel = null; sheetEl.hidden = true; render(true); return true; }
     if (S.screen === 'module') { go('tone'); return true; }
+    if (S.screen === 'recorder') { go('play'); return true; }
     if (S.screen !== 'play') { go('play'); return true; }
     return false;
   }
@@ -1045,5 +1127,5 @@ var KS = (function () {
   loadOffline();
   setInterval(function () { if (connected()) strip(); }, 1000);
   render();
-  return { onMessage: onMessage, onLink: onLink, back: back, state: S };
+  return { onMessage: onMessage, onLink: onLink, back: back, state: S, refresh: function () { render(true); } };
 })();

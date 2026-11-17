@@ -1,7 +1,9 @@
 package uk.kevinkaye.keystone;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
@@ -31,6 +33,8 @@ public class MainActivity extends Activity {
     private boolean flushQueued;
     private boolean pageReady;
     private String pendingStatus;
+    private volatile boolean linked;
+    private RoomRecorder room;
 
     @SuppressLint({ "SetJavaScriptEnabled", "AddJavascriptInterface" })
     // No network pinning: the phone is often on home Wi-Fi and hosting the hotspot at once,
@@ -63,9 +67,18 @@ public class MainActivity extends Activity {
         setContentView(web);
         web.loadUrl("file:///android_asset/index.html");
 
+        room = new RoomRecorder(this, new RoomRecorder.Sender() {
+            @Override public boolean send(String line) { if (!linked) return false; link.send(line); return true; }
+            @Override public boolean linked() { return linked; }
+        });
+
         link = new Link(this, new Link.Listener() {
             @Override
             public void onLine(String line) {
+                if (line.contains("\"t\":\"roomAck\"")) {
+                    try { room.onAck(new JSONObject(line)); } catch (Exception ignored) { }
+                    return;
+                }
                 Widgets.onLine(MainActivity.this, line);
                 synchronized (inbox) {
                     inbox.add(line);
@@ -77,7 +90,9 @@ public class MainActivity extends Activity {
 
             @Override
             public void onStatus(String status, String detail) {
-                Widgets.setLinked(MainActivity.this, "connected".equals(status));
+                linked = "connected".equals(status);
+                Widgets.setLinked(MainActivity.this, linked);
+                if (linked) room.kick();   // anything left over from last time
                 ui.post(() -> deliverStatus(JSONObject.quote(status) + "," + JSONObject.quote(detail)));
             }
         });
@@ -105,6 +120,11 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        if (pageReady) web.evaluateJavascript("KS.refresh()", null);
+    }
+
+    @Override
     public void onBackPressed() {
         web.evaluateJavascript("KS.back()", value -> {
             if (!"true".equals(value)) moveTaskToBack(true);
@@ -113,6 +133,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        room.stop();
         link.stop();
         Widgets.setLinked(this, false);
         web.destroy();
@@ -128,5 +149,21 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String version() { return BuildConfig.VERSION_NAME; }
+
+        // the room track for rehearsal takes
+        @JavascriptInterface
+        public boolean micAllowed() { return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED; }
+
+        @JavascriptInterface
+        public void askMic() { ui.post(() -> requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, 7)); }
+
+        @JavascriptInterface
+        public boolean roomStart(String take, double at) { return micAllowed() && room.start(MainActivity.this, take, at); }
+
+        @JavascriptInterface
+        public void roomStop() { room.stop(); }
+
+        @JavascriptInterface
+        public String roomStatus() { return room.statusJson(); }
     }
 }

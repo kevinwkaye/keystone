@@ -293,6 +293,8 @@ struct ParamInfo
     P(KRoomPre,       "kuddle.roomPre",  "Pre-delay",     "k.room",  "Room",           Flip,   0,    60,   10,   "ms", "",   Kuddle) \
     P(KRoomMix,       "kuddle.roomMix",  "Mix",           "k.room",  "Room",           Flip,   0,    1,    0.2f, "%",  "",   Kuddle) \
     P(KOutput,        "kuddle.output",   "Level",         "k.output","Output",         Flip,   -24,  12,   -3,   "dB", "",   Kuddle) \
+    P(RecOn,          "rec.on",          "Record when I play","recorder","Recorder",   Toggle, 0,    1,    1,    "",   "",   Global) \
+    P(RecRoom,        "rec.room",        "Room",          "recorder","Recorder",       Choice, 0,    1,    1,    "",   "Off|This phone's mic", Global) \
     P(FsACycle,       "fs.aCycle",       "Tap A in Grit", "footswitches","This song",  Choice, 0,    3,    0,    "",   "Edge and Drive|Off, Edge, Drive|Off and Edge|Off and Drive", None)
 // clang-format on
 

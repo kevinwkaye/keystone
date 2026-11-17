@@ -67,6 +67,7 @@ const ModuleInfo* moduleTable (int& count)
         { "pedal", "Pedal jobs", "Control", "Dirt blend, wah, volume, Bloom" },
         { "bloom", "Bloom sweep", "Control", "Grains then wash, per song" },
         { "tempo", "Tempo", "Control", "Saved per song, tap on Play" },
+        { "recorder", "Recorder", "Control", "Rehearsal takes, room from the phone" },
         { "footswitches", "Footswitches", "Control", "Tap and hold jobs" },
         { "output", "Output", "Control", "Level, limiter, amp or PA" },
         // Kuddle, the home rig, in playing order

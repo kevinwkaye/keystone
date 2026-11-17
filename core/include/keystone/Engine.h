@@ -57,6 +57,8 @@ enum class Action
 // What the expression pedal does: one job per bank, and in Groove, wah or volume.
 enum class PedalJob { Dirt = 0, Wah = 1, Volume = 2, Bloom = 3 };
 
+class Recorder;
+
 class Engine
 {
 public:
@@ -91,6 +93,9 @@ public:
     int rig() const { return rigNow.load(); }
     void setMelt (float pos01);            // Kuddle's pedal, from the phone
     void setSqueeze (bool on) { squeezeHeld.store (on); }   // Kuddle: hold D
+
+    // the rehearsal recorder hears the dry bass and the output of every block
+    void setRecorder (Recorder* r) { recorder.store (r); }
     float bloom() const { return job[3].value.load(); }
     void action (Action a);
     void setLightMode (bool light) { lightRequest.store (light); }
@@ -129,6 +134,7 @@ private:
     std::atomic<int> pedalBank { 0 }, lastTarget { -1 };
     std::atomic<float> lastPedal { -1.0f }, cpuLoad { 0.0f };
     std::atomic<int> rigNow { 0 };
+    std::atomic<Recorder*> recorder { nullptr };
     std::atomic<float> meltPos { 0.0f };
     std::atomic<bool> squeezeHeld { false };
     int pedalTarget() const;

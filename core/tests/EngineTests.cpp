@@ -11,6 +11,7 @@
 #include "Analysis.h"
 #include "Drone.h"
 #include "Valve.h"
+#include "Recorder.h"
 
 #include <algorithm>
 #include <array>
@@ -23,6 +24,7 @@
 #include <thread>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -1352,6 +1354,61 @@ static void testNewDefaults()
     std::filesystem::remove_all (dir);
 }
 
+static void testRecorder()
+{
+    std::printf ("The rehearsal recorder\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_rec";
+    std::filesystem::remove_all (dir);
+    Engine e; e.prepare (kSr, 128);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    c.load();
+    auto& r = c.recorder();
+    std::vector<float> quiet ((size_t) (3 * kSr), 0.0f);
+    render (e, quiet);
+    r.flushForTests();
+    CHECK (! r.recording() && r.takes().empty(), "silence: no take");
+    render (e, pluck (55.0, 2.0, 0.6, 0.6));
+    r.flushForTests();
+    CHECK (r.recording(), "the first note starts a take");
+    c.selectSong (1);
+    c.mark ("Keep");
+    std::vector<float> minute ((size_t) (65 * kSr), 0.0f);
+    render (e, minute);
+    r.flushForTests();
+    std::this_thread::sleep_for (std::chrono::milliseconds (150));
+    const auto takes = r.takes();
+    CHECK (! r.recording() && takes.size() == 1, "a quiet minute ends it");
+    if (takes.size() == 1)
+    {
+        const double secs = takes[0].seconds;
+        CHECK (secs > 6.5 && secs < 7.5, "two seconds before the note, the note, three after: %.1f s (mark 7)", secs);
+        std::ifstream f (dir / "Recordings" / (takes[0].name + ".wav"), std::ios::binary);
+        char h[44] = {};
+        f.read (h, 44);
+        uint32_t dataBytes = 0; std::memcpy (&dataBytes, h + 40, 4);
+        CHECK (std::string (h, 4) == "RIFF" && std::string (h + 8, 4) == "WAVE" && (h[22] == 2) && (uint8_t) h[34] == 24
+               && dataBytes == (uint32_t) (std::filesystem::file_size (dir / "Recordings" / (takes[0].name + ".wav")) - 44), "a proper 24-bit stereo WAV");
+        std::ifstream js (dir / "Recordings" / (takes[0].name + ".json"));
+        const std::string side ((std::istreambuf_iterator<char> (js)), std::istreambuf_iterator<char>());
+        CHECK (side.find ("Song: The Comedian and the Boxer") != std::string::npos && side.find ("Song: When the Circus") != std::string::npos
+               && side.find ("Keep") != std::string::npos, "marked: the song at the start, the song change, the Keep (%s)", side.substr (0, 300).c_str());
+        // the phone's room recording, in two pieces of base64
+        auto msg = [&] (const std::string& m) { std::string got; c.handleMessage (m, [&] (const std::string& x) { got = x; }); return got; };
+        const auto a1 = msg (R"({"t":"room","take":")" + takes[0].name + R"(","seq":0,"last":false,"ext":"m4a","data":"aGVsbG8g"})");
+        const auto a2 = msg (R"({"t":"room","take":")" + takes[0].name + R"(","seq":1,"last":true,"ext":"m4a","data":"cm9vbQ=="})");
+        std::ifstream room (dir / "Recordings" / (takes[0].name + " room.m4a"), std::ios::binary);
+        const std::string got ((std::istreambuf_iterator<char> (room)), std::istreambuf_iterator<char>());
+        CHECK (got == "hello room" && a2.find ("\"ok\":true") != std::string::npos, "the phone's room file lands beside the take");
+        const auto bad = msg (R"({"t":"room","take":"../evil","seq":0,"last":true,"ext":"m4a","data":"aGk="})");
+        CHECK (bad.find ("\"ok\":false") != std::string::npos, "a room file can't be written anywhere else");
+    }
+    c.setValue (P::RecOn, 0);
+    render (e, pluck (55.0, 2.0, 0.6, 0.6));
+    r.flushForTests();
+    CHECK (! r.recording(), "switched off: playing doesn't record");
+    std::filesystem::remove_all (dir);
+}
+
 static void testBandSetlist()
 {
     std::printf ("The band's setlist\n");
@@ -1540,6 +1597,7 @@ static int soak (double minutes)
     Engine e; e.prepare (kSr, 128);
     Controller c (e, dir.string(), (dir / "caps").string());
     c.load();
+    c.setValue (P::RecOn, 0);   // an hour of takes would only fill the build machine's disk
     const int64_t total = (int64_t) (minutes * 60 * kSr);
     std::atomic<int64_t> done { 0 };
     std::atomic<bool> stop { false };
@@ -1692,6 +1750,7 @@ int main (int argc, char** argv)
         testBandSetlist();
         testKuddle();
         testNewDefaults();
+        testRecorder();
         testCapture (capture);
     }
     bench (capture);
