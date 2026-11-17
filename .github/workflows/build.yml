@@ -111,6 +111,10 @@ jobs:
           ./build/keystone_tests --defaults android/app/src/main/assets/defaults.js
           git diff --exit-code android/app/src/main/assets/defaults.js || { echo "::error::defaults.js is out of date: run keystone_tests --defaults"; exit 1; }
 
+      # an hour of audio with a gig's worth of footwork, the audio on its own thread
+      - name: Soak test (ARM64, like the Pi)
+        run: ./build/keystone_tests --soak 60 | tee soak-linux-arm64.md
+
       - name: Package and add to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,7 +123,7 @@ jobs:
           cp build/app/Keystone_artefacts/Release/Keystone dist/keystone/keystone
           cp installer/README.txt dist/keystone/
           tar -C dist -czf "Keystone-$VERSION-linux-arm64.tar.gz" keystone
-          gh release upload "v$VERSION" "Keystone-$VERSION-linux-arm64.tar.gz" bench-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
+          gh release upload "v$VERSION" "Keystone-$VERSION-linux-arm64.tar.gz" bench-linux-arm64.md soak-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
 
   android:
     needs: prepare

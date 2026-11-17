@@ -13,6 +13,10 @@
 #include "Valve.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <mutex>
+#include <random>
 #include <chrono>
 #include <complex>
 #include <functional>
@@ -1462,8 +1466,151 @@ static int writeDefaults (const char* path)
     return 0;
 }
 
+
+// ---------------------------------------------------------------------------------------
+// Soak: the audio runs on its own thread, flat out, while another thread does what a gig
+// does to it: stomps, holds, both modes, banks, song and part changes, rig swaps, the phone
+// moving controls and editing the setlist, the pedal rocking. The bass comes and goes,
+// with silence, loud digs and the odd spike. It fails on any non-finite sample, output
+// past the limiter's ceiling, a stuck output, or memory that keeps growing.
+static long rssKb()
+{
+    std::ifstream f ("/proc/self/status");
+    std::string line;
+    while (std::getline (f, line))
+        if (line.rfind ("VmRSS:", 0) == 0) return std::atol (line.c_str() + 6);
+    return 0;
+}
+
+static int soak (double minutes)
+{
+    std::printf ("Soak: %.0f minutes of audio with a gig's worth of footwork\n", minutes);
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_soak";
+    std::filesystem::remove_all (dir);
+    Engine e; e.prepare (kSr, 128);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    c.load();
+    const int64_t total = (int64_t) (minutes * 60 * kSr);
+    std::atomic<int64_t> done { 0 };
+    std::atomic<bool> stop { false };
+    std::atomic<int> bad { 0 };
+    std::atomic<float> worst { 0 };
+    std::atomic<double> slowestMs { 0 };
+    std::atomic<int> lastEvent { -1 }, overruns { 0 };
+    std::array<std::atomic<int>, 16> slowAfter {};     // blocks over half their time, by the event before them
+    std::string firstBad;
+    std::mutex badLock;
+    auto fail = [&] (const std::string& why) { std::lock_guard<std::mutex> l (badLock); if (bad.fetch_add (1) == 0) firstBad = why; };
+
+    std::thread audio ([&]
+    {
+        std::mt19937 rng (7);
+        std::uniform_real_distribution<float> u (0.0f, 1.0f);
+        std::vector<float> in (128), out (128);
+        double ph = 0, freq = 55, amp = 0;
+        int64_t quietRun = 0, still = 0;
+        float last = 0;
+        while (done.load() < total && ! stop.load())
+        {
+            // a new note, a rest, or something rude, now and then
+            if (u (rng) < 0.01f)
+            {
+                const float r = u (rng);
+                if (r < 0.6f) { freq = 41.2 * std::pow (2.0, std::floor (u (rng) * 24) / 12.0); amp = 0.1 + 0.6 * u (rng); }
+                else if (r < 0.9f) amp = 0;
+                else amp = 1.4;   // past full scale: a hot input or a cable knock
+            }
+            for (int i = 0; i < 128; ++i)
+            {
+                ph += freq / kSr;
+                amp *= 0.99995;
+                in[(size_t) i] = (float) (amp * (std::sin (2 * M_PI * ph) + 0.3 * std::sin (4 * M_PI * ph)));
+            }
+            if (u (rng) < 0.0005f) in[(size_t) (rng() % 128)] = 4.0f;   // a spike
+            const auto t0 = std::chrono::steady_clock::now();
+            e.process (in.data(), out.data(), 128);
+            const double ms = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - t0).count();
+            if (ms > slowestMs.load()) slowestMs.store (ms);
+            if (ms > 128 / kSr * 1000) overruns.fetch_add (1);
+            if (ms > 0.5 * 128 / kSr * 1000) { const int le = lastEvent.load(); if (le >= 0) slowAfter[(size_t) le].fetch_add (1); }
+            float pk = 0;
+            for (float y : out)
+            {
+                if (! std::isfinite (y)) { fail ("a non-finite sample"); y = 0; }
+                pk = std::max (pk, std::fabs (y));
+            }
+            if (pk > worst.load()) worst.store (pk);
+            if (pk > 1.01f) fail ("output past full scale: " + std::to_string (pk));
+            // stuck: the same non-zero value for ten seconds
+            if (pk > 1.0e-3f && std::fabs (out[127] - last) < 1.0e-9f && std::fabs (out[0] - last) < 1.0e-9f) still += 128; else still = 0;
+            if (still > (int64_t) (10 * kSr)) fail ("output stuck at " + std::to_string (last));
+            last = out[127];
+            quietRun = pk < 1.0e-6f ? quietRun + 128 : 0;
+            done.fetch_add (128);
+        }
+    });
+
+    // the gig, on the control thread
+    std::mt19937 rng (11);
+    std::uniform_real_distribution<float> u (0.0f, 1.0f);
+    double t = 0;
+    const long rssStart = rssKb();
+    long rssAtHalf = 0;
+    int events = 0;
+    auto press = [&] (int sw) { c.footswitchPress (sw, t); };
+    auto release = [&] (int sw) { c.footswitchRelease (sw, t); };
+    auto msg = [&] (const std::string& m) { c.handleMessage (m, [] (const std::string&) {}); };
+    while (done.load() < total && bad.load() == 0)
+    {
+        const double audioT = (double) done.load() / kSr;
+        if (t > audioT) { std::this_thread::sleep_for (std::chrono::microseconds (200)); c.tick (t); continue; }
+        t += 0.05 + 2.0 * u (rng);
+        ++events;
+        const float r = u (rng);
+        const int sw = (int) (u (rng) * 4) % 4;
+        static const float edges[] = { 0.35f, 0.50f, 0.55f, 0.75f, 0.85f, 0.90f, 0.93f, 0.96f, 0.97f, 0.98f, 0.99f, 1.01f };
+        int kind = 0; while (r >= edges[kind]) ++kind;
+        lastEvent.store (kind);
+        if (r < 0.35f) { press (sw); t += 0.05 + 0.1 * u (rng); c.tick (t); release (sw); }        // tap
+        else if (r < 0.50f) { press (sw); for (int i = 0; i < 12; ++i) { t += 0.05; c.tick (t); } release (sw); }   // hold
+        else if (r < 0.55f) { const int a = u (rng) < 0.5f ? 0 : 2; press (a); press (a + 1); for (int i = 0; i < (int) (u (rng) * 25); ++i) { t += 0.05; c.tick (t); } release (a); release (a + 1); }
+        else if (r < 0.75f) e.setPedal (u (rng));
+        else if (r < 0.85f)
+        {
+            // the phone moves a random control somewhere in its range (not the globals:
+            // they'd write settings files flat out)
+            const int p = (int) (u (rng) * kNumParams) % kNumParams;
+            const auto& in = paramTable()[p];
+            if (! (in.flags & Global)) c.setValue ((P) p, in.min + (in.max - in.min) * u (rng));
+        }
+        else if (r < 0.90f) msg (R"({"t":"songStep","d":)" + std::string (u (rng) < 0.5f ? "1" : "-1") + "}");
+        else if (r < 0.93f) msg (R"({"t":"rig","r":)" + std::to_string ((int) (u (rng) * 2)) + "}");
+        else if (r < 0.96f) msg (R"({"t":"bank","i":)" + std::to_string ((int) (u (rng) * 3) % 3) + "}");
+        else if (r < 0.97f) msg (R"({"t":"setlist","op":"revert"})");
+        else if (r < 0.98f) msg (R"({"t":"tap"})");
+        else if (r < 0.99f) msg (R"({"t":"footMode"})");
+        else msg (R"({"t":"setlist","op":"save"})");
+        if (! rssAtHalf && done.load() > total / 2) rssAtHalf = rssKb();
+    }
+    stop.store (true);
+    audio.join();
+    const long rssEnd = rssKb();
+    std::printf ("  %d events, loudest sample %.3f, slowest block %.2f ms (a block lasts %.2f ms)\n", events, worst.load(), slowestMs.load(), 128 / kSr * 1000);
+    static const char* kinds[] = { "tap", "hold", "pair", "pedal", "phone control", "song step", "rig", "bank", "revert", "tap tempo", "mode", "save" };
+    std::printf ("  blocks over their time: %d. Slow blocks (over half their time) after: ", overruns.load());
+    for (int k = 0; k < 12; ++k) if (slowAfter[(size_t) k].load()) std::printf ("%s %d, ", kinds[k], slowAfter[(size_t) k].load());
+    std::printf ("\n");
+    std::printf ("  memory %ld KB at the start, %ld KB halfway, %ld KB at the end\n", rssStart, rssAtHalf, rssEnd);
+    if (rssAtHalf > 0 && rssEnd - rssAtHalf > 8192) fail ("memory grew by " + std::to_string ((rssEnd - rssAtHalf) / 1024) + " MB in the second half");
+    std::filesystem::remove_all (dir);
+    if (bad.load()) { std::printf ("  FAIL  %s (%d problems)\n", firstBad.c_str(), bad.load()); return 1; }
+    std::printf ("  Soak passed\n");
+    return 0;
+}
+
 int main (int argc, char** argv)
 {
+    if (argc > 2 && std::string (argv[1]) == "--soak") return soak (std::atof (argv[2]));
     if (argc > 2 && std::string (argv[1]) == "--defaults") return writeDefaults (argv[2]);
     const char* capture = argc > 1 ? argv[1] : nullptr;
     const bool benchOnly = argc > 2 && std::string (argv[2]) == "--bench";
