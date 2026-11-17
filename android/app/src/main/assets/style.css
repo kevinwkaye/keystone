@@ -196,3 +196,9 @@ body.kuddle .pill { background: #24180F; border-color: #6E5240; color: #8A6A50; 
 .rec-time .colon { font-size: 30px; font-weight: 700; color: var(--muted); padding: 0 2px; }
 .marks { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--muted); }
 .marks b { color: var(--text); font-weight: 700; margin-right: 6px; }
+
+/* updates */
+.urow { display: flex; align-items: center; gap: 12px; min-height: 54px; border-bottom: 1px solid #262626; }
+.urow:last-of-type { border-bottom: none; }
+.ubtn { flex: none; height: 40px; padding: 0 14px; border-radius: 8px; border: 2px solid var(--green); background: transparent; color: var(--green); font-size: 14px; font-weight: 700; }
+.ubtn[disabled] { opacity: 0.4; }

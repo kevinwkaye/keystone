@@ -38,6 +38,7 @@ public:
 
     bool recording() const { return active.load(); }
     double takeSeconds() const;
+    double quietSeconds() const;                                // since the bass last played, recording or not
     float takePeakDb() const { return peakDb.load(); }
     bool clipped() const { return clip.load(); }
     std::string takeName() const;                               // "" when not recording
@@ -67,6 +68,7 @@ private:
     void housekeeping();
 
     std::string folder;
+    std::atomic<int64_t> lastSignal { -1 };
     std::atomic<double> sr { 48000 };
     std::atomic<bool> enabled { true }, active { false }, stopRequest { false }, quit { false }, clip { false };
     std::atomic<float> peakDb { -100 };

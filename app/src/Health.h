@@ -38,6 +38,11 @@ struct Health
         auto* o = new juce::DynamicObject();
         o->setProperty ("t", "health");
         o->setProperty ("version", version);
+       #if JUCE_WINDOWS
+        o->setProperty ("device", "laptop");   // which release Update firmware fetches
+       #else
+        o->setProperty ("device", "pi");
+       #endif
         o->setProperty ("uptime", (int) uptimeSec);
         auto obj = [] (std::initializer_list<std::pair<const char*, juce::var>> items)
         {

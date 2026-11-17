@@ -35,6 +35,7 @@ public class MainActivity extends Activity {
     private String pendingStatus;
     private volatile boolean linked;
     private RoomRecorder room;
+    private Updater updater;
 
     @SuppressLint({ "SetJavaScriptEnabled", "AddJavascriptInterface" })
     // No network pinning: the phone is often on home Wi-Fi and hosting the hotspot at once,
@@ -72,9 +73,17 @@ public class MainActivity extends Activity {
             @Override public boolean linked() { return linked; }
         });
 
+        updater = new Updater(this,
+                json -> ui.post(() -> { if (pageReady) web.evaluateJavascript("KS.onUpdate(" + json + ")", null); }),
+                line -> { if (!linked) return false; link.send(line); return true; });
+
         link = new Link(this, new Link.Listener() {
             @Override
             public void onLine(String line) {
+                if (line.contains("\"t\":\"fwAck\"")) {
+                    try { updater.onAck(new JSONObject(line)); } catch (Exception ignored) { }
+                    return;
+                }
                 if (line.contains("\"t\":\"roomAck\"")) {
                     try { room.onAck(new JSONObject(line)); } catch (Exception ignored) { }
                     return;
@@ -165,5 +174,15 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String roomStatus() { return room.statusJson(); }
+
+        // Update firmware and the phone app
+        @JavascriptInterface
+        public void updateCheck() { updater.check(); }
+
+        @JavascriptInterface
+        public void updateFirmware(String url, String name, double size, String digest, String version) { updater.firmware(url, name, (long) size, digest, version); }
+
+        @JavascriptInterface
+        public void updateApp(String url, double size) { updater.app(url, (long) size); }
     }
 }

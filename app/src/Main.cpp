@@ -390,6 +390,33 @@ private:
         };
         controller->footswitchStatus = [this] { return midi ? midi->status().toStdString() : std::string(); };
         controller->audioStatus = [this] { return audio ? audio->status().toStdString() : std::string(); };
+       #if JUCE_WINDOWS
+        // Update firmware: hand the installer to the "Keystone Update" task (Tools\Update.ps1),
+        // which installs it with administrator rights and puts the old version back if the
+        // new one doesn't start
+        controller->onFirmware = [this] (const std::string& file, const std::string& version) -> std::string
+        {
+            const File installer (String::fromUTF8 (file.c_str()));
+            if (! installer.hasFileExtension ("exe")) return "That update is for the Pi, not the laptop";
+            auto* r = new DynamicObject();
+            r->setProperty ("installer", installer.getFullPathName());
+            r->setProperty ("version", String (version));
+            r->setProperty ("from", String (ks::Controller::kVersion));
+            if (! installer.getSiblingFile ("request.json").replaceWithText (JSON::toString (var (r))))
+                return "Couldn't save the update request";
+            ChildProcess task;
+            if (! task.start (StringArray { "schtasks.exe", "/run", "/tn", "Keystone Update" }, 0))
+                return "Couldn't start the updater";
+            task.waitForProcessToFinish (10000);
+            if (task.getExitCode() != 0)
+            {
+                installer.getSiblingFile ("request.json").deleteFile();
+                return "The updater isn't set up on this laptop yet. Run this version's installer once by hand, then updates work from the phone";
+            }
+            Logger::writeToLog ("Update firmware: handed " + installer.getFileName() + " to the updater");
+            return {};
+        };
+       #endif
     }
 
 public:

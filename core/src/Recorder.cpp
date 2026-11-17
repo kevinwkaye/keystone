@@ -81,6 +81,12 @@ std::string Recorder::firstSong (const std::string& take) const
     return {};
 }
 
+double Recorder::quietSeconds() const
+{
+    const int64_t last = lastSignal.load();
+    return last < 0 ? 1.0e9 : (double) (written.load() - last) / sr.load();
+}
+
 double Recorder::takeSeconds() const { return (double) framesNow.load() / sr.load(); }
 
 std::string Recorder::takeName() const
@@ -127,11 +133,11 @@ void Recorder::run()
             for (auto& m : marks) if (m.second.rfind ("Song: ", 0) == 0) context = m.second;
             marks.clear();
             stopRequest.store (false);
-            if (! enabled.load()) { readFrame = w; caughtUp.store (w); continue; }
             int64_t loud = -1;
             for (int64_t f = from; f < w && loud < 0; ++f)
                 if (std::fabs (ring[(size_t) (f % cap) * 2]) > kPlayThreshold) loud = f;
-            if (loud < 0) { readFrame = w; caughtUp.store (w); continue; }
+            if (loud >= 0) lastSignal.store (w);
+            if (! enabled.load() || loud < 0) { readFrame = w; caughtUp.store (w); continue; }
             from = std::max ({ loud - (int64_t) (kPreRollSeconds * rate), w - cap + 1024, (int64_t) 0 });
             open (from);
             if (! file) { readFrame = w; caughtUp.store (w); continue; }
@@ -150,7 +156,7 @@ void Recorder::run()
             {
                 const float x = ring[r + (size_t) ch];
                 const float ax = std::fabs (x);
-                if (ch == 0 && ax > kPlayThreshold) lastLoud = f;
+                if (ch == 0 && ax > kPlayThreshold) { lastLoud = f; lastSignal.store (f); }
                 pk = std::max (pk, ax);
                 if (ax >= 0.999f) clip.store (true);
                 buf[k++] = (int32_t) std::lrint (std::clamp (x, -1.0f, 1.0f) * 8388607.0f);

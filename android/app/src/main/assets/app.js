@@ -15,7 +15,8 @@ var KS = (function () {
     editVoice: null, sel: null, openRow: -1, renameRow: -1, confirmDel: -1,
     noteFor: 0, noteUntil: 0, pedalDrag: null,
     health: null, rtt: null, healthAt: 0,
-    takes: null, takesFree: 0, roomTake: '', roomFailed: ''
+    takes: null, takesFree: 0, roomTake: '', roomFailed: '',
+    upd: { latest: '', assets: [], checkedAt: 0, checking: false, busy: null, err: null, msg: '' }
   };
 
   // ---------------------------------------------------------------- transport
@@ -261,6 +262,51 @@ var KS = (function () {
       nav('play') + '</section>';
   }
 
+  // ---- Update firmware (the laptop or the Pi) and the phone app, from GitHub
+  function newer(a, b) {   // is version a newer than b?
+    var x = String(a || '').split('.'), y = String(b || '').split('.');
+    for (var i = 0; i < Math.max(x.length, y.length); i++) { var d = (+x[i] || 0) - (+y[i] || 0); if (d) return d > 0; }
+    return false;
+  }
+  function phoneVersion() { try { return window.KeystoneNative ? KeystoneNative.version() : ''; } catch (e) { return ''; } }
+  function updateCheck(force) {
+    var N = window.KeystoneNative;
+    if (!N || !N.updateCheck || S.upd.checking) return;
+    if (!force && Date.now() - S.upd.checkedAt < 10 * 60 * 1000) return;
+    S.upd.checking = true; S.upd.err = null;
+    N.updateCheck();
+  }
+  function onUpdate(m) {
+    var u = S.upd;
+    if (m.t === 'latest') { u.latest = m.version; u.assets = m.assets || []; u.checkedAt = Date.now(); u.checking = false; }
+    else if (m.t === 'progress') { u.busy = m; u.err = null; }
+    else if (m.t === 'error') { u.busy = null; u.checking = false; u.err = m; }
+    else if (m.t === 'done') { u.busy = null; u.msg = 'Installing ' + m.version + '. Keystone restarts by itself in about a minute, and goes back to the old version if the new one doesn\'t start.'; }
+    if (S.screen === 'health') render(true);
+  }
+  function asset(re) { for (var i = 0; i < S.upd.assets.length; i++) if (re.test(S.upd.assets[i].name)) return S.upd.assets[i]; return null; }
+  function rigDevice() { return S.health && S.health.device === 'pi' ? 'pi' : 'laptop'; }
+  function updateCard() {
+    var u = S.upd, h = S.health, rigV = h ? h.version : '', phoneV = phoneVersion();
+    if (!window.KeystoneNative || !KeystoneNative.updateCheck) return '';
+    var dev = rigDevice(), devName = dev === 'pi' ? 'Pi' : 'Laptop';
+    var fwAsset = asset(dev === 'pi' ? /linux-arm64\.tar\.gz$/ : /-Setup\.exe$/), apk = asset(/\.apk$/);
+    var fwNew = u.latest && rigV && newer(u.latest, rigV) && fwAsset, appNew = u.latest && phoneV && newer(u.latest, phoneV) && apk;
+    function row(name, now, isNew, act, label) {
+      var st = !u.latest ? (u.checking ? 'Checking' : '') : isNew ? u.latest + ' is out' : 'Up to date';
+      return '<div class="urow"><span style="display:flex;flex-direction:column;flex:1;min-width:0"><span style="font-size:17px;font-weight:500">' + esc(name) + '</span>' +
+        '<span class="small" style="font-size:13px">' + esc(now) + (st ? ', <span style="color:' + (isNew ? '#5DCAA5' : '#8A847A') + '">' + st + '</span>' : '') + '</span></span>' +
+        (isNew ? '<button type="button" class="ubtn" data-act="' + act + '"' + (u.busy ? ' disabled' : '') + '>' + label + '</button>' : '') + '</div>';
+    }
+    var busy = u.busy ? '<div class="small">' + esc(u.busy.stage) + (u.busy.what === 'app' ? ' the phone app' : '') + ', ' + u.busy.pct + '%</div><div class="bar" style="height:8px"><div style="width:' + u.busy.pct + '%;background:#5DCAA5;height:8px"></div></div>' : '';
+    return '<section class="card" style="gap:6px"><div style="display:flex;justify-content:space-between;align-items:center"><h2 class="label">Updates</h2>' +
+      '<button type="button" class="back" data-act="updateCheck" style="min-height:32px;font-size:14px">' + (u.checking ? 'Checking' : 'Check again') + '</button></div>' +
+      (connected() && h ? row(devName, 'Keystone ' + rigV, fwNew, 'updateFirmware', 'Update firmware') : '') +
+      row('This phone', 'App ' + (phoneV || '?'), appNew, 'updateApp', 'Update app') + busy +
+      (u.err ? '<div class="small" style="color:#F0997B">' + esc(u.err.why) + '</div>' : '') +
+      (u.msg && !u.busy ? '<div class="small" style="color:#5DCAA5">' + esc(u.msg) + '</div>' : '') + '</section>';
+  }
+
   function pill() {
     var c = S.link === 'connected', w = warnings().length;
     var label = !c ? 'Searching' : w ? w + (w > 1 ? ' problems' : ' problem') : 'Connected';
@@ -319,6 +365,7 @@ var KS = (function () {
       }).join('') + '</section>' +
       (Math.round(val('output.mode')) === 2 ? '<button type="button" class="wide" data-act="asioPanel">ASIO panel (opens on the laptop)</button>' : '') +
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
+      updateCard() +
       '<button type="button" class="wide" data-go="recorder">Recorder' + (rec().on ? ': recording ' + clock(rec().s) : on('rec.on') ? ': ready' : ': off') + '</button>' +
       '<div class="small">If something goes wrong on stage, a warning strip appears across the top of Play. Tap it to come here.</div>' +
       nav('play') + '</section>';
@@ -589,7 +636,7 @@ var KS = (function () {
       var list = pg[1].filter(function (id) { return by[id]; }).map(function (id) { seen[id] = 1; return by[id]; });
       if (list.length) out.push([pg[0], list]);
     });
-    var rest = S.modules.filter(function (m) { return !seen[m.id] && m.id.indexOf('k.') !== 0; });   // anything new still shows
+    var rest = S.modules.filter(function (m) { return !seen[m.id] && m.id.indexOf('k.') !== 0 && m.id !== 'recorder'; });   // the recorder has its own page   // anything new still shows
     if (rest.length) out[out.length - 1][1] = out[out.length - 1][1].concat(rest);
     return out;
   }
@@ -952,6 +999,7 @@ var KS = (function () {
     if (screen === 'tuner' && !S.tuner) { send({ t: 'tuner', on: true }); S.tunerAuto = false; }
     if (S.screen === 'tuner' && screen !== 'tuner' && S.tuner) { send({ t: 'tuner', on: false }); S.tuner = false; }
     if (screen === 'recorder') send({ t: 'takes' });
+    if (screen === 'health') updateCheck(false);
     S.screen = screen; S.sel = null; sheetEl.hidden = true; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false; S.showSpaces = false;
     render();
   }
@@ -987,6 +1035,15 @@ var KS = (function () {
     var i2 = d.i != null ? +d.i : -1;
     switch (d.act) {
       case 'keep': send({ t: 'keep' }); break;
+      case 'updateCheck': updateCheck(true); render(true); break;
+      case 'updateFirmware':
+        var fa = asset(rigDevice() === 'pi' ? /linux-arm64\.tar\.gz$/ : /-Setup\.exe$/);
+        if (fa && connected()) { S.upd.msg = ''; S.upd.err = null; S.upd.busy = { what: 'firmware', stage: 'Downloading', pct: 0 }; KeystoneNative.updateFirmware(fa.url, fa.name, fa.size, fa.digest || '', S.upd.latest); render(true); }
+        break;
+      case 'updateApp':
+        var ap = asset(/\.apk$/);
+        if (ap) { S.upd.err = null; S.upd.busy = { what: 'app', stage: 'Downloading', pct: 0 }; KeystoneNative.updateApp(ap.url, ap.size); render(true); }
+        break;
       case 'recStop': send({ t: 'recStop' }); setTimeout(function () { send({ t: 'takes' }); }, 1500); break;
       case 'roomToggle':
         var N = native();
@@ -1127,5 +1184,5 @@ var KS = (function () {
   loadOffline();
   setInterval(function () { if (connected()) strip(); }, 1000);
   render();
-  return { onMessage: onMessage, onLink: onLink, back: back, state: S, refresh: function () { render(true); } };
+  return { onMessage: onMessage, onLink: onLink, back: back, state: S, refresh: function () { render(true); }, onUpdate: onUpdate };
 })();

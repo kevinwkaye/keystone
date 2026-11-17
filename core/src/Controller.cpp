@@ -6,8 +6,10 @@
 
 #include <nlohmann/json.hpp>
 #include "Recorder.h"
+#include "Sha256.h"
 
 #include <algorithm>
+#include <regex>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -37,6 +39,8 @@ struct Controller::Song
 
 struct Controller::State
 {
+    // an update arriving from the phone
+    struct Firmware { std::unique_ptr<std::ofstream> file; std::string path, version, sha; int64_t size = 0, got = 0; int seq = 0; } fw;
     std::vector<Song> songs;
     int current = 0;
     FootswitchLogic logic;
@@ -296,6 +300,10 @@ void Controller::load()
     mark ("Song: " + songLabel (s->current));   // the context for the first take
     if (startRig == 1) setRig (1, false);   // the last rig used
     syncPairs();
+
+    // the updater waits for this to say the new version started
+    const auto now = std::chrono::duration_cast<std::chrono::seconds> (std::chrono::system_clock::now().time_since_epoch()).count();
+    std::ofstream (toPath (dataDir) / "started.json") << json { { "version", kVersion }, { "at", now } }.dump();
 }
 
 void Controller::useBandSetlist (bool backup)
@@ -966,6 +974,80 @@ static json recentMarks (const Recorder& r)
     return a;
 }
 
+std::string Controller::updatesDir() const { return fromPath (toPath (dataDir) / "Updates"); }
+
+// Update firmware, a piece at a time: begin, chunk, chunk, ..., end
+std::string Controller::firmwareMessage (const std::string& line)
+{
+    const auto m = json::parse (line, nullptr, false);
+    auto& fw = s->fw;
+    const auto op = m.value ("op", std::string());
+    auto answer = [&] (bool ok, const std::string& why = {}) {
+        json a { { "t", "fwAck" }, { "op", op }, { "seq", m.value ("seq", -1) }, { "ok", ok } };
+        if (! why.empty()) a["why"] = why;
+        return dumps (a);
+    };
+    auto fail = [&] (const std::string& why) {
+        if (fw.file) { fw.file.reset(); std::error_code ec; fs::remove (toPath (fw.path), ec); }
+        fw = {};
+        if (onLog) onLog ("Update firmware: " + why);
+        return answer (false, why);
+    };
+    const bool playing = s->recorder->quietSeconds() < 20.0;
+    if (op == "begin")
+    {
+        if (! onFirmware) return fail ("This device can't update itself yet");
+        const auto version = m.value ("version", std::string());
+        const auto file = m.value ("file", std::string());
+        static const std::regex okVersion (R"(\d{1,3}(\.\d{1,3}){1,3})");
+        static const std::regex okFile (R"(Keystone-[0-9.]+(-Setup\.exe|-linux-arm64\.tar\.gz))");
+        if (! std::regex_match (version, okVersion) || ! std::regex_match (file, okFile)) return fail ("That isn't a Keystone release");
+        const int64_t size = m.value ("size", (int64_t) 0);
+        if (size <= 0 || size > 300ll * 1024 * 1024) return fail ("That file is the wrong size");
+        if (playing) return fail ("You're playing. Try again once the bass has been quiet for 20 seconds");
+        std::error_code ec;
+        fs::create_directories (toPath (updatesDir()), ec);
+        fw = {};
+        fw.path = fromPath (toPath (updatesDir()) / toPath (file));
+        fw.version = version;
+        fw.sha = m.value ("sha256", std::string());
+        fw.size = size;
+        fw.file = std::make_unique<std::ofstream> (toPath (fw.path), std::ios::binary | std::ios::trunc);
+        if (! *fw.file) return fail ("Couldn't save the update on this device");
+        if (onLog) onLog ("Update firmware: receiving " + file);
+        return answer (true);
+    }
+    if (op == "chunk")
+    {
+        if (! fw.file) return fail ("The update started again, try once more");
+        if (m.value ("seq", -1) != fw.seq) return fail ("A piece went missing, try once more");
+        const auto data = fromBase64 (m.value ("data", std::string()));
+        fw.got += (int64_t) data.size();
+        if (fw.got > fw.size) return fail ("More arrived than expected, try once more");
+        fw.file->write ((const char*) data.data(), (std::streamsize) data.size());
+        if (! *fw.file) return fail ("Couldn't save the update on this device");
+        ++fw.seq;
+        return answer (true);
+    }
+    if (op == "end")
+    {
+        if (! fw.file) return fail ("Nothing has arrived");
+        fw.file.reset();
+        if (fw.got != fw.size) return fail ("The update didn't arrive whole, try once more");
+        const auto sum = Sha256::ofFile (toPath (fw.path));
+        if (fw.sha.empty() || sum != fw.sha) return fail ("The update didn't arrive whole, try once more");
+        if (playing) return fail ("You're playing. Try again once the bass has been quiet for 20 seconds");
+        const auto why = onFirmware (fw.path, fw.version);
+        const auto version = fw.version;
+        fw = {};
+        if (! why.empty()) return answer (false, why);
+        if (onLog) onLog ("Update firmware: installing " + version);
+        queueToast ("UPDATING TO " + version);
+        return answer (true);
+    }
+    return answer (false, "Unknown step");
+}
+
 std::string Controller::takesJson() const
 {
     json j { { "t", "takes" }, { "list", json::array() }, { "free", s->recorder->freeBytes() } };
@@ -1063,6 +1145,7 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         if (s->rig == 1) engine.setMelt (m.value ("v", 0.0f));
         else engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));
     }
+    else if (t == "fw") reply (firmwareMessage (line));
     else if (t == "recStop") { s->recorder->stopTake(); queueToast ("TAKE STOPPED"); }
     else if (t == "takes") reply (takesJson());
     else if (t == "room")

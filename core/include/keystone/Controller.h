@@ -55,6 +55,11 @@ public:
     std::function<void (const std::string&)> onLog;
     std::function<void()> onRestartAudio;
     std::function<void()> onAsioPanel;   // opens the ASIO driver's own settings on the laptop
+    // Update firmware: the phone sends the new release a piece at a time; once it has
+    // arrived whole the host hands it to its updater. Returns "" when the update is under
+    // way, otherwise what went wrong in plain words. Not set: this device can't update itself.
+    std::function<std::string (const std::string& file, const std::string& version)> onFirmware;
+    std::string updatesDir() const;
 
     // songs
     int songCount() const;
@@ -83,6 +88,7 @@ public:
     void tapTempo (double nowSeconds);   // the phone's Tap, sets the song's tempo
     std::string songLabel (int i) const;   // "Circus, Verse" for a part
     std::string takesJson() const;           // the recorder's takes, for the phone
+    std::string firmwareMessage (const std::string& line);
     static std::vector<uint8_t> fromBase64 (const std::string& in);
 
     // the rehearsal recorder: marks land in the take being recorded

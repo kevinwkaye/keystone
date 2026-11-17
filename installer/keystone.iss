@@ -51,6 +51,7 @@ Source: "..\tools\Set up footswitch.ps1"; DestDir: "{app}\Tools"; Flags: ignorev
 Source: "..\tools\Set up footswitch.bat"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\tools\Set up gig laptop.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\tools\Set up gig laptop.bat"; DestDir: "{app}\Tools"; Flags: ignoreversion
+Source: "..\tools\Update.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Keystone"; Filename: "{app}\Keystone.exe"
@@ -75,11 +76,15 @@ Filename: "{sys}\powercfg.exe"; Parameters: "/setdcvalueindex SCHEME_CURRENT 2a7
 Filename: "{sys}\powercfg.exe"; Parameters: "/setacvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0"; Flags: runhidden waituntilterminated; Tasks: power
 Filename: "{sys}\powercfg.exe"; Parameters: "/setdcvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0"; Flags: runhidden waituntilterminated; Tasks: power
 Filename: "{sys}\powercfg.exe"; Parameters: "/setactive SCHEME_CURRENT"; Flags: runhidden waituntilterminated
+; Update firmware from the phone: a scheduled task that may install without a Windows prompt.
+; Made on a normal install only: an update from the phone is already running inside it.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Tools\Update.ps1"" -Register"; Flags: runhidden waituntilterminated; Check: not WizardSilent
 Filename: "{app}\Keystone.exe"; Description: "Start Keystone now"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/im Keystone.exe /f"; Flags: runhidden; RunOnceId: "StopKeystone"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Keystone"""; Flags: runhidden; RunOnceId: "DelFirewall"
+Filename: "{sys}\schtasks.exe"; Parameters: "/delete /tn ""Keystone Update"" /f"; Flags: runhidden; RunOnceId: "DelUpdateTask"
 
 [Code]
 function IsProcessorFeaturePresent(Feature: Cardinal): BOOL; external 'IsProcessorFeaturePresent@kernel32.dll stdcall';

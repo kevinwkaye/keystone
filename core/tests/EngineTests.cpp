@@ -12,6 +12,7 @@
 #include "Drone.h"
 #include "Valve.h"
 #include "Recorder.h"
+#include "Sha256.h"
 
 #include <algorithm>
 #include <array>
@@ -1409,6 +1410,47 @@ static void testRecorder()
     std::filesystem::remove_all (dir);
 }
 
+static void testFirmware()
+{
+    std::printf ("Update firmware from the phone\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_fw";
+    std::filesystem::remove_all (dir);
+    Engine e; e.prepare (kSr, 128);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    c.load();
+    auto msg = [&] (const std::string& m) { std::string got; c.handleMessage (m, [&] (const std::string& x) { got = x; }); return got; };
+    const std::string begin = R"({"t":"fw","op":"begin","version":"0.4.9","file":"Keystone-0.4.9-Setup.exe","size":10,"sha256":")";
+    CHECK (msg (begin + std::string (64, '0') + "\"}").find ("can't update itself") != std::string::npos, "a device with no updater says so");
+    std::string gotFile, gotVersion;
+    c.onFirmware = [&] (const std::string& f, const std::string& v) { gotFile = f; gotVersion = v; return std::string(); };
+    CHECK (msg (R"({"t":"fw","op":"begin","version":"0.4.9","file":"..\\evil.exe","size":10,"sha256":"x"})").find ("\"ok\":false") != std::string::npos, "only a Keystone release file name");
+    Sha256 h; h.add ((const uint8_t*) "hello room", 10);
+    const std::string real = h.hex();
+    Sha256 abc; abc.add ((const uint8_t*) "abc", 3);
+    CHECK (abc.hex() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", "SHA-256 of abc matches the standard");
+    // a wrong checksum is refused
+    msg (begin + std::string (64, '0') + "\"}");
+    msg (R"({"t":"fw","op":"chunk","seq":0,"data":"aGVsbG8gcm9vbQ=="})");
+    CHECK (msg (R"({"t":"fw","op":"end"})").find ("didn't arrive whole") != std::string::npos && gotFile.empty(), "a damaged update is never installed");
+    // a missing piece is refused
+    msg (begin + real + "\"}");
+    CHECK (msg (R"({"t":"fw","op":"chunk","seq":1,"data":"aGVsbG8gcm9vbQ=="})").find ("missing") != std::string::npos, "a missing piece stops it");
+    // the real thing
+    msg (begin + real + "\"}");
+    msg (R"({"t":"fw","op":"chunk","seq":0,"data":"aGVsbG8g"})");
+    msg (R"({"t":"fw","op":"chunk","seq":1,"data":"cm9vbQ=="})");
+    const auto end = msg (R"({"t":"fw","op":"end"})");
+    CHECK (end.find ("\"ok\":true") != std::string::npos && gotVersion == "0.4.9" && std::filesystem::file_size (gotFile) == 10, "a whole update goes to the updater");
+    // not while playing
+    render (e, pluck (55.0, 1.0, 0.6, 0.6));
+    c.recorder().flushForTests();
+    CHECK (msg (begin + real + "\"}").find ("playing") != std::string::npos, "never while you're playing");
+    std::ifstream st (dir / "started.json");
+    const std::string started ((std::istreambuf_iterator<char> (st)), std::istreambuf_iterator<char>());
+    CHECK (started.find (Controller::kVersion) != std::string::npos, "started.json tells the updater which version is running");
+    std::filesystem::remove_all (dir);
+}
+
 static void testBandSetlist()
 {
     std::printf ("The band's setlist\n");
@@ -1751,6 +1793,7 @@ int main (int argc, char** argv)
         testKuddle();
         testNewDefaults();
         testRecorder();
+        testFirmware();
         testCapture (capture);
     }
     bench (capture);
