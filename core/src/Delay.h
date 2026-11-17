@@ -97,9 +97,11 @@ public:
         mixS.set (mix);
         fbS.set (fb);
 
-        static const float syncMul[4] = { 1.0f, 1.0f, 0.75f, 0.5f };
-        const float t = clampf (V (v, P::DlTime) * syncMul[std::max (0, std::min (3, Vi (v, P::DlSync)))] * 0.001f * sr,
-                                16.0f, (float) line.size() - 0.02f * sr);
+        // Free is the delay's own time; every other choice is a note value of the song's tempo
+        static const float note[9] = { 0.0f, 1.0f, 0.75f, 0.5f, 2.0f, 1.5f, 2.0f / 3.0f, 1.0f / 3.0f, 0.25f };
+        const int sync = std::max (0, std::min (8, Vi (v, P::DlSync)));
+        const float ms = sync == 0 ? V (v, P::DlTime) : 60000.0f / std::max (40.0f, V (v, P::Tempo)) * note[sync];
+        const float t = clampf (ms * 0.001f * sr, 16.0f, (float) line.size() - 0.02f * sr);
         timeTarget = t;
         machine = Vi (v, P::DlTapeMachine);
         mode = Vi (v, P::DlTapeMode);

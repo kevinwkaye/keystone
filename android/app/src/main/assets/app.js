@@ -292,6 +292,16 @@ var KS = (function () {
       { k: 'B', name: 'Bitrot', st: lit('bitrot.on'), id: 'bitrot.on', mod: 'bitrot' },
       { k: 'C', name: 'Growl/Cut', st: on('preamp.flip') ? 'FLIPPED' : 'OFF', id: 'preamp.flip', mod: 'preamp' }];
   }
+  function fmtBpm() { var b = val('tempo.bpm'); return (Math.round(b * 10) / 10) + '<span class="unit"> BPM</span>'; }
+  // a dot that blinks on the beat, so you can check the tempo against the drummer
+  var beatTimer = null;
+  function beatLoop() {
+    clearTimeout(beatTimer);
+    var dot = document.getElementById('beat');
+    if (dot) { dot.classList.add('on'); setTimeout(function () { dot.classList.remove('on'); }, 90); }
+    beatTimer = setTimeout(beatLoop, 60000 / Math.max(40, val('tempo.bpm') || 120));
+  }
+  beatLoop();
   function pedalInfo() {
     if (kud()) {
       var mv = S.pedalDrag != null ? S.pedalDrag : (S.meter.melt || 0);
@@ -355,6 +365,8 @@ var KS = (function () {
       '<div class="card meter">' + meterSvg() + '<div class="label">Output</div></div>' +
       (K ? '' : modeBar() + (S.footMode === 1 ? '' : bankBar())) +
       '<div class="stomps">' + stomps + '</div>' + note +
+      (K ? '' : '<div class="card tempo"><span class="tlab">TEMPO</span><span class="tbpm" id="tbpm">' + fmtBpm() + '</span><span class="beat" id="beat"></span>' +
+        '<button type="button" class="tap" data-act="tapTempo">TAP</button></div>') +
       '<div class="card pedal" id="pedal"><div class="label" style="display:flex;justify-content:space-between"><span id="pedalName">Pedal: ' + pi.name + '</span><span id="pedalPct">' + pi.text + '</span></div>' +
       '<div class="bar"><div id="pedalBar" style="width:' + (pi.v * 100) + '%;background:' + (K ? 'linear-gradient(90deg,#F28C28,#8A3F0A)' : bc) + '"></div></div>' +
       '<div class="zones">' + pi.zones.map(function (z) { return '<span>' + z + '</span>'; }).join('') + '</div>' +
@@ -475,7 +487,8 @@ var KS = (function () {
       }
       case 'dim': return 'Mode ' + fmt('dim.mode') + ' on the ' + (Math.round(val('dim.path')) ? 'full sound' : 'bottom end');
       case 'grains': return fmt('grains.effect') + ' ' + fmt('grains.variant') + ', ' + fmt('grains.subdiv') + (Math.round(val('grains.pitch')) ? ', ' + fmt('grains.pitch') + ' up' : '');
-      case 'delay': return fmt('delay.type') + ', ' + (Math.round(val('delay.sync')) ? fmt('delay.sync') : fmt('delay.time')) + ', ' + fmt('delay.feedback') + ' repeats';
+      case 'tempo': return fmt('tempo.bpm') + ', tap on Play';
+      case 'delay': return fmt('delay.type') + ', ' + (Math.round(val('delay.sync')) ? fmt('delay.sync') + ' of the tempo' : fmt('delay.time')) + ', ' + fmt('delay.feedback') + ' repeats';
       case 'reverb': return fmt('reverb.type') + (Math.round(val('reverb.type')) === 11 ? (S.space ? ', ' + S.space : ', no space loaded') : Math.round(val('reverb.type')) === 10 ? ', ' + fmt('reverb.length') : ', ' + fmt('reverb.decay'));
       case 'wah': return 'Heel ' + fmt('wah.low') + ' Hz to toe ' + fmt('wah.high') + ' Hz';
       case 'pedal': return 'Now: ' + pedalInfo().name + ' in ' + BANKS[S.bank].name;
@@ -497,7 +510,7 @@ var KS = (function () {
       ['Bottom end dry', ['lowcomp']],
       ['Bottom end wet', dimFull ? ['drone'] : ['dim', 'drone']],
       ['Full sound', (place === 0 ? ['bitrot', 'drive', 'preamp'] : place === 1 ? ['drive', 'bitrot', 'preamp'] : ['drive', 'preamp', 'bitrot']).concat(['filter', 'wah'], dimFull ? ['dim'] : [], ['grains', 'delay', 'reverb'])],
-      ['Control', ['footswitches', 'pedal', 'bloom', 'output']]];
+      ['Control', ['tempo', 'footswitches', 'pedal', 'bloom', 'output']]];
     var seen = {}, out = [];
     paths.forEach(function (pg) {
       var list = pg[1].filter(function (id) { return by[id]; }).map(function (id) { seen[id] = 1; return by[id]; });
@@ -595,7 +608,7 @@ var KS = (function () {
     if (id === 'bitrot.gate') return 'How quiet a note can be and still play the synth. It follows how hard you play, so hiss never plays it.';
     if (id === 'bitrot.clean') return 'How much of your clean bass stays under the synth, lows included.';
     if (id === 'grains.pitch') return 'Off plays Speckle on your full sound. The others pitch it up first, always in key, to sit above the band.';
-    if (id === 'grains.subdiv') return 'Steps of the delay time, so tap tempo sets Speckle too.';
+    if (id === 'grains.subdiv') return 'Steps of the song\'s tempo, so tap tempo sets Speckle too.';
     if (id === 'grains.filter') return 'Fully up is open. Down darkens the effect, and right down mutes it.';
     if (id === 'grains.space') return 'A dotted echo and a reverb on the effect only. Fully up is all space.';
     if (id === 'preamp.gain') return 'Two valve stages. Low is warm and clean, the middle thickens as you dig in, the top growls. The level stays put.';
@@ -899,6 +912,7 @@ var KS = (function () {
     var i2 = d.i != null ? +d.i : -1;
     switch (d.act) {
       case 'keep': send({ t: 'keep' }); break;
+      case 'tapTempo': send({ t: 'tap' }); t.classList.add('hit'); setTimeout(function () { t.classList.remove('hit'); }, 120); break;
       case 'footMode': if (send({ t: 'footMode', m: S.footMode ? 0 : 1 })) { S.footMode = S.footMode ? 0 : 1; render(true); } break;
       case 'rig': if (send({ t: 'rig', r: kud() ? 0 : 1 })) { S.rig = kud() ? 0 : 1; render(); } break;
       case 'manual': var mi = document.getElementById('manualIp'); if (mi && mi.value.trim()) { S.manualIp = mi.value.trim(); if (window.KeystoneNative && KeystoneNative.connectTo) KeystoneNative.connectTo(S.manualIp); toast('TRYING'); } break;

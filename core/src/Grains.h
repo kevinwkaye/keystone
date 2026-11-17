@@ -113,9 +113,9 @@ public:
         p.activity = V (v, P::GrActivity);
         p.repeats = V (v, P::GrRepeats);
         p.shape = V (v, P::GrContour);
-        // the delay's time (tap tempo sets it) is the beat
+        // the song's tempo is the beat
         static constexpr float subdiv[9] = { 4.0f, 2.0f, 1.5f, 1.0f, 2.0f / 3.0f, 0.75f, 0.5f, 1.0f / 3.0f, 0.25f };
-        p.beatSamples = clampf (V (v, P::DlTime), 150.0f, 1500.0f) * 0.001f * sr;
+        p.beatSamples = 60000.0f / clampf (V (v, P::Tempo), 40.0f, 240.0f) * 0.001f * sr;
         p.stepSamples = p.beatSamples * subdiv[std::max (0, std::min (8, Vi (v, P::GrSubdiv)))];
         p.filter = V (v, P::GrFilter);
         p.resonance = V (v, P::GrRes);

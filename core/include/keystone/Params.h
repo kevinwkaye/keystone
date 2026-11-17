@@ -170,7 +170,8 @@ struct ParamInfo
     P(BloomGrains,    "bloom.grains",    "Bloom reach",   "grains",  "Bloom reach",    Slider, 0,    1,    1,    "%",  "None|Full", None) \
     P(DlOn,           "delay.on",        "On",            "delay",   "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(DlType,         "delay.type",      "Type",          "delay",   "Type",           Choice, 0,    11,   0,    "",   "Digital|Bucket|Tape|Dual|Pattern|Reverse|Ice|Swell|Trem|Filter|Lo-fi|Galaxy", None) \
-    P(DlSync,         "delay.sync",      "Time",          "delay",   "Time",           Choice, 0,    3,    0,    "",   "Free|1/4|1/8.|1/8", None) \
+    P(Tempo,          "tempo.bpm",       "Tempo",         "tempo",   "This song",      Flip,   40,   240,  120,  "BPM","",   None) \
+    P(DlSync,         "delay.sync",      "Time",          "delay",   "Time",           Choice, 0,    8,    0,    "",   "Free|1/4|1/8.|1/8|1/2|1/4.|1/4T|1/8T|1/16", None) \
     P(DlTime,         "delay.time",      "Time",          "delay",   "Time",           Flip,   40,   1500, 420,  "ms", "",   Log) \
     P(DlFeedback,     "delay.feedback",  "Repeats",       "delay",   "Repeats",        Flip,   0,    0.95f,0.35f,"%",  "",   None) \
     P(DlMix,          "delay.mix",       "Mix",           "delay",   "Repeats",        Flip,   0,    1,    0.3f, "%",  "",   None) \

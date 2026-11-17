@@ -46,6 +46,9 @@ struct Controller::State
     // the two rigs: songs and current are the playing rig's list, other the resting one's
     int rig = 0;
     int footMode = 0;                       // Keystone's feet: 0 Stomp, 1 Song
+    double lastTap = 0;                     // tap tempo
+    std::array<double, 4> tapGaps {};
+    int tapCount = 0;
     int undoSong = -1;                      // Song mode: where a C press came from, in case it was half of C+D
     double undoAt = -10;
     std::vector<Song> other;
@@ -225,6 +228,9 @@ static std::vector<Controller::Song> readList (const json& j, const std::map<std
             if (was ("drive.drive.level", 0.0f)) song.values["drive.drive.level"] = 1.5f;
             if (was ("preamp.blend", 0.5f) && was ("preamp.gain", 0.6f)) song.values["preamp.blend"] = 0.65f;
         }
+        // setlist version 8 (0.4.2): each song has a tempo. It starts from the delay time,
+        // which was the beat before, so synced delays and Speckle keep their timing.
+        if (parts && version < 8) song.values["tempo.bpm"] = std::round (clampf (60000.0f / std::max (1.0f, song.values["delay.time"]), 40.0f, 240.0f) * 10.0f) / 10.0f;
         out.push_back (std::move (song));
         if ((int) out.size() >= max) break;
     }
@@ -308,7 +314,7 @@ void Controller::useBandSetlist (bool backup)
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 7;
+    j["version"] = 8;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)
@@ -421,6 +427,23 @@ void Controller::jumpSong (int dir)
     else { --i; while (i > 0 && isPart (i)) --i; }
     if (i < 0 || i >= n) { queueToast (dir > 0 ? "LAST SONG" : "FIRST SONG"); return; }
     selectSong (i);
+}
+
+// Tap tempo: the average of the last few gaps, to a tenth of a BPM; a pause of two seconds
+// starts afresh. A free delay follows the tap as well.
+void Controller::tapTempo (double now)
+{
+    const double gap = s->lastTap > 0 ? (now - s->lastTap) * 1000.0 : 1.0e9;
+    s->lastTap = now;
+    if (gap > 2000.0) { s->tapCount = 0; return; }
+    if (gap < 250.0) return;
+    s->tapGaps[(size_t) (s->tapCount++ % 4)] = gap;
+    const int k = std::min (s->tapCount, 4);
+    double sum = 0;
+    for (int i = 0; i < k; ++i) sum += s->tapGaps[(size_t) i];
+    const double ms = sum / k;
+    setValue (P::Tempo, (float) (std::round (600000.0 / ms) / 10.0));
+    if (std::lround (value (P::DlSync)) == 0) setValue (P::DlTime, (float) ms);
 }
 
 int Controller::footMode() const { return s->footMode; }
@@ -997,7 +1020,7 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         const std::string op = m.value ("op", std::string());
         engine.action (op == "clear" ? Action::DroneClear : Action::DroneCapture);
     }
-    else if (t == "tap") engine.action (Action::DelayTap);
+    else if (t == "tap") tapTempo (std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count());
     else if (t == "capture")
     {
         std::string err;

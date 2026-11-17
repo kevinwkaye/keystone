@@ -412,6 +412,55 @@ static void testTapeMachines()
         }
 }
 
+// ---------------------------------------------------------------------------------------
+// Tempo: saved per song, tapped from the phone, synced delays and Speckle follow it.
+static double echoMs (Engine& e)
+{
+    // a click, then the time of the loudest repeat
+    // a second of silence first, so the delay time has settled
+    std::vector<float> in ((size_t) (3.0 * kSr), 0.0f);
+    in[(size_t) (1.0 * kSr)] = 0.8f;
+    auto y = render (e, in);
+    size_t best = 0; float pk = 0;
+    for (size_t i = (size_t) (1.03 * kSr); i < y.size(); ++i) if (std::fabs (y[i]) > pk) { pk = std::fabs (y[i]); best = i; }
+    return ((double) best / kSr - 1.0) * 1000.0;
+}
+
+static void testTempo()
+{
+    std::printf ("Tempo\n");
+    auto setup = [] (Engine& e)
+    {
+        e.prepare (kSr, 64); neutral (e); e.setParam (P::DroneOn, 0);
+        e.setParam (P::DlOn, 1); e.setParam (P::DlMix, 1.0f); e.setParam (P::DlFeedback, 0.0f); e.setParam (P::DlType, 0);
+    };
+    // each on a fresh delay, since a changed time glides
+    auto at = [&] (int sync, float bpm, float ms) { Engine e; setup (e); e.setParam (P::Tempo, bpm); e.setParam (P::DlSync, (float) sync); e.setParam (P::DlTime, ms); return echoMs (e); };
+    const double q = at (1, 100, 420), d = at (2, 100, 420), f = at (0, 100, 300), t3 = at (6, 100, 420);
+    CHECK (std::fabs (q - 600) < 20, "100 BPM, delay on 1/4: repeats after %.0f ms (mark 600)", q);
+    CHECK (std::fabs (d - 450) < 20, "dotted 1/8: %.0f ms (mark 450)", d);
+    CHECK (std::fabs (t3 - 400) < 20, "1/4 triplet: %.0f ms (mark 400)", t3);
+    CHECK (std::fabs (f - 300) < 20, "Free ignores the tempo: %.0f ms (mark 300)", f);
+    {
+        // four taps 500 ms apart: 120 BPM; a free delay follows the tap
+        const auto dir = std::filesystem::temp_directory_path() / "keystone_tap";
+        std::filesystem::remove_all (dir);
+        Engine e; e.prepare (kSr, 64);
+        Controller c (e, dir.string(), (dir / "caps").string());
+        c.load();
+        c.setValue (P::DlSync, 0);
+        c.takeBroadcasts();
+        for (int i = 0; i < 4; ++i) c.tapTempo (10.0 + 0.5 * i);
+        CHECK (std::fabs (c.value (P::Tempo) - 120) < 0.06f && std::fabs (c.value (P::DlTime) - 500) < 0.5f, "four taps 500 ms apart: %.1f BPM, delay %.0f ms", c.value (P::Tempo), c.value (P::DlTime));
+        int sent = 0;
+        for (auto& m : c.takeBroadcasts()) sent += m.find ("tempo.bpm") != std::string::npos;
+        CHECK (sent > 0, "and the phone hears the new tempo");
+        for (int i = 0; i < 3; ++i) c.tapTempo (20.0 + 0.4 * i);
+        CHECK (std::fabs (c.value (P::Tempo) - 150) < 0.06f, "after a pause the taps start afresh: %.1f BPM (mark 150)", c.value (P::Tempo));
+        std::filesystem::remove_all (dir);
+    }
+}
+
 static void testDelayLimits()
 {
     std::printf ("Delay at the edge: Bloom, full repeats and Hold\n");
@@ -1297,6 +1346,7 @@ static void testNewDefaults()
     c.load();
     CHECK (std::fabs (c.value (P::BitrotVol) - 0.4f) < 1e-4 && c.value (P::DroneRelease) == 2.0f && c.value (P::DrivePresence) == 4.0f,
            "a song on the old defaults moves to the new ones");
+    CHECK (std::fabs (c.value (P::Tempo) - 142.9f) < 0.05f, "and gets a tempo from its delay time (%.1f BPM from 420 ms)", c.value (P::Tempo));
     c.selectSong (1);
     CHECK (std::fabs (c.value (P::BitrotVol) - 0.55f) < 1e-4 && c.value (P::DroneRelease) == 6.0f, "a song you'd changed keeps your settings");
     std::filesystem::remove_all (dir);
@@ -1625,6 +1675,7 @@ int main (int argc, char** argv)
         testDelayTypes();
         testTapeMachines();
         testDelayLimits();
+        testTempo();
         testBitrotSynth();
     testOffMeansOff();
     testValvePreamp();

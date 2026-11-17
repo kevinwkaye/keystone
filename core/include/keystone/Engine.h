@@ -51,7 +51,6 @@ enum class Action
     TunerOn,
     TunerOff,
     TunerToggle,
-    DelayTap,        // tap tempo for the delay
     Spill,           // the next few blocks: delay and reverb switched off keep their tails
 };
 

@@ -80,6 +80,7 @@ public:
     int footMode() const;
     void setFootMode (int m);
     void jumpSong (int dir);   // whole songs, skipping parts
+    void tapTempo (double nowSeconds);   // the phone's Tap, sets the song's tempo
 private:
     void syncPairs();
 public:

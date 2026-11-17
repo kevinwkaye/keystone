@@ -110,9 +110,6 @@ struct Engine::Impl
     bool autoLight = false;
 
     // delay tap tempo
-    std::atomic<int> tapRequests { 0 };
-    int tapSeen = 0;
-    int64_t sampleClock = 0, lastTap = -1;
 
     std::string capName;
     mutable std::mutex capLock;
@@ -212,8 +209,6 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.tunerRing.assign (8192, 0.0f);
     d.tunerPos = 0;
     d.inPk = d.outPk = d.outMs = 0;
-    d.sampleClock = 0;
-    d.lastTap = -1;
 }
 
 void Engine::setParam (P p, float value)
@@ -293,7 +288,6 @@ void Engine::action (Action a)
         case Action::TunerOn: d.tunerOn.store (true); break;
         case Action::TunerOff: d.tunerOn.store (false); break;
         case Action::TunerToggle: d.tunerOn.store (! d.tunerOn.load()); break;
-        case Action::DelayTap: d.tapRequests.fetch_add (1); break;
         case Action::Spill: d.spillRequests.fetch_add (1); break;
     }
 }
@@ -371,18 +365,6 @@ void Engine::process (const float* in, float* out, int numSamples)
         const bool cutTails = Vi (v, P::BloomTails) == 0;
 
         // tap tempo for the delay: time between two taps under 2 s
-        const int tr = d.tapRequests.load();
-        if (tr != d.tapSeen)
-        {
-            d.tapSeen = tr;
-            if (d.lastTap >= 0)
-            {
-                const double ms = (double) (d.sampleClock - d.lastTap) * 1000.0 / d.sr;
-                if (ms > 40 && ms < 1500) values[(size_t) P::DlTime].store ((float) ms);
-            }
-            d.lastTap = d.sampleClock;
-        }
-        d.sampleClock += n;
 
         // ---- the other pedal jobs ----
         // dirt blend: heel clean, the drive fully in by halfway, Bitrot from "joins at" to
