@@ -126,7 +126,7 @@ public:
     void reset()
     {
         for (auto* b : { &couple1, &couple2, &miller1, &miller2, &cHp, &cPeak, &cLp, &detail, &ultraLo1, &ultraLo2, &ultraHi,
-                         &tapePre, &tapeDe, &bump, &tapeLp })
+                         &tapePre, &tapeDe, &bump, &tapeLp, &growlPk, &growlDe, &cab, &cab2, &midFill })
             b->reset();
         tri1.reset(); tri2.reset(); ovs.reset(); dry.reset(); cSat.reset(); tapeSat.reset(); stack.reset(); line.reset();
         blendS.reset (0.3f); stageS.reset (4.0f);
@@ -142,6 +142,18 @@ public:
         const float mf = V (v, P::PreMidFreq), mp = V (v, P::PreMid), det = V (v, P::PreDetail);
         if (! init || mf != lmf || mp != lmp) { cPeak.peak (mf, 1.1f, 10.0f * mp, sr); lmf = mf; lmp = mp; }
         if (! init || det != ldet) { detail.peak (3000.0f, 0.7f, det, sr); ldet = det; }
+        {   // growl: the valve breaks up in the low mids, and the top is rolled off like a cab
+            const float gg = V (v, P::PreGain);
+            if (! init || gg != lgrowl)
+            {
+                growlPk.peak (600.0f, 0.7f, 6.0f + 6.0f * gg, sr);      // the low mids hit the valve hardest
+                growlDe.peak (600.0f, 0.7f, -(3.0f + 3.0f * gg), sr);   // half taken back after, so it leans, not honks
+                midFill.peak (550.0f, 0.8f, 10.0f, sr);                // fills the passive stack's scoop: an amp, not a hi-fi
+                const float fc = 6000.0f - 5000.0f * gg;                // the cab: darker as it's pushed
+                cab.lowPass (fc, 0.54f, sr); cab2.lowPass (fc, 1.31f, sr);
+                lgrowl = gg;
+            }
+        }
         const float tp = V (v, P::PreTape);
         if (! init || tp != ltape)
         {
@@ -202,10 +214,11 @@ private:
 
         // ---- valve: two triode stages at twice the rate, bias shifting as you dig in ----
         float u0, u1;
-        ovs.up (x * sg, u0, u1);
+        ovs.up (growlPk.process (x * sg), u0, u1);
         const float o0 = valveAt2x (u0), o1 = valveAt2x (u1);
         float valve = ovs.down (o0, o1) / (drive1 * drive2) * makeup;
-        valve = stack.process (valve) * stackMakeup;
+        valve = cab2.process (cab.process (growlDe.process (valve)));
+        valve = midFill.process (stack.process (valve)) * stackMakeup;
         valve = ultraHi.process (ultraLo2.process (ultraLo1.process (valve)));
         const float in = xd * sg;   // the Cut voice works on the same, lined-up signal
 
@@ -281,11 +294,11 @@ private:
     DelayLine dry;
     float sr = 48000, gain = 0, drive1 = 1, drive2 = 1, sag = 0, cDrive = 1, tape = 0, wow = 0, level = 1;
     float env = 0, envA = 0.01f, envR = 0.001f, stackMakeup = 1, wowPh = 0, flutPh = 0;
-    float lt = -1, lm = -1, lb = -1, lmf = -1, lmp = -1, ldet = -99, ltape = -1;
+    float lgrowl = -1, lt = -1, lm = -1, lb = -1, lmf = -1, lmp = -1, ldet = -99, ltape = -1;
     bool lulo = false, luhi = false, init = false;
     Triode tri1, tri2;
     ToneStack stack;
-    Biquad couple1, couple2, miller1, miller2, cHp, cPeak, cLp, detail, ultraLo1, ultraLo2, ultraHi, tapePre, tapeDe, bump, tapeLp;
+    Biquad couple1, couple2, miller1, miller2, cHp, cPeak, cLp, detail, ultraLo1, ultraLo2, ultraHi, tapePre, tapeDe, bump, tapeLp, growlPk, growlDe, cab, cab2, midFill;
     AdaaTanh cSat, tapeSat;
     DelayLine line;
     Smoothed blendS, stageS;

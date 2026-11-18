@@ -139,7 +139,7 @@ static const Overrides kClean = { { "drive.on", 0 }, { "drive.voice", 0 }, { "fs
 static const Overrides kBlumes = { { "drive.on", 1 }, { "drive.voice", 1 }, { "fs.aCycle", 3 } };
 // the Blumes with the preamp pushed: more valve gain and grit, and more Cut so it carries
 static const Overrides kPushed = { { "drive.on", 1 }, { "drive.voice", 1 }, { "fs.aCycle", 3 },
-                                   { "preamp.gain", 0.6f }, { "preamp.drive", 0.45f }, { "preamp.blend", 0.65f } };
+                                   { "preamp.gain", 0.65f }, { "preamp.blend", 0.2f } };
 // Speckle as sparkle: Haze, an octave up, sitting back
 static const Overrides kSparkle = { { "grains.on", 1 }, { "grains.effect", 3 }, { "grains.pitch", 1 }, { "grains.mix", 0.35f } };
 
@@ -284,6 +284,23 @@ static std::vector<Controller::Song> readList (const json& j, const std::map<std
             if (was ("drive.drive.level", 0.0f)) song.values["drive.drive.level"] = 1.5f;
             if (was ("preamp.blend", 0.5f) && was ("preamp.gain", 0.6f)) song.values["preamp.blend"] = 0.65f;
         }
+        // setlist version 9 (0.4.9): Growl is the valve on its own and growls, Cut is the
+        // modern voice on its own and bites, and Bitrot goes before the preamp. Only values
+        // still on the old defaults move; ones you'd changed stay.
+        if (parts && version < 9)
+        {
+            auto was = [&] (const char* id, float x) { return std::fabs (song.values[id] - x) < 1.0e-3f; };
+            if (was ("preamp.blend", 0.65f) && was ("preamp.gain", 0.6f)) { song.values["preamp.blend"] = 0.2f; song.values["preamp.gain"] = 0.65f; if (was ("preamp.drive", 0.45f)) song.values["preamp.drive"] = 0.6f; }
+            if (was ("preamp.blend", 0.3f)) song.values["preamp.blend"] = 0.0f;
+            if (was ("preamp.gain", 0.35f)) song.values["preamp.gain"] = 0.45f;
+            if (was ("preamp.blendB", 0.85f)) song.values["preamp.blendB"] = 1.0f;
+            if (was ("preamp.mid", 0.5f)) song.values["preamp.mid"] = 0.9f;
+            if (was ("preamp.drive", 0.25f)) song.values["preamp.drive"] = 0.6f;
+            if (was ("preamp.midFreq", 1000.0f)) song.values["preamp.midFreq"] = 1100.0f;
+            if (was ("bitrot.place", 2.0f)) song.values["bitrot.place"] = 1.0f;
+            // halls, rooms and plates no longer shimmer unless you ask (the Shimmer type still does)
+            if (was ("reverb.shimmer", 0.3f) && ! was ("reverb.type", 8.0f)) song.values["reverb.shimmer"] = 0.0f;
+        }
         // setlist version 8 (0.4.2): each song has a tempo. It starts from the delay time,
         // which was the beat before, so synced delays and Speckle keep their timing.
         if (parts && version < 8) song.values["tempo.bpm"] = std::round (clampf (60000.0f / std::max (1.0f, song.values["delay.time"]), 40.0f, 240.0f) * 10.0f) / 10.0f;
@@ -389,7 +406,7 @@ void Controller::useBandSetlist (bool backup)
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 8;
+    j["version"] = 9;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)

@@ -1,9 +1,14 @@
 #pragma once
 // Keystone reverb: twelve spaces in one mono engine.
 //
-// Room, Hall, Plate, Chamber, Cloud, Bloom, Chorale, Shimmer and Magneto share an 8-line
-// feedback delay network with per-type voicing (size, diffusion, early reflections,
-// modulation). Spring is its own dispersive tank, Nonlinear a shaped burst of dense taps,
+// Room, Hall, Plate, Chamber, Cloud, Bloom, Chorale, Shimmer and Magneto share a 16-line
+// feedback delay network built to the standard of the big studio reverbs: every line moves
+// on its own slow, drifting modulation (read with smooth interpolation, so the tail shimmers
+// instead of ringing), and every line has a three-band decay, so the lows, the mids and the
+// highs each die away in their own time (the highs faster, the way air and walls take them),
+// rather than one filter dulling the whole tail a little more every pass. The low cut is
+// taken once on the way in, so the tail keeps its body. Rooms, chambers and halls get a
+// spread of early reflections in front. Spring is its own dispersive tank, Nonlinear a shaped burst of dense taps,
 // Impulse plays your own .wav spaces (Convolver.h).
 //
 // Shared: Decay, Pre-delay, Mix, Darkness, Low cut, Duck, Mod, Swell, Grit and Freeze.
@@ -19,12 +24,12 @@ class Reverb
 {
 public:
     enum Type { Room = 0, Hall, Plate, Spring, Chamber, Cloud, Bloom, Chorale, Shimmer, Magneto, Nonlinear, Impulse, kTypes };
-    static constexpr int kLines = 8, kDiff = 6, kTaps = 24, kSprings = 3, kSpringAp = 8;
+    static constexpr int kLines = 16, kDiff = 6, kTaps = 24, kSprings = 3, kSpringAp = 8;
 
     void prepare (float sr_)
     {
         sr = sr_;
-        for (auto& l : lines) l.prepare ((int) (0.2f * sr) + 64);
+        for (auto& l : lines) l.prepare ((int) (0.25f * sr) + 64);
         pre.prepare ((int) (0.27f * sr) + 8);
         for (auto& a : diff) a.prepare ((int) (0.06f * sr));
         for (auto& a : bloomAp) a.prepare ((int) (0.2f * sr));
@@ -45,6 +50,8 @@ public:
         slowEnv.set (0.08f, 0.3f, sr);
         swellFall = onePoleCoef (0.003f, sr);
         lenGlide = 1.0f - onePoleCoef (0.15f, sr);
+        driftGlide = 1.0f / (0.35f * sr);
+        inHpEr.highPass (150.0f, 0.707f, sr);
         echoLp.setLowPass (4200.0f, sr);
         echoHp.setLowPass (120.0f, sr);
         for (auto& f : springLp) f.setLowPass (4500.0f, sr);
@@ -56,10 +63,11 @@ public:
     {
         for (auto& l : lines) l.reset();
         for (auto& d : damp) d.reset();
+        for (auto& d : bandL) d.reset();
         for (auto& h : hpf) h.reset();
         for (auto& a : diff) a.reset();
         for (auto& a : bloomAp) a.reset();
-        shift.reset(); echo.reset(); burst.reset();
+        shift.reset(); echo.reset(); burst.reset(); erLp.reset();
         for (auto& sl : springLine) sl.reset();
         for (auto& ap : springAp) for (auto& a : ap) a.reset();
         for (auto& b : formant) b.reset();
@@ -71,8 +79,10 @@ public:
     {
         for (auto& l : lines) l.reset();
         for (auto& d : damp) d.reset();
+        for (auto& d : bandL) d.reset();
         for (auto& h : hpf) h.reset();
-        pre.reset();
+        pre.reset(); inHp1.reset(); inHp2.reset(); erLp.reset();
+        for (int i = 0; i < kLines; ++i) { drift[i] = 0; driftT[i] = 0; ph[i] = 0.137f * (float) i; }
         for (auto& a : diff) a.reset();
         for (auto& a : bloomAp) a.reset();
         shift.reset();
@@ -129,20 +139,23 @@ public:
     {
 
         // per type voicing: line size, input diffusion, early reflections, built-in movement
-        struct Voice { float size, diff, er, mod, bright, trim; };
+        // lo and hi: how long the lows (below 250 Hz) and the highs (above hiHz) ring, as a
+        // share of Decay, which sets the mids. Measured against the BigSky's factory sounds:
+        // lows a touch longer in the big spaces, the top falling away about twice as fast.
+        struct Voice { float size, diff, er, mod, bright, trim, lo, hi, hiHz; };
         static const Voice voices[kTypes] = {
-            { 0.38f, 0.60f, 0.9f, 0.15f, 1.00f, 1.25f },   // Room
-            { 1.00f, 0.70f, 0.3f, 0.45f, 0.90f, 1.00f },   // Hall
-            { 0.60f, 0.85f, 0.0f, 0.30f, 1.40f, 1.05f },   // Plate
-            { 0.30f, 0.50f, 0.0f, 0.10f, 1.00f, 1.00f },   // Spring (own tank)
-            { 0.62f, 0.72f, 1.0f, 0.20f, 0.75f, 1.0f },    // Chamber
-            { 1.45f, 0.85f, 0.0f, 0.65f, 0.85f, 1.00f },   // Cloud
-            { 1.10f, 0.75f, 0.0f, 0.50f, 0.90f, 1.05f },   // Bloom
-            { 1.00f, 0.72f, 0.0f, 0.55f, 1.00f, 1.70f },   // Chorale
-            { 1.10f, 0.75f, 0.0f, 0.50f, 1.00f, 1.00f },   // Shimmer
-            { 0.90f, 0.70f, 0.0f, 0.40f, 0.80f, 1.00f },   // Magneto
-            { 0.50f, 0.70f, 0.0f, 0.00f, 1.00f, 1.00f },   // Nonlinear (own taps)
-            { 1.00f, 0.00f, 0.0f, 0.00f, 1.00f, 1.00f },   // Impulse (convolution)
+            { 0.38f, 0.60f, 0.9f, 0.15f, 1.00f, 1.00f, 1.00f, 0.55f, 4000.0f },   // Room
+            { 1.00f, 0.70f, 0.4f, 0.45f, 0.90f, 1.00f, 1.25f, 0.45f, 3500.0f },   // Hall
+            { 0.62f, 0.85f, 0.0f, 0.40f, 1.40f, 1.05f, 0.80f, 0.75f, 6000.0f },   // Plate
+            { 0.30f, 0.50f, 0.0f, 0.10f, 1.00f, 1.00f, 1.00f, 1.00f, 5000.0f },   // Spring (own tank)
+            { 0.62f, 0.72f, 1.0f, 0.20f, 0.75f, 0.80f, 1.10f, 0.50f, 3000.0f },   // Chamber
+            { 1.45f, 0.85f, 0.0f, 0.65f, 0.85f, 1.00f, 1.30f, 0.55f, 3000.0f },   // Cloud
+            { 1.10f, 0.75f, 0.0f, 0.50f, 0.90f, 1.05f, 1.20f, 0.50f, 3500.0f },   // Bloom
+            { 1.00f, 0.72f, 0.0f, 0.55f, 1.00f, 2.40f, 1.20f, 0.50f, 3500.0f },   // Chorale
+            { 1.10f, 0.75f, 0.0f, 0.50f, 1.00f, 1.00f, 1.00f, 0.65f, 5000.0f },   // Shimmer
+            { 0.90f, 0.70f, 0.0f, 0.40f, 0.80f, 1.00f, 1.10f, 0.45f, 3000.0f },   // Magneto
+            { 0.50f, 0.70f, 0.0f, 0.00f, 1.00f, 1.00f, 1.00f, 1.00f, 5000.0f },   // Nonlinear (own taps)
+            { 1.00f, 0.00f, 0.0f, 0.00f, 1.00f, 1.00f, 1.00f, 1.00f, 5000.0f },   // Impulse (convolution)
         };
         const Voice& vc = voices[type];
         const float userSize = V (v, P::RvSize), userDiff = V (v, P::RvDiffusion);
@@ -151,8 +164,9 @@ public:
         erAmt = vc.er;
         modAmt = vc.mod + V (v, P::RvMod);
         trim = vc.trim;
-        static const float base[kLines] = { 29.7f, 37.1f, 41.1f, 43.7f, 53.3f, 59.9f, 67.7f, 73.1f };
-        nLines = lightMode ? 4 : kLines;
+        static const float base[kLines] = { 23.3f, 27.1f, 29.9f, 33.7f, 37.3f, 41.9f, 45.1f, 49.7f,
+                                            53.9f, 58.3f, 63.1f, 67.9f, 73.7f, 79.1f, 85.3f, 93.7f };
+        nLines = lightMode ? 8 : kLines;
         for (int i = 0; i < kLines; ++i)
         {
             const int idx = lightMode ? i * 2 % kLines : i;
@@ -162,7 +176,13 @@ public:
 
         const float dark = V (v, P::RvDamp);
         dampHz = std::min (0.45f * sr, 12000.0f * vc.bright * std::pow (0.12f, dark));
+        // Darkness also moves where the highs start to fall away, and how fast
+        hiRatio = clampf (vc.hi * std::pow (2.0f, (0.5f - dark) * 1.4f), 0.12f, 1.0f);
+        loRatio = vc.lo;
+        hiHz = std::min (0.4f * sr, vc.hiHz * std::pow (2.0f, (0.5f - dark) * 2.0f));
+        erLp.setLowPass (std::min (0.45f * sr, 7000.0f * std::pow (2.0f, 0.5f - dark)), sr);
         lowCut = V (v, P::RvLowCut);
+        if (std::fabs (lowCut - lastLowCut) > 0.5f) { inHp1.setLowPass (0.55f * lowCut, sr); inHp2.setLowPass (0.55f * lowCut, sr); lastLowCut = lowCut; }
         predelay = V (v, P::RvPredelay) * 0.001f * sr;
         duck = V (v, P::RvDuck);
         swellSamples = V (v, P::RvSwell) * sr;
@@ -170,7 +190,7 @@ public:
 
         const bool shimmerShown = type <= Plate || type == Chamber || type == Cloud || type == Bloom || type == Shimmer;
         float sh = shimmerShown ? V (v, P::RvShimmer) : 0.0f;
-        if (type == Shimmer) sh = std::max (sh, 0.2f);
+        if (type == Shimmer) sh = std::max (sh, 0.35f);   // the others shimmer only if you ask
         shimS.set (sh);
         static const float ratios[3] = { 2.0f, 1.5f, 3.0f };
         ratio = ratios[std::max (0, std::min (2, Vi (v, P::RvInterval)))];
@@ -226,7 +246,8 @@ public:
             case Spring: wet = springTank (s); break;
             case Nonlinear: wet = nonlinear (s); break;
             case Impulse: wet = conv.process (s); break;
-            default: wet = fdn (s); break;
+            // the low cut, once, on the way in (before the switch ramp, so a fresh space starts from silence)
+            default: wet = fdn (inHp2.hp (inHp1.hp (pre.frac (std::max (1.0f, predelay)))) * swS); break;
         }
         if (type == Spring || type == Nonlinear || type == Impulse) wet = outHp.hp (outLp.lp (wet));
 
@@ -251,12 +272,16 @@ private:
         }
     };
 
+    // each line loses exactly what it should in its own length: true RT60s, band by band
     void updateGains()
     {
+        const float T = std::max (0.2f, decaySec), cap = 0.9995f + 0.0055f * runAmt;
         for (int i = 0; i < kLines; ++i)
         {
-            const float g = std::pow (10.0f, -3.0f * len[i] / (std::max (0.2f, decaySec) * sr));
-            gains[i] = freeze ? 1.0f : std::min (g, 0.9995f + 0.0055f * runAmt);
+            auto g = [&] (float t) { return std::min (cap, std::pow (10.0f, -3.0f * len[i] / (t * sr))); };
+            gains[i] = freeze ? 1.0f : g (T);
+            gainLo[i] = freeze ? 1.0f : g (T * loRatio);
+            gainHi[i] = freeze ? 1.0f : std::max (0.05f, g (T * hiRatio));
         }
     }
 
@@ -264,8 +289,9 @@ private:
     {
         for (int i = 0; i < kLines; ++i)
         {
-            damp[i].setLowPass (freeze ? 0.45f * sr : dampHz, sr);
-            hpf[i].setLowPass (freeze ? 10.0f : std::max (lowCut * 0.5f, 130.0f * runAmt), sr);
+            bandL[i].setLowPass (250.0f, sr);
+            damp[i].setLowPass (0.6f * hiHz, sr);   // a one-pole shelf, so it sits lower to land the highs on time
+            hpf[i].setLowPass (std::max (10.0f, 130.0f * runAmt), sr);
         }
     }
 
@@ -308,37 +334,54 @@ private:
         }
         s = lim.process (s);
 
-        // read lines, with slow movement on each
-        lfo += 0.31f / sr;
-        if (lfo >= 1) lfo -= 1;
-        const float modDepth = modAmt * 0.0016f * sr;
-        float o[kLines];
-        for (int i = 0; i < nLines; ++i)
-        {
-            const float m = modDepth > 0.5f ? modDepth * std::sin (kTwoPi * (lfo + 0.125f * (float) i) + (float) i) : 0.0f;
-            lenNow[i] += (len[i] - lenNow[i]) * lenGlide;   // Size moves glide, never jump
-            o[i] = damp[i].lp (lines[i].frac (std::max (4.0f, lenNow[i] + m)));
-            o[i] = o[i] - hpf[i].lp (o[i]);
-            if (grit > 0.01f) { const float dr = 1.0f + 4.0f * grit; o[i] = std::tanh (o[i] * dr) / dr; }
-        }
-        hadamard (o, nLines);
-        float out = 0;
-        const float g = gateS.value;
-        for (int i = 0; i < nLines; ++i)
-        {
-            lines[i].push ((s + o[i] * gains[i]) * g);
-            out += (i & 1) ? -o[i] : o[i];
-        }
-        out *= 0.35f;
 
-        // early reflections from the pre-delay line (Room, Chamber, a touch on Hall)
+        // read the lines: each moves on its own slow sine plus a wandering drift, so no two
+        // repeat together and the tail never settles into a ring
+        const float modDepth = modAmt * 0.0011f * sr;
+        float o[kLines];
+        const int step = nLines == kLines ? 1 : 2;
+        for (int j = 0; j < nLines; ++j)
+        {
+            const int i = j * step;
+            float m = 0.0f;
+            if (modDepth > 0.5f)
+            {
+                ph[i] += (0.11f + 0.047f * (float) i) / sr;
+                if (ph[i] >= 1) ph[i] -= 1;
+                if ((count & 255) == (unsigned) (i * 16)) driftT[i] = rnd() * 2.0f - 1.0f;
+                drift[i] += (driftT[i] - drift[i]) * driftGlide;
+                m = modDepth * (0.6f * std::sin (kTwoPi * ph[i]) + 0.4f * drift[i]) * (0.7f + 0.02f * (float) i);
+            }
+            lenNow[i] += (len[i] - lenNow[i]) * lenGlide;   // Size moves glide, never jump
+            float x = lines[i].hermite (std::max (4.0f, lenNow[i] + m));
+            // three-band decay: lows, mids and highs each lose their own share per pass
+            const float lo = bandL[i].lp (x), belowHi = damp[i].lp (x);
+            x = gainLo[i] * lo + gains[i] * (belowHi - lo) + gainHi[i] * (x - belowHi);
+            if (runAmt > 0.001f) x = x - hpf[i].lp (x);
+            if (grit > 0.01f) { const float dr = 1.0f + 4.0f * grit; x = std::tanh (x * dr) / dr; }
+            o[j] = x;
+        }
+        float out = 0;
+        for (int j = 0; j < nLines; ++j) out += (j & 1) ? -o[j] : o[j];
+        out *= 0.77f * std::sqrt (8.0f / (float) nLines);
+        hadamard (o, nLines);
+        const float g = gateS.value;
+        for (int j = 0; j < nLines; ++j)
+        {
+            const int i = j * step;
+            // the input spreads into the lines with alternating signs, so it starts dense
+            lines[i].push ((s * ((j & 2) ? -0.5f : 0.5f) + o[j]) * g);
+        }
+
+        // early reflections from the pre-delay line (Room, Chamber, Hall): a spread of
+        // twelve, falling away and softened like real walls
         if (erAmt > 0.01f)
         {
-            static const float er[6] = { 7.1f, 11.3f, 17.9f, 23.3f, 31.9f, 41.3f };
-            static const float eg[6] = { 0.5f, -0.42f, 0.36f, -0.3f, 0.24f, -0.2f };
+            static const float er[12] = { 5.3f, 7.9f, 11.3f, 13.7f, 17.9f, 21.1f, 23.3f, 29.3f, 31.9f, 37.1f, 41.3f, 47.9f };
+            static const float eg[12] = { 0.55f, -0.48f, 0.42f, -0.4f, 0.34f, -0.3f, 0.27f, -0.24f, 0.2f, -0.18f, 0.15f, -0.12f };
             float e = 0;
-            for (int k = 0; k < 6; ++k) e += pre.frac (std::max (1.0f, predelay + er[k] * diffScale * 0.001f * sr)) * eg[k];
-            out += e * erAmt * 0.6f;
+            for (int k = 0; k < 12; ++k) e += pre.frac (std::max (1.0f, predelay + er[k] * diffScale * 0.001f * sr)) * eg[k];
+            out += erLp.lp (inHpEr.process (e)) * erAmt * 0.5f;
         }
         lastOut = out;
 
@@ -420,6 +463,8 @@ private:
         return swellG;
     }
 
+    float rnd() { seed = seed * 1664525u + 1013904223u; return (float) (seed >> 8) / 16777216.0f; }
+
     static void hadamard (float* o, int n)
     {
         for (int h = 1; h < n; h <<= 1)
@@ -456,7 +501,10 @@ private:
     float runAmt = 0.0f;
     int type = Hall, pendingType = Hall, nLines = kLines, springs = 2, vowel = 0, shape = 0;
     bool feeding = false, freeze = false, lightMode = false;
-    float len[kLines] {}, lenNow[kLines] {}, gains[kLines] {}, lenGlide = 0.0002f;
+    float len[kLines] {}, lenNow[kLines] {}, gains[kLines] {}, gainLo[kLines] {}, gainHi[kLines] {}, lenGlide = 0.0002f;
+    float ph[kLines] {}, drift[kLines] {}, driftT[kLines] {}, driftGlide = 0.0001f;
+    float loRatio = 1, hiRatio = 0.5f, hiHz = 3500, lastLowCut = -1;
+    uint32_t seed = 0x2545F491u;
     const Vals* vals = nullptr;
     float decaySec = 3, diffK = 0.6f, diffScale = 1, erAmt = 0, modAmt = 0.3f, trim = 1, dampHz = 6000, lowCut = 180;
     float predelay = 0, duck = 0.2f, swellSamples = 0, grit = 0, ratio = 2, tension = 0.5f, voicesAmt = 0.7f;
@@ -465,9 +513,9 @@ private:
     float swellPos = 1, swellG = 1, swellFall = 0.99f, sw = 1;
     unsigned count = 0;
     DelayLine lines[kLines], pre, shift, echo, burst, springLine[kSprings];
-    OnePole damp[kLines], hpf[kLines], echoLp, echoHp, springLp[kSprings], springHp[kSprings], outLp, outHp;
+    OnePole damp[kLines], bandL[kLines], erLp, inHp1, inHp2, hpf[kLines], echoLp, echoHp, springLp[kSprings], springHp[kSprings], outLp, outHp;
     Allpass diff[kDiff], bloomAp[3], springAp[kSprings][kSpringAp];
-    Biquad shimHp, formant[3];
+    Biquad shimHp, formant[3], inHpEr;
     Convolver conv;
     LoopLimiter lim, limEcho, limBloom, limSpring[kSprings];
     Follower duckEnv, fastEnv, slowEnv;

@@ -62,6 +62,9 @@ struct Engine::Impl
     Smoothed bloomS;
     std::vector<float> lowBuf, highBuf, cleanBuf, droneBuf, synthBuf, lowMul, synthG;
     Smoothed bitrotClean;
+    // Bitrot's synth, matched to the level you play at, so turning it on makes it fuzzier, not louder
+    float bitPowIn = 0, bitPowSy = 0, bitMatch = 1, bitAvg = 0.0005f, bitTrim = 1;
+    bool bitFresh = true;
 
     // tuner: input decimated by 4 into a ring, analysed on the housekeeping thread
     Biquad tunerLp1, tunerLp2;
@@ -157,6 +160,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.drone.prepare (s);
     d.drive.prepare (s, d.maxBlock);
     d.bitrot.prepare (s);
+    d.bitAvg = 1.0f - std::exp (-1.0f / (0.3f * (float) s)); d.bitPowIn = d.bitPowSy = 0; d.bitMatch = 1;
     d.preamp.prepare (s);
     d.iron.prepare (s);
     d.filter.prepare (s);
@@ -442,6 +446,7 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.outLevel.set (dbToGain (V (v, P::OutLevel)));
         d.bitrotOn.set (Vb (v, P::BitrotOn) ? bitMix : 0.0f);
         d.bitrotClean.set (V (v, P::BitrotClean));
+        d.bitTrim = 0.8f * V (v, P::BitrotVol) / 0.4f;   // Level: 40% sits level with your playing, the clean under it included
         d.preOn.set (Vb (v, P::PreOn) ? 1.0f : 0.0f);
         d.filtOn.set (Vb (v, P::FiltOn) ? 1.0f : 0.0f);
         d.dimOn.set (Vb (v, P::DimOn) ? 1.0f : 0.0f);
@@ -500,10 +505,32 @@ void Engine::process (const float* in, float* out, int numSamples)
             auto runBitrot = [&]()
             {
                 const bool active = Vb (v, P::BitrotOn) || d.bitrotOn.current() > 1.0e-4f;
-                if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); return; }
+                if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); d.bitFresh = true; return; }
                 float* sy = d.synthBuf.data();
                 for (int i = 0; i < n; ++i) sy[i] = d.cleanBuf[(size_t) i];   // the whole bass, sub included, so it tracks the fundamental
                 d.bitrot.process (sy, n);
+                if (d.bitFresh)
+                {
+                    // just switched on: start from this block's levels, so it lands level at once
+                    double pi = 0, ps = 0;
+                    for (int i = 0; i < n; ++i) { pi += (double) d.cleanBuf[(size_t) i] * d.cleanBuf[(size_t) i]; ps += (double) sy[i] * sy[i]; }
+                    d.bitPowIn = (float) (pi / n); d.bitPowSy = (float) (ps / n);
+                    if (d.bitPowIn > 1.0e-6f && d.bitPowSy > 1.0e-8f) d.bitMatch = clampf (std::sqrt (d.bitPowIn / d.bitPowSy), 0.05f, 4.0f);
+                    d.bitFresh = false;
+                }
+                for (int i = 0; i < n; ++i)
+                {
+                    const float c = d.cleanBuf[(size_t) i], q = sy[i];
+                    d.bitPowIn += (c * c - d.bitPowIn) * d.bitAvg;
+                    d.bitPowSy += (q * q - d.bitPowSy) * d.bitAvg;
+                    // only learn while a note sounds, so the gap between notes can't pull the synth up
+                    if (d.bitPowIn > 1.0e-6f && d.bitPowSy > 1.0e-8f)
+                    {
+                        const float want = clampf (std::sqrt (d.bitPowIn / d.bitPowSy), 0.05f, 4.0f);
+                        d.bitMatch += (want - d.bitMatch) * d.bitAvg * 0.25f;
+                    }
+                    sy[i] = q * d.bitMatch * d.bitTrim;
+                }
                 for (int i = 0; i < n; ++i)
                 {
                     const float g = d.bitrotOn.next();

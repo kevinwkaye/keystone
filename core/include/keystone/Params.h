@@ -107,25 +107,25 @@ struct ParamInfo
     P(BitrotFmDepth,  "bitrot.fmDepth",  "Depth",         "bitrot",  "Movement",       Flip,   0,    1,    0.4f, "%",  "",   None) \
     P(BitrotCorrupt,  "bitrot.corrupt",  "Corrupt",       "bitrot",  "Tracking",       Flip,   0,    1,    0.25f, "%", "",   None) \
     P(BitrotGate,     "bitrot.gate",     "Sensitivity",   "bitrot",  "Tracking",       Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(BitrotPlace,    "bitrot.place",    "Goes",          "bitrot",  "Order",          Choice, 0,    2,    2,    "",   "Before drive|After drive|After preamp", None) \
+    P(BitrotPlace,    "bitrot.place",    "Goes",          "bitrot",  "Order",          Choice, 0,    2,    1,    "",   "Before drive|After drive|After preamp", None) \
     P(PreOn,          "preamp.on",       "On",            "preamp",  "",               Toggle, 0,    1,    1,    "",   "",   None) \
-    P(PreGain,        "preamp.gain",     "Gain",          "preamp",  "Valve",          Flip,   0,    1,    0.35f,"%",  "",   None) \
+    P(PreGain,        "preamp.gain",     "Gain",          "preamp",  "Valve",          Flip,   0,    1,    0.45f,"%",  "",   None) \
     P(PreSag,         "preamp.sag",      "Sag",           "preamp",  "Valve",          Flip,   0,    1,    0.4f, "%",  "",   None) \
     P(PreBass,        "preamp.bass",     "Bass",          "preamp",  "Tone stack",     Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(PreMiddle,      "preamp.middle",   "Middle",        "preamp",  "Tone stack",     Flip,   0,    1,    0.6f, "%",  "",   None) \
     P(PreTreble,      "preamp.treble",   "Treble",        "preamp",  "Tone stack",     Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(PreUltraLo,     "preamp.ultraLo",  "Ultra Lo",      "preamp",  "Tone stack",     Toggle, 0,    1,    0,    "",   "",   None) \
     P(PreUltraHi,     "preamp.ultraHi",  "Ultra Hi",      "preamp",  "Tone stack",     Toggle, 0,    1,    0,    "",   "",   None) \
-    P(PreBlend,       "preamp.blend",    "Blend",         "preamp",  "Modern",         Slider, 0,    1,    0.3f, "%",  "Valve|Cut", None) \
-    P(PreMidFreq,     "preamp.midFreq",  "Mid focus",     "preamp",  "Modern",         Flip,   700,  1500, 1000, "Hz", "",   Log) \
-    P(PreMid,         "preamp.mid",      "Mid push",      "preamp",  "Modern",         Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(PreDrive,       "preamp.drive",    "Grit",          "preamp",  "Modern",         Flip,   0,    1,    0.25f,"%",  "",   None) \
+    P(PreBlend,       "preamp.blend",    "Blend",         "preamp",  "Modern",         Slider, 0,    1,    0.0f, "%",  "Valve|Cut", None) \
+    P(PreMidFreq,     "preamp.midFreq",  "Mid focus",     "preamp",  "Modern",         Flip,   700,  1500, 1100, "Hz", "",   Log) \
+    P(PreMid,         "preamp.mid",      "Mid push",      "preamp",  "Modern",         Flip,   0,    1,    0.9f, "%",  "",   None) \
+    P(PreDrive,       "preamp.drive",    "Grit",          "preamp",  "Modern",         Flip,   0,    1,    0.6f,"%",  "",   None) \
     P(PreTape,        "preamp.tape",     "Tape",          "preamp",  "Tape",           Flip,   0,    1,    0.3f, "%",  "",   None) \
     P(PreWow,         "preamp.wow",      "Wow",           "preamp",  "Tape",           Flip,   0,    1,    0.15f,"%",  "",   None) \
     P(PreDetail,      "preamp.detail",   "Detail",        "preamp",  "Output",         Flip,   0,    6,    2,    "dB", "",   None) \
     P(PreLevel,       "preamp.level",    "Level",         "preamp",  "Output",         Flip,   -12,  12,   0,    "dB", "",   None) \
     P(PreFlip,        "preamp.flip",     "Flipped",       "preamp",  "Flip (tap C in Grit)", Toggle, 0, 1,    0,    "",   "",   None) \
-    P(PreBlendB,      "preamp.blendB",   "Flip to",       "preamp",  "Flip (tap C in Grit)", Slider, 0, 1,    0.85f,"%",  "Valve|Cut", None) \
+    P(PreBlendB,      "preamp.blendB",   "Flip to",       "preamp",  "Flip (tap C in Grit)", Slider, 0, 1,    1.0f, "%",  "Valve|Cut", None) \
     P(FiltOn,         "filter.on",       "On",            "filter",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(FiltMode,       "filter.mode",     "Mode",          "filter",  "Mode",           Choice, 0,    1,    0,    "",   "Envelope|Manual", None) \
     P(FiltType,       "filter.type",     "Shape",         "filter",  "Mode",           Choice, 0,    1,    1,    "",   "Low-pass|Band-pass", None) \
@@ -216,7 +216,7 @@ struct ParamInfo
     P(RvGrit,         "reverb.grit",     "Grit",          "reverb",  "Space",          Flip,   0,    1,    0,    "%",  "",   None) \
     P(RvDiffusion,    "reverb.diffusion","Diffusion",     "reverb",  "Character",      Flip,   0,    1,    0.7f, "%",  "",   None) \
     P(RvSize,         "reverb.size",     "Size",          "reverb",  "Character",      Flip,   0,    1,    0.6f, "%",  "",   None) \
-    P(RvShimmer,      "reverb.shimmer",  "Shimmer",       "reverb",  "Character",      Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(RvShimmer,      "reverb.shimmer",  "Shimmer",       "reverb",  "Character",      Flip,   0,    1,    0.0f, "%",  "",   None) \
     P(RvInterval,     "reverb.interval", "Interval",      "reverb",  "Character",      Choice, 0,    2,    0,    "",   "Octave|Fifth|Oct + 5th", None) \
     P(RvSprings,      "reverb.springs",  "Springs",       "reverb",  "Character",      Choice, 0,    2,    1,    "",   "One|Two|Three", None) \
     P(RvTension,      "reverb.tension",  "Drip",          "reverb",  "Character",      Flip,   0,    1,    0.5f, "%",  "",   None) \

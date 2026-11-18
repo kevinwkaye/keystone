@@ -605,6 +605,35 @@ static void testReverbTypes()
     }
 }
 
+// Reverb decays: each band dies in its own true time, the way the BigSky's do: the mids in
+// Decay, the highs about twice as fast, the lows a touch longer in a hall
+static void testReverbDecay()
+{
+    std::printf ("Reverb decay, band by band\n");
+    std::vector<float> in ((size_t) (8 * kSr), 0.0f);
+    uint32_t r = 7;
+    for (size_t i = 0; i < (size_t) (0.05 * kSr); ++i) { r = r * 1664525u + 1013904223u; in[i] = ((float) (r >> 8) / 16777216.0f * 2 - 1) * 0.4f; }
+    auto wet = wetOf ([] (Engine& e) { e.setParam (P::RvOn, 1); e.setParam (P::RvType, 1); e.setParam (P::RvMix, 1.0f);
+                                       e.setParam (P::RvDecay, 3.0f); e.setParam (P::RvPredelay, 0.0f); e.setParam (P::RvDuck, 0.0f); }, in);
+    auto rt = [&] (float lo, float hi)
+    {
+        Biquad a, a2, b, b2;   // steep, so the strong mids can't leak into the highs' reading
+        a.highPass (lo, 0.54f, (float) kSr); a2.highPass (lo, 1.31f, (float) kSr); b.lowPass (hi, 0.54f, (float) kSr); b2.lowPass (hi, 1.31f, (float) kSr);
+        std::vector<double> e;
+        double acc = 0; int k = 0;
+        for (float x : wet) { const float y = b2.process (b.process (a2.process (a.process (x)))); acc += (double) y * y; if (++k == (int) (0.05 * kSr)) { e.push_back (10 * std::log10 (acc / k + 1e-20)); acc = 0; k = 0; } }
+        // fit the fall from 0.5 s to 2 s
+        double sx = 0, sy = 0, sxx = 0, sxy = 0; int n = 0;
+        for (size_t i = 10; i < 40 && i < e.size(); ++i) { const double t = i * 0.05; sx += t; sy += e[i]; sxx += t * t; sxy += t * e[i]; ++n; }
+        const double slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+        return slope < 0 ? -60.0 / slope : 99.0;
+    };
+    const double low = rt (90, 220), mid = rt (400, 1400), high = rt (5000, 9000);
+    CHECK (mid > 2.4 && mid < 3.6, "Hall at 3 s: the mids ring %.2f s (mark 2.4 to 3.6)", mid);
+    CHECK (high < 0.65 * mid, "the highs fall away faster: %.2f s (mark under two thirds of the mids)", high);
+    CHECK (low > 0.95 * mid, "the lows hold their body: %.2f s (mark at least the mids)", low);
+}
+
 static void testReverbEdges()
 {
     std::printf ("Reverb at the edge: Bloom, freeze, type changes, impulses\n");
@@ -717,6 +746,24 @@ static double toneAt (const std::vector<float>& x, size_t a, size_t n, double f)
         re += x[a + i] * std::cos (w); im += x[a + i] * std::sin (w);
     }
     return 2 * std::sqrt (re * re + im * im) / (double) n;
+}
+
+// Bitrot sits before the preamp and comes in at your level: fuzzier, not louder (0.4.9)
+static void testBitrotLevel()
+{
+    std::printf ("Bitrot level\n");
+    auto in = bassLine (4.0, 0.3);
+    auto level = [&] (bool on)
+    {
+        Engine e; e.prepare (kSr, 64);
+        e.setParam (P::BitrotOn, on ? 1.0f : 0.0f);
+        auto y = render (e, in);
+        return 20 * std::log10 (rms (y.data() + (size_t) kSr, y.size() - (size_t) kSr) + 1e-12);
+    };
+    const double off = level (false), on = level (true);
+    // the synth on a plain test line reads a little under, real playing a little over (+2.8 dB
+    // on Kevin's own recording); before 0.4.9 it was +15 dB
+    CHECK (std::fabs (on - off) < 4.5, "Bitrot on: %+.1f dB against off (mark within 4.5)", on - off);
 }
 
 static void testBitrotSynth()
@@ -857,8 +904,10 @@ static void testBloomSafety()
     const double after = 20 * std::log10 (rms (t.data() + t.size() / 2, t.size() / 2) + 1e-12);
     if (getenv ("KS_DEBUG")) for (int k = 0; k < 10; ++k) std::printf ("      cut %d00 ms: %.1f dB\n", k, 20 * std::log10 (rms (t.data() + (size_t) (k * 0.1 * kSr), (size_t) (0.1 * kSr)) + 1e-12));
     // the wash is gone; what's left is the reverb's own short tail of it, which rings on
-    // because the reverb is switched on (the delay's repeats no longer die off by themselves)
-    CHECK (after < -50, "heel back with Cut: %.1f dBFS half a second later (mark -50)", after);
+    // because the reverb is switched on (the delay's repeats no longer die off by themselves).
+    // Since 0.4.9 the reverb decays in exactly its Decay time (3 s) instead of faster, so
+    // half a second on it's that tail, about 25 dB under the wash: mark -35.
+    CHECK (after < -35, "heel back with Cut: %.1f dBFS half a second later (mark -35)", after);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -2030,10 +2079,12 @@ int main (int argc, char** argv)
         testDelayLimits();
         testTempo();
         testBitrotSynth();
+        testBitrotLevel();
     testOffMeansOff();
     testValvePreamp();
     testGrainEffects();
         testReverbTypes();
+        testReverbDecay();
         testReverbEdges();
         testBloomSafety();
         testClicks();
