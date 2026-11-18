@@ -23,6 +23,14 @@ if ($Register) {
     $trigger = New-ScheduledTaskTrigger -AtLogOn
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName 'Keystone Update' -Action $action -Principal $principal -Trigger $trigger -Settings $settings -Force | Out-Null
+    # let Keystone (which runs as you, without administrator rights) start the task: without
+    # this Windows answers "access denied" and Update firmware can't go ahead
+    try {
+        $svc = New-Object -ComObject Schedule.Service; $svc.Connect()
+        $task = $svc.GetFolder('\').GetTask('Keystone Update')
+        $sd = $task.GetSecurityDescriptor(0xF)
+        if ($sd -notmatch '\(A;;GRGX;;;AU\)') { $task.SetSecurityDescriptor($sd + '(A;;GRGX;;;AU)', 0) }
+    } catch { }
     exit 0
 }
 

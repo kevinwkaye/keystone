@@ -3,7 +3,7 @@
 ; firewall so the phone can find it on the hotspot.
 
 #ifndef AppVersion
-  #define AppVersion "0.4.9"
+  #define AppVersion "0.4.10"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\build\app\Keystone_artefacts\Release"
@@ -78,8 +78,9 @@ Filename: "{sys}\powercfg.exe"; Parameters: "/setacvalueindex SCHEME_CURRENT 19c
 Filename: "{sys}\powercfg.exe"; Parameters: "/setdcvalueindex SCHEME_CURRENT 19cbb8fa-5279-450e-9fac-8a3d5fedd0c1 12bbebe6-58d6-4636-95bb-3217ef867c1a 0"; Flags: runhidden waituntilterminated; Tasks: power
 Filename: "{sys}\powercfg.exe"; Parameters: "/setactive SCHEME_CURRENT"; Flags: runhidden waituntilterminated
 ; Update firmware from the phone: a scheduled task that may install without a Windows prompt.
-; Made on a normal install only: an update from the phone is already running inside it.
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Tools\Update.ps1"" -Register"; Flags: runhidden waituntilterminated; Check: not WizardSilent
+; Made on a normal install, and on a quiet one when it's missing or Keystone can't start it.
+; An update from the phone that's already running inside the task is left alone.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\Tools\Update.ps1"" -Register"; Flags: runhidden waituntilterminated; Check: NeedsUpdateTask
 Filename: "{app}\Keystone.exe"; Description: "Start Keystone now"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
@@ -88,6 +89,15 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 Filename: "{sys}\schtasks.exe"; Parameters: "/delete /tn ""Keystone Update"" /f"; Flags: runhidden; RunOnceId: "DelUpdateTask"
 
 [Code]
+// the updater task: always on a normal install; on a quiet one only if it's missing, so an
+// update the task is running isn't pulled from under itself
+function NeedsUpdateTask: Boolean;
+var Code: Integer;
+begin
+  if not WizardSilent then Result := True
+  else Result := not (Exec(ExpandConstant('{sys}\schtasks.exe'), '/query /tn "Keystone Update"', '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0));
+end;
+
 function IsProcessorFeaturePresent(Feature: Cardinal): BOOL; external 'IsProcessorFeaturePresent@kernel32.dll stdcall';
 
 // PF_AVX2_INSTRUCTIONS_AVAILABLE is 40. Haswell and later have FMA alongside AVX2.

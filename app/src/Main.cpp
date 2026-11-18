@@ -486,13 +486,17 @@ private:
             return {};
            #else
             ChildProcess task;
-            if (! task.start (StringArray { "schtasks.exe", "/run", "/tn", "Keystone Update" }, 0))
+            if (! task.start (StringArray { "schtasks.exe", "/run", "/tn", "Keystone Update" }, ChildProcess::wantStdOut | ChildProcess::wantStdErr))
                 return "Couldn't start the updater";
+            const String said = task.readAllProcessOutput().trim();
             task.waitForProcessToFinish (10000);
             if (task.getExitCode() != 0)
             {
+                Logger::writeToLog ("Update firmware: schtasks said " + said);
                 installer.getSiblingFile ("request.json").deleteFile();
-                return "The updater isn't set up on this laptop yet. Run this version's installer once by hand, then updates work from the phone";
+                // the installer stays in Documents\Keystone\Updates, ready to run by hand
+                return "The laptop's updater needs setting up once: on the laptop, open Documents\\Keystone\\Updates and run "
+                       + installer.getFileName().toStdString() + ". After that, updates install from the phone by themselves";
             }
             Logger::writeToLog ("Update firmware: handed " + installer.getFileName() + " to the updater");
             return {};
