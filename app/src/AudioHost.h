@@ -37,6 +37,13 @@ public:
     // Auto buffer: called when Keystone steps the buffer up after dropouts (0 = 3 ms ... 3 = 10 ms)
     std::function<void (int)> onBufferStepLearnt;
 
+    // Find the best buffer: tries 3, 4, 6 and 10 ms for 15 s each, smallest first, and keeps
+    // the smallest that ran without dropouts (message thread)
+    void findBestBuffer();
+    void stopFindingBuffer();
+    juce::String finderJson() const;            // progress for the phone, empty when idle
+    std::function<void (int step)> onBufferFound;   // the host sets Auto and the learnt step
+
     void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
                                            const juce::AudioIODeviceCallbackContext&) override;
     void audioDeviceAboutToStart (juce::AudioIODevice*) override;
@@ -68,6 +75,15 @@ private:
     int stalledTicks = 0;
     int openedBuffer = 0, lastDropCheck = 0, dropTicks = 0, lastLate = 0, lastXrun = 0;
     juce::String openedForSetting;
+    // the buffer finder
+    bool finding = false;
+    int findStep = 0, findTicks = 0, findLate0 = 0, findXr0 = 0, findWasMs = 0, findResult[4] { -1, -1, -1, -1 };
+    float findCpu = 0, findCpuStep = 0, foundLat = 0;
+    int foundMs = 0;
+    double findDoneAt = 0;
+    void findStartStep();
+    void findFinish (int step);
+    juce::String settingNow() const;
     double callbackBudgetMs = 3.0;
     juce::CriticalSection statusLock;
 };

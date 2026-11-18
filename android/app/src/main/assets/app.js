@@ -77,6 +77,7 @@ var KS = (function () {
         if (m.rig != null && m.rig !== S.rig) { S.rig = m.rig; queueRender(); }
         if (m.tuner) tunerState(true); else if (S.tuner) tunerState(false);
         roomSync(m.rec);
+        if (S.screen === 'health') { var bfk = JSON.stringify(m.bf || null) + '|' + m.buf; if (bfk !== S.bfKey) { S.bfKey = bfk; queueRender(true); } }
         if (S.screen === 'recorder' || (S.screen === 'take' && (m.listen || S.making))) queueRender(true);
         else if (S.screen === 'listen') { /* the player updates its own row */ }
         else { var rp = document.getElementById('recPill'), want = recPill(); if (rp ? rp.outerHTML !== want : want) queueRender(true); }
@@ -445,6 +446,39 @@ var KS = (function () {
   }
   function asset(re) { for (var i = 0; i < S.upd.assets.length; i++) if (re.test(S.upd.assets[i].name)) return S.upd.assets[i]; return null; }
   function rigDevice() { return S.health && S.health.device === 'pi' ? 'pi' : 'laptop'; }
+  // Buffer: one tap finds the smallest size this laptop plays without dropouts
+  function bufferCard() {
+    var m = S.meter || {}, bf = m.bf, h = S.health;
+    var ms = m.buf && m.sr ? Math.round(1000 * m.buf / m.sr * 10) / 10 : null;
+    var head = '<span class="small" style="letter-spacing:.15em;font-weight:700">BUFFER</span>';
+    var tried = function () {
+      var out = [];
+      [3, 4, 6, 10].forEach(function (x, i) { var r = bf.tried[i]; if (r > 0) out.push(x + ' ms: ' + r + ' dropout' + (r === 1 ? '' : 's') + ', too small'); });
+      return out.join('. ');
+    };
+    if (bf && bf.on) {
+      var t = tried();
+      return '<section class="card" style="gap:10px">' + head +
+        '<div style="font-size:19px;font-weight:700">Trying ' + bf.ms + ' ms <span class="small">(' + (bf.step + 1) + ' of 4)</span></div>' +
+        '<div style="height:8px;border-radius:4px;background:#2a2a30;overflow:hidden"><div style="width:' + Math.round(100 * bf.progress) + '%;height:100%;background:#5DCAA5"></div></div>' +
+        '<span class="small">' + (t ? esc(t) + '. ' : '') + 'Keep playing.</span>' +
+        '<button type="button" class="wide" data-act="bufferStop">Stop and keep ' + bf.was + ' ms</button></section>';
+    }
+    if (bf && bf.done) {
+      var quicker = bf.was - bf.done, t2 = tried();
+      return '<section class="card" style="gap:10px">' + head +
+        '<div style="font-size:19px;font-weight:700">Set to ' + bf.done + ' ms</div>' +
+        '<span class="small">' + (bf.lat ? bf.lat + ' ms round trip' : '') + (quicker > 0 ? ', ' + quicker + ' ms quicker than before' : quicker < 0 ? ', ' + (-quicker) + ' ms more than before, so it plays clean' : '') + '. ' +
+        (t2 ? esc(t2) + '. ' : '') + bf.done + ' ms ran clean for 15 seconds' + (bf.cpu ? ' with the laptop at ' + bf.cpu + '%' : '') + '. Keystone remembers this for this laptop.</span></section>';
+    }
+    var drops = h && h.laptop ? h.laptop.dropouts : null;
+    return '<section class="card" style="gap:10px">' + head +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div style="font-size:19px;font-weight:700">' + (ms ? ms + ' ms' : 'Not playing') + '</div>' +
+      '<div class="small">' + (m.lat ? m.lat + ' ms round trip' : '') + (drops != null ? (m.lat ? ', ' : '') + (drops ? drops + ' dropout' + (drops === 1 ? '' : 's') + ' since it started' : 'no dropouts') : '') + '</div></div>' +
+      '<button type="button" data-act="bufferFind" style="padding:12px 16px;background:none;border:2px solid #5DCAA5;color:#5DCAA5;border-radius:12px;font-weight:700;font-size:16px;flex:none">Find the best</button></div>' +
+      '<span class="small">Tries each size for 15 seconds, smallest first, and keeps the smallest with no dropouts. Takes about a minute. The sound cuts for a moment between tries, so do it at soundcheck, playing your busiest song.</span></section>';
+  }
+
   function updateCard() {
     var u = S.upd, h = S.health, rigV = h ? h.version : '', phoneV = phoneVersion();
     if (!window.KeystoneNative || !KeystoneNative.updateCheck) return '';
@@ -525,6 +559,7 @@ var KS = (function () {
           '<span style="font-size:13px;font-weight:700;color:' + col + '">' + (r.st || (r.ok ? 'OK' : 'CHECK')) + '</span></div>';
       }).join('') + '</section>' +
       (Math.round(val('output.mode')) === 2 ? '<button type="button" class="wide" data-act="asioPanel">ASIO panel (opens on the laptop)</button>' : '') +
+      bufferCard() +
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
       wifiCard() +
       updateCard() +
@@ -1276,6 +1311,8 @@ var KS = (function () {
       case 'prev': if (send({ t: 'songStep', d: -1 }) && S.songs.length) { S.current = Math.max(0, S.current - 1); render(true); } break;
       case 'next': if (send({ t: 'songStep', d: 1 }) && S.songs.length) { S.current = Math.min(S.songs.length - 1, S.current + 1); render(true); } break;
       case 'restartAudio': send({ t: 'restartAudio' }); break;
+      case 'bufferFind': send({ t: 'bufferFind' }); break;
+      case 'bufferStop': send({ t: 'bufferStop' }); break;
       case 'asioPanel': send({ t: 'asioPanel' }); break;
       case 'light': setParam('output.quality', Math.round(val('output.quality')) === 2 ? 0 : 2); render(true); break;
       case 'note': var nt = document.getElementById('noteText'); if (nt && nt.value.trim()) send({ t: 'keepNote', text: nt.value.trim() }); S.noteUntil = 0; render(); break;

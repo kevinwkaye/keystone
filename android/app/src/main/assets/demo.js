@@ -5,7 +5,7 @@
 window.KSDemo = (function () {
   var st = null, timer = null, t0 = 0, tunerOn = false, droneOn = false, pedal = 0.5, taps = [];
   var NEEDS_RIG = { takes: 1, takeInfo: 1, listen: 1, listenList: 1, listenGet: 1, listenUse: 1, recStop: 1, fw: 1,
-    capture: 1, space: 1, learn: 1, calibrate: 1, restartAudio: 1, asioPanel: 1, keep: 1, keepNote: 1, wifi: 1, 'default': 1 };
+    capture: 1, space: 1, learn: 1, calibrate: 1, restartAudio: 1, bufferFind: 1, bufferStop: 1, asioPanel: 1, keep: 1, keepNote: 1, wifi: 1, 'default': 1 };
 
   function reply(o) { setTimeout(function () { if (window.KS) KS.onMessage(JSON.stringify(o)); }, 15); }
   function toast(text) { reply({ t: 'toast', text: text }); }

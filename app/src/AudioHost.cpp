@@ -279,9 +279,107 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
     if (Time::getMillisecondCounterHiRes() - startMs > callbackBudgetMs) lateCallbacks.fetch_add (1);
 }
 
+juce::String AudioHost::settingNow() const
+{
+    return String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep)) + "/" + String (engine.getParam (ks::P::OutMode));
+}
+
+static const int kFindMs[4] = { 3, 4, 6, 10 };
+static constexpr int kFindTicks = 6;   // one tick (3 s) to settle, then 15 s counted
+
+void AudioHost::findBestBuffer()
+{
+    if (finding) return;
+    auto* dev = deviceManager.getCurrentAudioDevice();
+    findWasMs = dev != nullptr && currentRate.load() > 0 ? (int) std::lround (1000.0 * dev->getCurrentBufferSizeSamples() / currentRate.load()) : targetBufferMs();
+    for (auto& r : findResult) r = -1;
+    findCpu = 0; foundMs = 0; findDoneAt = 0;
+    finding = true;
+    findStep = 0;
+    Logger::writeToLog ("Audio: finding the best buffer, starting at 3 ms");
+    findStartStep();
+}
+
+void AudioHost::findStartStep()
+{
+    findTicks = 0;
+    findCpuStep = 0;
+    if (! tryOpen()) Logger::writeToLog ("Audio: buffer finder couldn't open " + String (kFindMs[findStep]) + " ms");
+}
+
+void AudioHost::stopFindingBuffer()
+{
+    if (! finding) return;
+    finding = false;
+    Logger::writeToLog ("Audio: buffer finder stopped, back to the size before");
+    tryOpen();
+}
+
+void AudioHost::findFinish (int step)
+{
+    finding = false;
+    foundMs = kFindMs[step];
+    findDoneAt = Time::getMillisecondCounterHiRes() * 0.001;
+    if (onBufferFound) onBufferFound (step);   // Auto, with this step learnt
+    openedForSetting = settingNow();
+    tryOpen();
+    foundLat = (float) latency.load();
+    Logger::writeToLog ("Audio: buffer finder chose " + String (foundMs) + " ms");
+}
+
+juce::String AudioHost::finderJson() const
+{
+    DynamicObject::Ptr o = new DynamicObject();
+    Array<var> tried;
+    for (int i = 0; i < 4; ++i) tried.add (findResult[i]);
+    o->setProperty ("tried", tried);
+    o->setProperty ("was", findWasMs);
+    if (finding)
+    {
+        o->setProperty ("on", true);
+        o->setProperty ("ms", kFindMs[findStep]);
+        o->setProperty ("step", findStep);
+        o->setProperty ("progress", (findStep + std::min (1.0, findTicks / (double) kFindTicks)) / 4.0);
+        return JSON::toString (var (o.get()), true);
+    }
+    if (foundMs > 0 && Time::getMillisecondCounterHiRes() * 0.001 - findDoneAt < 120.0)
+    {
+        o->setProperty ("on", false);
+        o->setProperty ("done", foundMs);
+        o->setProperty ("lat", std::round (latency.load() * 10.0) / 10.0);
+        o->setProperty ("cpu", std::round (findCpu * 100.0f));
+        return JSON::toString (var (o.get()), true);
+    }
+    return {};
+}
+
 void AudioHost::timerCallback()
 {
     engine.setCpuLoad (cpuLoad());
+    // the buffer finder: count dropouts at this size, move on or settle
+    if (finding)
+    {
+        auto* d = deviceManager.getCurrentAudioDevice();
+        const int late = lateCallbacks.load(), xr = d != nullptr ? std::max (0, d->getXRunCount()) : 0;
+        if (++findTicks == 1) { findLate0 = late; findXr0 = xr; return; }   // let it settle first
+        findCpuStep = std::max (findCpuStep, cpuLoad());
+        const int drops = (late - findLate0) + std::max (0, xr - findXr0);
+        if (drops >= 2 || d == nullptr || ! isRunning.load())
+        {
+            findResult[findStep] = std::max (drops, 1);
+            Logger::writeToLog ("Audio: buffer finder: " + String (kFindMs[findStep]) + " ms dropped out (" + String (drops) + ")");
+            if (findStep < 3) { ++findStep; findStartStep(); }
+            else findFinish (3);   // nothing ran clean: the safest size
+            return;
+        }
+        if (findTicks >= kFindTicks)
+        {
+            findResult[findStep] = 0;
+            findCpu = findCpuStep;
+            findFinish (findStep);
+        }
+        return;
+    }
     if (needsReopen.exchange (false) || deviceManager.getCurrentAudioDevice() == nullptr)
     {
         if (tryOpen()) Logger::writeToLog ("Audio: device open again");
@@ -326,7 +424,7 @@ void AudioHost::timerCallback()
         const int step = std::clamp ((int) std::lround (engine.getParam (ks::P::OutBufferStep)), 0, 3);
         // only when Keystone itself ran late: dropouts the interface reports come from its
         // USB connection, and a bigger buffer only adds delay without curing them
-        if (choice == 0 && late >= 6 && step < 3 && wantBuffer <= 0)
+        if (choice == 0 && late >= 6 && step < 3 && wantBuffer <= 0 && ! finding)
         {
             Logger::writeToLog ("Audio: too many dropouts, moving the buffer up a step");
             if (onBufferStepLearnt) onBufferStepLearnt (step + 1);
@@ -369,6 +467,7 @@ void AudioHost::showDriverPanel()
 int AudioHost::targetBufferMs() const
 {
     static const double stepMs[4] = { 3.0, 4.0, 6.0, 10.0 };
+    if (finding) return (int) stepMs[findStep];
     const int choice = (int) std::lround (engine.getParam (ks::P::OutBuffer));
     if (choice >= 1 && choice <= 4) return (int) stepMs[choice - 1];
     const int step = std::clamp ((int) std::lround (engine.getParam (ks::P::OutBufferStep)), 0, 3);

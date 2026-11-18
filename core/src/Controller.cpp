@@ -1670,6 +1670,11 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
     j["buf"] = bufferSize;
     j["sr"] = sampleRate;
     j["lat"] = std::round (latencyMs * 10) / 10;
+    if (bufferFinder)
+    {
+        const auto bf = bufferFinder();
+        if (! bf.empty()) { try { j["bf"] = json::parse (bf); } catch (...) {} }
+    }
     if (m.tunerOn)
     {
         j["tuner"] = { { "on", true }, { "note", m.tunerMidi >= 0 ? noteName (m.tunerMidi) : "" },
@@ -1793,6 +1798,8 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     }
     else if (t == "state") reply (stateJson());
     else if (t == "restartAudio") { if (onRestartAudio) onRestartAudio(); queueToast ("RESTARTING AUDIO"); }
+    else if (t == "bufferFind") { if (onBufferFind) { onBufferFind (true); queueToast ("FINDING THE BEST BUFFER"); } else queueToast ("NOT ON THIS DEVICE"); }
+    else if (t == "bufferStop") { if (onBufferFind) onBufferFind (false); }
     else if (t == "asioPanel") { if (onAsioPanel) onAsioPanel(); queueToast ("ASIO PANEL ON THE LAPTOP"); }
 }
 } // namespace ks

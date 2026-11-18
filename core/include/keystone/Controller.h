@@ -21,7 +21,7 @@ public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
-    static constexpr const char* kVersion = "0.4.10";
+    static constexpr const char* kVersion = "0.4.11";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -60,6 +60,8 @@ public:
     std::function<int()> lastKeepNumber;
     std::function<void (const std::string&)> onLog;
     std::function<void()> onRestartAudio;
+    std::function<void (bool start)> onBufferFind;   // Find the best buffer, or stop
+    std::function<std::string()> bufferFinder;        // its progress as JSON, empty when idle
     std::function<void()> onAsioPanel;   // opens the ASIO driver's own settings on the laptop
     // Update firmware: the phone sends the new release a piece at a time; once it has
     // arrived whole the host hands it to its updater. Returns "" when the update is under

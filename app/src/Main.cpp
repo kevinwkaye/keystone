@@ -261,6 +261,13 @@ public:
             engine.setParam (ks::P::OutBufferStep, (float) step);
             if (controller) controller->saveGlobals();
         };
+        audio->onBufferFound = [this] (int step)
+        {
+            engine.setParam (ks::P::OutBufferStep, (float) step);
+            // Auto, through the controller so the phone's Setup page follows
+            if (controller) controller->handleMessage (R"({"t":"set","id":"output.buffer","v":0})", [] (const std::string&) {});
+            if (controller) controller->saveGlobals();
+        };
         audio->start (wantDevice, wantBuffer);
 
         midi = std::make_unique<DirectMidiInput>();
@@ -272,6 +279,12 @@ public:
 
         controller->onLog = [] (const std::string& msg) { Logger::writeToLog (String (msg)); };
         controller->onRestartAudio = [this] { Logger::writeToLog ("Audio: restart asked for"); audio->restart(); };
+        controller->onBufferFind = [this] (bool start)
+        {
+            // the link thread asks; the finder lives on the message thread with the audio
+            MessageManager::callAsync ([this, start] { if (audio) { if (start) audio->findBestBuffer(); else audio->stopFindingBuffer(); } });
+        };
+        controller->bufferFinder = [this] { return audio ? audio->finderJson().toStdString() : std::string(); };
         controller->onAsioPanel = [this] { MessageManager::callAsync ([this] { audio->showDriverPanel(); }); };
         link.onMessage = [this] (int client, const String& line)
         {
