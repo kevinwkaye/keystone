@@ -72,6 +72,13 @@ final class WatchView extends View {
         String hint = bank != 0 ? "The watch works in Grit" : live ? "Let go of C to glide back" : "Hold C to go live";
         text(c, hint, cx, cy + 30 * u, 6 * u, DIM, false, 0);
         text(c, "Tap for the tuner", cx, cy + 38 * u, 5.5f * u, DIM, false, 0);
+        status(c, cx, cy - 34 * u, u, s);
+    }
+
+    // the small print: version, which Wi-Fi, how often it's dropped
+    private void status(Canvas c, float cx, float y, float u, WristService.State s) {
+        String line = "v" + WristService.VERSION + "  " + (s.net.isEmpty() ? "" : s.net.split(",")[0] + "  ") + s.drops + (s.drops == 1 ? " drop" : " drops");
+        text(c, line, cx, y, 4.2f * u, DIM, false, 0);
     }
 
     private void drawSearching(Canvas c, float cx, float cy, float u, String status) {
@@ -86,6 +93,7 @@ final class WatchView extends View {
         tp.setTypeface(face);
         tp.setTextSize(6 * u);
         tp.setColor(DIM);
+        status(c, cx, cy - 34 * u, u, WristService.STATE);
         StaticLayout sl = StaticLayout.Builder.obtain(status == null ? "" : status, 0, status == null ? 0 : status.length(), tp, (int) (64 * u))
                 .setAlignment(Layout.Alignment.ALIGN_CENTER).build();
         c.save();

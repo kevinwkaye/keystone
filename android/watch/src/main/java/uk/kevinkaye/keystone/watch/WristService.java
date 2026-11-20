@@ -69,7 +69,10 @@ public final class WristService extends Service implements SensorEventListener {
         volatile boolean tunerOn, tunerValid;
         volatile String note = "";
         volatile float cents;
+        volatile int drops;              // since the app opened
+        volatile String net = "";        // which Wi-Fi, pinned or not, and Keystone's address
     }
+    static final String VERSION = "0.4.17";
     static final State STATE = new State();
     static volatile WristService running;
 
@@ -211,7 +214,8 @@ public final class WristService extends Service implements SensorEventListener {
                 STATE.connected = true;
                 STATE.status = "Connected";
                 buzz(new long[] { 0, 30, 80, 30 });
-                send("{\"t\":\"watchHello\"}");
+                STATE.net = (pinned && !unpinned ? "Keystone Wi-Fi" : "any Wi-Fi") + ", " + target.getAddress().getHostAddress();
+                send("{\"t\":\"watchHello\",\"v\":\"" + VERSION + "\",\"net\":\"" + STATE.net + "\",\"drops\":" + STATE.drops + "}");
                 BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
                 String line;
                 while (alive && (line = in.readLine()) != null) onLine(line);
@@ -219,7 +223,7 @@ public final class WristService extends Service implements SensorEventListener {
                 STATE.status = "Lost Keystone, looking again";
             }
             closeSocket();
-            if (STATE.connected) buzz(new long[] { 0, 200 });
+            if (STATE.connected) { buzz(new long[] { 0, 200 }); STATE.drops++; }
             STATE.connected = false;
             STATE.live = false;
             sleep(500);

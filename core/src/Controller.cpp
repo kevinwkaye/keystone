@@ -49,6 +49,7 @@ struct Controller::State
     int watchJob = 0;
     float watchFrom = 0, watchNow = 0, watchGlideFrom = 0;   // from: where it glides back to
     float watchT = 0;                  // how far the arm has moved, 0 to 1 of the sweep
+    bool watchWasOn = false, watchHelloed = false;
     bool watchSplit = false;           // Sweep, Rev and sweep: Rev up, the filter down
     float watchRevFrom = 0, watchCutFrom = 1;
     double watchGlideAt = 0;
@@ -727,6 +728,16 @@ void Controller::tick (double now)
     // once a watch has been used, Bitrot stays fully wet, so a Wi-Fi blip can't swing the level
     engine.setWatchConnected (s->watchSeen > 0);
     engine.setWatchMoving (s->watchLive || s->watchGliding);
+    {
+        // the watch arriving and going, for the log
+        const bool on = watchConnected();
+        if (on != s->watchWasOn)
+        {
+            if (! on && onLog) onLog (s->watchLive ? "Watch: lost while live (C held)" : "Watch: lost");
+            if (on && onLog && ! s->watchHelloed) onLog ("Watch: connected");
+            s->watchWasOn = on;
+        }
+    }
     watchTick();
     if (s->listenFinished.exchange (false))
     {
@@ -1886,6 +1897,9 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     {
         // the watch keeps Keystone's own Wi-Fi so it can ask for that network by name
         s->watchSeen = steadyNow();
+        s->watchHelloed = true;
+        if (onLog) onLog ("Watch: connected, app " + m.value ("v", std::string ("0.4.13 or older")) + ", " + m.value ("net", std::string ("network unknown"))
+                          + ", dropped " + std::to_string (m.value ("drops", 0)) + " times since it opened");
         if (s->wifiOn && s->wifiPass.size() >= 8)
             reply (json ({ { "t", "watchWifi" }, { "ssid", s->wifiSsid }, { "pass", s->wifiPass } }).dump());
     }
