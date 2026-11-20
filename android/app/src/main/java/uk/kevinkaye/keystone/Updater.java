@@ -5,6 +5,10 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInstaller;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.Build;
 import android.util.Base64;
 
@@ -47,7 +51,49 @@ final class Updater {
     private final LinkedBlockingQueue<JSONObject> acks = new LinkedBlockingQueue<>();
     private volatile boolean busy;
 
-    Updater(Context ctx, Page page, Sender out) { this.ctx = ctx; this.page = page; this.out = out; }
+    Updater(Context ctx, Page page, Sender out) { this.ctx = ctx; this.page = page; this.out = out; appCtx = ctx.getApplicationContext(); }
+
+    // ---------------------------------------------------------------- the internet
+    // On Keystone's own Wi-Fi there's no internet, and Android may still send everything that
+    // way. GitHub goes over whichever network really reaches the internet: one Android has
+    // checked (mobile data, or Wi-Fi that works), or mobile data asked for outright. Keystone
+    // itself stays on the Wi-Fi.
+    private static Context appCtx;
+
+    private static Network internet() {
+        if (appCtx == null) return null;
+        ConnectivityManager cm = appCtx.getSystemService(ConnectivityManager.class);
+        try {
+            for (Network n : cm.getAllNetworks()) {
+                NetworkCapabilities nc = cm.getNetworkCapabilities(n);
+                if (nc != null && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return n;
+            }
+            final LinkedBlockingQueue<Network> got = new LinkedBlockingQueue<>();
+            ConnectivityManager.NetworkCallback cb = new ConnectivityManager.NetworkCallback() {
+                @Override public void onAvailable(Network n) { got.offer(n); }
+            };
+            cm.requestNetwork(new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), cb);
+            Network n = got.poll(8, TimeUnit.SECONDS);
+            if (n == null) try { cm.unregisterNetworkCallback(cb); } catch (Exception ignored) { }
+            else {
+                // kept until the next time, so mobile data stays up for the download
+                if (held != null) try { cm.unregisterNetworkCallback(held); } catch (Exception ignored) { }
+                held = cb;
+            }
+            return n;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+    private static ConnectivityManager.NetworkCallback held;
+
+    private static HttpURLConnection open(String url) throws Exception {
+        Network n = internet();
+        return (HttpURLConnection) (n != null ? n.openConnection(new URL(url)) : new URL(url).openConnection());
+    }
 
     void onAck(JSONObject ack) { acks.offer(ack); }
 
@@ -183,7 +229,7 @@ final class Updater {
         File dir = new File(ctx.getCacheDir(), "updates");
         dir.mkdirs();
         File f = new File(dir, name);
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection c = open(url);
         c.setConnectTimeout(15000);
         c.setReadTimeout(30000);
         c.setRequestProperty("User-Agent", "Keystone");
@@ -231,7 +277,7 @@ final class Updater {
     }
 
     private static String get(String url) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        HttpURLConnection c = open(url);
         c.setConnectTimeout(10000);
         c.setReadTimeout(15000);
         c.setRequestProperty("User-Agent", "Keystone");
