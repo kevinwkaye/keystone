@@ -43,6 +43,13 @@ struct Controller::Song
 
 struct Controller::State
 {
+    // the watch: last wrist message, and the hold of C that puts it live
+    double watchSeen = -1;
+    bool watchLive = false, watchGliding = false, watchWasActive = false, watchHaveRef = false;
+    int watchJob = 0;
+    float watchFrom = 0, watchNow = 0, watchGlideFrom = 0;
+    double watchGlideAt = 0;
+    float watchRef[4] = { 1, 0, 0, 0 };
     // Keystone's own Wi-Fi network
     bool wifiOn = true;
     std::string wifiSsid = "Keystone", wifiPass;
@@ -507,6 +514,7 @@ void Controller::applySong (int i, bool keepGoing)
     if (keepGoing) engine.action (Action::Spill);
     applyValues (engine, s->songs[(size_t) i].values);
     if (s->rig == 1) return;   // Kuddle: no banks, no drone
+    s->watchLive = s->watchGliding = false;   // a new song starts on its saved sound
     engine.resetPedalJobs();
     s->bank = std::clamp ((int) std::lround (engine.getParam (P::BankStart)), 0, 2);
     engine.setPedalBank (s->bank);
@@ -711,6 +719,7 @@ void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, 
 void Controller::tick (double now)
 {
     s->logic.tick (now);
+    watchTick();
     if (s->listenFinished.exchange (false))
     {
         std::string folder, err;
@@ -770,6 +779,112 @@ bool Controller::backup (const std::string& day)
 }
 
 bool Controller::tunerOn() const { return engine.meters().tunerOn; }
+
+// ---------------------------------------------------------------------------------------
+// The watch. It streams its orientation (game rotation vector, a quaternion) over the link
+// about 50 times a second. Hold C in Grit and it goes live: where your arm is now picks up
+// the pedal job where it is now, so nothing jumps. Reach: the further your forearm moves
+// away from there, in any direction, the further towards the toe, like a theremin. Twist:
+// turning the forearm, both ways. Let go of C and the job glides back to where it was.
+// ---------------------------------------------------------------------------------------
+static double steadyNow() { return std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count(); }
+
+bool Controller::watchConnected() const { return s->watchSeen > 0 && steadyNow() - s->watchSeen < 2.0; }
+bool Controller::watchLive() const { return s->watchLive; }
+
+void Controller::watchStart()
+{
+    const int t = engine.target();
+    const auto job = (PedalJob) t;
+    s->watchJob = t;
+    s->watchWasActive = engine.jobActive (job);
+    float from = engine.jobValue (job);
+    if (! s->watchWasActive)
+    {
+        // the value that sounds like the saved sound, near enough
+        if (job == PedalJob::Bitrot)
+        {
+            const int cfg = (int) std::lround (value (P::BitrotPedal));
+            from = cfg == 2 ? 1.0f : cfg == 4 ? value (P::BitrotCorrupt) : cfg == 5 ? 0.5f : 0.0f;
+        }
+        else if (job == PedalJob::Dirt) from = 1.0f;
+        else if (job == PedalJob::Wah) from = 0.5f;
+    }
+    s->watchFrom = s->watchNow = from;
+    s->watchLive = true;
+    s->watchGliding = false;
+    s->watchHaveRef = false;   // the next wrist message sets where your arm starts
+    engine.setJob (job, from);
+    queueToast ("WATCH LIVE");
+    mark ("Watch live");
+}
+
+void Controller::watchEnd()
+{
+    if (! s->watchLive) return;
+    s->watchLive = false;
+    s->watchGliding = true;
+    s->watchGlideFrom = s->watchNow;
+    s->watchGlideAt = steadyNow();
+}
+
+void Controller::watchWrist (const float* q)
+{
+    s->watchSeen = steadyNow();
+    if (! s->watchLive) return;
+    float n = std::sqrt (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (! (n > 0.5f)) return;
+    const float w = q[0] / n, x = q[1] / n, y = q[2] / n, z = q[3] / n;
+    if (! s->watchHaveRef)
+    {
+        s->watchRef[0] = w; s->watchRef[1] = x; s->watchRef[2] = y; s->watchRef[3] = z;
+        s->watchHaveRef = true;
+        return;
+    }
+    const float rw = s->watchRef[0], rx = s->watchRef[1], ry = s->watchRef[2], rz = s->watchRef[3];
+    float deg = 0;
+    if ((int) std::lround (value (P::WatchMotion)) == 0)
+    {
+        // Reach: the angle between the forearm (the watch's 12 o'clock axis) now and at the start
+        auto axis = [] (float qw, float qx, float qy, float qz, float* o)
+        {
+            o[0] = 2 * (qx * qy - qw * qz); o[1] = 1 - 2 * (qx * qx + qz * qz); o[2] = 2 * (qy * qz + qw * qx);
+        };
+        float a[3], b[3];
+        axis (rw, rx, ry, rz, a); axis (w, x, y, z, b);
+        const float d = std::clamp (a[0] * b[0] + a[1] * b[1] + a[2] * b[2], -1.0f, 1.0f);
+        deg = std::acos (d) * 57.29578f;
+    }
+    else
+    {
+        // Twist: the turn about the forearm since the start (swing-twist), both ways
+        const float qw = rw * w + rx * x + ry * y + rz * z;     // conj(ref) * now
+        const float qy = rw * y - ry * w + rz * x - rx * z;
+        float tw = 2.0f * std::atan2 (qy, qw);
+        if (tw > kPi) tw -= 2 * kPi;
+        if (tw < -kPi) tw += 2 * kPi;
+        deg = tw * 57.29578f * (value (P::WatchReverse) > 0.5f ? -1.0f : 1.0f);
+    }
+    s->watchNow = std::clamp (s->watchFrom + deg / std::max (10.0f, value (P::WatchRange)), 0.0f, 1.0f);
+    engine.setJob ((PedalJob) s->watchJob, s->watchNow);
+}
+
+void Controller::watchTick()
+{
+    if (! s->watchGliding) return;
+    const float secs = std::max (0.05f, value (P::WatchGlide));
+    const float t = (float) std::min (1.0, (steadyNow() - s->watchGlideAt) / secs);
+    const float e = t * t * (3 - 2 * t);
+    const auto job = (PedalJob) s->watchJob;
+    if (t >= 1.0f)
+    {
+        s->watchGliding = false;
+        if (s->watchWasActive) engine.setJob (job, s->watchFrom);
+        else engine.releaseJob (job);   // back to the saved sound
+        return;
+    }
+    engine.setJob (job, s->watchGlideFrom + (s->watchFrom - s->watchGlideFrom) * e);
+}
 
 void Controller::onFootswitch (int sw, int ev)
 {
@@ -891,7 +1006,7 @@ void Controller::onFootswitch (int sw, int ev)
         }
         return;
     }
-    if (ev == E::HoldEnd && sw == 2) { engine.setRunaway (false); engine.setBrake (false); return; }
+    if (ev == E::HoldEnd && sw == 2) { engine.setRunaway (false); engine.setBrake (false); watchEnd(); return; }
     if (ev == E::HoldStart)
     {
         switch (sw)
@@ -914,6 +1029,9 @@ void Controller::onFootswitch (int sw, int ev)
                     queueToast (any ? "RUNAWAY" : "RUNAWAY NEEDS DELAY OR REVERB ON");
                     mark ("Runaway");
                 }
+                // Grit with the watch on: the wrist works the pedal while held (the tuner
+                // is on the watch)
+                else if (s->bank == 0 && ! tuning && watchConnected()) watchStart();
                 else { engine.action (Action::TunerToggle); queueState(); }
                 break;
             case 3: if (! tuning) toggle (P::CompSlap); break;
@@ -1660,6 +1778,12 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
         j["jobOn"] = act[m.pedalTarget];
     }
     j["wait"] = m.waiting;
+    {
+        static const char* names[] = { "Dirt blend", "Wah", "Volume", "Bloom" };
+        j["jobName"] = m.pedalTarget == (int) PedalJob::Bitrot ? "Bitrot: " + formatValue (P::BitrotPedal, engine.getParam (P::BitrotPedal))
+                                                               : std::string (names[std::clamp (m.pedalTarget, 0, 3)]);
+    }
+    j["watch"] = { { "on", watchConnected() }, { "live", s->watchLive }, { "motion", (int) std::lround (value (P::WatchMotion)) } };
     j["rig"] = m.rig;
     j["melt"] = std::round (m.melt * 1000) / 1000;
     j["sq"] = std::round (m.kuddleSqueezeDb * 10) / 10;
@@ -1720,6 +1844,16 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     else if (t == "song") selectSong (m.value ("i", 0));
     else if (t == "songStep") stepSong (m.value ("d", 1));
     else if (t == "setlist") setlistOp (m.value ("op", std::string()), m.value ("i", s->current), m.value ("to", -1), m.value ("name", std::string()));
+    else if (t == "wrist")   // the watch, about 50 times a second
+    {
+        if (m.contains ("q") && m["q"].is_array() && m["q"].size() == 4)
+        {
+            float q[4];
+            for (int i = 0; i < 4; ++i) q[i] = m["q"][(size_t) i].is_number() ? m["q"][(size_t) i].get<float>() : 0.0f;
+            watchWrist (q);
+        }
+        else s->watchSeen = steadyNow();
+    }
     else if (t == "pedal")   // the phone's bar
     {
         if (s->rig == 1) engine.setMelt (m.value ("v", 0.0f));

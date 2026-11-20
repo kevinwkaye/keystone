@@ -45,6 +45,7 @@ const char* showIf (P p)
         case P::BitrotFloorHz: return "bitrot.floor=1";
         case P::BitrotFmDepth: return "bitrot.fm=1";
         case P::BitrotPeak: return "bitrot.pedal=2|3";
+        case P::WatchReverse: return "watch.motion=1";
         default: return "";
     }
 }
@@ -67,6 +68,7 @@ const ModuleInfo* moduleTable (int& count)
         { "reverb", "Reverb", "Full sound", "Twelve spaces, shimmer, your own impulses" },
         { "pedal", "Pedal jobs", "Control", "Dirt blend or Bitrot, wah, volume, Bloom" },
         { "bloom", "Bloom sweep", "Control", "Grains then wash, per song" },
+        { "watch", "Watch", "Control", "Hold C in Grit: your wrist works the pedal" },
         { "tempo", "Tempo", "Control", "Saved per song, tap on Play" },
         { "recorder", "Recorder", "Control", "Rehearsal takes, room from the phone" },
         { "footswitches", "Footswitches", "Control", "Tap and hold jobs" },

@@ -288,6 +288,14 @@ void Engine::setJob (PedalJob which, float v)
     if ((int) which == pedalTarget()) lastTarget.store ((int) which);
 }
 
+void Engine::releaseJob (PedalJob which)
+{
+    auto& j = job[(size_t) which];
+    j.active.store (false);
+    j.caught.store (false);
+    lastTarget.store (-1);
+}
+
 void Engine::action (Action a)
 {
     auto& d = *impl;

@@ -296,6 +296,10 @@ struct ParamInfo
     P(KOutput,        "kuddle.output",   "Level",         "k.output","Output",         Flip,   -24,  12,   -3,   "dB", "",   Kuddle) \
     P(RecOn,          "rec.on",          "Record when I play","recorder","Recorder",   Toggle, 0,    1,    1,    "",   "",   Global) \
     P(RecRoom,        "rec.room",        "Room",          "recorder","Recorder",       Choice, 0,    1,    1,    "",   "Off|This phone's mic", Global) \
+    P(WatchMotion,    "watch.motion",    "Movement",      "watch",   "Watch",          Choice, 0,    1,    0,    "",   "Reach|Twist", Global) \
+    P(WatchRange,     "watch.range",     "Full sweep",    "watch",   "Watch",          Flip,   20,   120,  60,   "°",  "",   Global) \
+    P(WatchGlide,     "watch.glide",     "Glide back",    "watch",   "Watch",          Flip,   0.05f, 3,   0.4f, "s",  "",   Global | Log) \
+    P(WatchReverse,   "watch.reverse",   "Reverse twist", "watch",   "Watch",          Toggle, 0,    1,    0,    "",   "",   Global) \
     P(FsACycle,       "fs.aCycle",       "Tap A in Grit", "footswitches","This song",  Choice, 0,    3,    0,    "",   "Edge and Drive|Off, Edge, Drive|Off and Edge|Off and Drive", None)
 // clang-format on
 

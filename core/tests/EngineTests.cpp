@@ -1243,6 +1243,78 @@ static void testBitrotPedal()
     }
 }
 
+// The watch: hold C in Grit and the wrist works the pedal's job, then it glides back.
+static void testWatch()
+{
+    std::printf ("Watch: hold C in Grit, Reach and Twist, glide back\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_watch_test";
+    { std::error_code ec; std::filesystem::remove_all (dir, ec); }
+    std::filesystem::create_directories (dir);
+    std::ofstream (dir / "setlist.json") << R"({"version":7,"current":0,"songs":[{"name":"Revver","values":{"bitrot.on":1,"bitrot.pedal":1}}]})";
+    Engine e; e.prepare (kSr, 64);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    c.load();
+    c.setValue (P::WatchGlide, 0.05f);
+    double t = 0;
+    auto none = [] (const std::string&) {};
+    auto wrist = [&] (float w, float x, float y, float z) { c.watchWristForTests (w, x, y, z); };
+    auto press = [&] { c.footswitchPress (2, t); for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); } };
+    auto release = [&] { c.footswitchRelease (2, t); t += 0.1; };
+    const float h = (float) (15.0 * M_PI / 180.0);
+    auto settle = [&] { std::this_thread::sleep_for (std::chrono::milliseconds (120)); c.tick (t); };
+
+    // no watch: hold C is the tuner, as before
+    press(); release();
+    for (int i = 0; i < 4; ++i) { e.process (std::vector<float> (64).data(), std::vector<float> (64).data(), 64); }
+    CHECK (c.tunerOn() && ! c.watchLive(), "no watch: hold C in Grit is the tuner");
+    c.handleMessage (R"({"t":"tuner","on":false})", none);
+    for (int i = 0; i < 4; ++i) { e.process (std::vector<float> (64).data(), std::vector<float> (64).data(), 64); }
+
+    // Reach: 30 degrees away with a 60 degree sweep is halfway
+    wrist (1, 0, 0, 0);
+    press();
+    CHECK (c.watchLive() && ! c.tunerOn(), "watch connected: hold C goes live, no tuner");
+    wrist (1, 0, 0, 0);                              // where the arm starts
+    wrist (std::cos (h), std::sin (h), 0, 0);        // forearm lifted 30 degrees
+    auto m = e.meters();
+    CHECK (m.pedalTarget == (int) PedalJob::Bitrot && std::fabs (m.bitrot - 0.5f) < 0.01f, "Reach: 30 degrees away puts Rev at %.2f (mark 0.50)", m.bitrot);
+    wrist (std::cos (h), -std::sin (h), 0, 0);       // 30 degrees the other way: still away
+    CHECK (std::fabs (e.meters().bitrot - 0.5f) < 0.01f, "Reach: away in any direction counts the same (%.2f)", e.meters().bitrot);
+    wrist (std::cos (h), 0, std::sin (h), 0);        // a twist about the forearm doesn't move it
+    CHECK (e.meters().bitrot < 0.01f, "Reach: a twist alone leaves it at the start (%.2f)", e.meters().bitrot);
+    wrist (std::cos (2 * h), std::sin (2 * h), 0, 0);
+    release();
+    settle();
+    CHECK (! c.watchLive() && ! e.meters().bitrotActive, "let go of C: glides back to the saved sound");
+
+    // Twist, with the job already set by the pedal: it glides back to the pedal's value
+    c.setValue (P::WatchMotion, 1);
+    e.setJob (PedalJob::Bitrot, 0.2f);
+    press();
+    wrist (1, 0, 0, 0);
+    wrist (std::cos (h), 0, std::sin (h), 0);
+    CHECK (std::fabs (e.meters().bitrot - 0.7f) < 0.01f, "Twist: 30 degrees turns 20%% up to %.2f (mark 0.70)", e.meters().bitrot);
+    wrist (std::cos (h), 0, -std::sin (h), 0);
+    CHECK (e.meters().bitrot < 0.01f, "Twist the other way goes down (%.2f)", e.meters().bitrot);
+    c.setValue (P::WatchReverse, 1);
+    wrist (std::cos (h), 0, -std::sin (h), 0);
+    CHECK (std::fabs (e.meters().bitrot - 0.7f) < 0.01f, "Reverse twist flips it (%.2f)", e.meters().bitrot);
+    release();
+    settle();
+    CHECK (std::fabs (e.meters().bitrot - 0.2f) < 0.01f && e.meters().bitrotActive, "let go: back to the pedal's 20%% (%.2f)", e.meters().bitrot);
+
+    // the meter tells the watch what it needs
+    const auto mj = c.meterJson (0, 64, kSr, 0);
+    CHECK (mj.find ("\"jobName\":\"Bitrot: Rev\"") != std::string::npos && mj.find ("\"watch\":{\"live\":false") != std::string::npos,
+           "the meter carries the job name and the watch's state");
+    // the watch only works in Grit
+    c.handleMessage (R"({"t":"bank","i":2})", none);
+    wrist (1, 0, 0, 0);
+    press();
+    CHECK (! c.watchLive(), "in Glow, hold C is still the runaway");
+    release();
+}
+
 // Tails ring over a part change; a plain switch-off still fades them.
 static void testPartTails()
 {
@@ -2211,6 +2283,7 @@ int main (int argc, char** argv)
         testTuner();
         testPedalJobs();
         testBitrotPedal();
+        testWatch();
         testPartTails();
         testController();
         testBandSetlist();

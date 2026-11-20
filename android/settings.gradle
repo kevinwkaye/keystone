@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "Keystone"
-include ':app'
+include ':app', ':watch'

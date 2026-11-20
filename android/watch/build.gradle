@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Keystone on the Galaxy Watch: hold C in Grit and your wrist works the pedal.
+android {
+    namespace 'uk.kevinkaye.keystone.watch'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'uk.kevinkaye.keystone.watch'
+        minSdk 30
+        targetSdk 34
+        versionCode 1
+        versionName '0.4.13'
+    }
+
+    // the same fixed key as the phone app, so each new APK installs over the last one
+    signingConfigs {
+        release {
+            storeFile file('../app/keystone.jks')
+            storePassword 'keystone-flip-fella'
+            keyAlias 'keystone'
+            keyPassword 'keystone-flip-fella'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

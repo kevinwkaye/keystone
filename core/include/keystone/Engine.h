@@ -82,9 +82,13 @@ public:
     // pedal left earlier waits until the pedal passes its value (soft takeover). Volume
     // starts full and always waits, so it never drops out on a bank change.
     void setPedal (float pos01);
+    int target() const { return pedalTarget(); }
     void setPedalBank (int bank);         // 0 Grit (dirt or Bitrot), 1 Groove (wah or volume), 2 Glow (Bloom)
     void resetPedalJobs();                // new song or part: every job back to its saved sound
     void setJob (PedalJob job, float v);  // the phone's bar: set a job directly
+    void releaseJob (PedalJob job);       // back to its saved sound, as if the pedal never touched it
+    bool jobActive (PedalJob job) const { return job_ (job).active.load(); }
+    float jobValue (PedalJob job) const { return job_ (job).value.load(); }
     void setBloom (float pos01) { setJob (PedalJob::Bloom, pos01); }
 
     // ---- the two rigs: Keystone (band) and Kuddle (home), both loaded ----
@@ -147,6 +151,7 @@ private:
     std::atomic<float> runawayNow { 0.0f };
     float runAmt = 0.0f;
     int pedalTarget() const;
+    const JobState& job_ (PedalJob j) const { return job[(size_t) j]; }
     std::atomic<bool> lightRequest { false };
 };
 

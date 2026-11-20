@@ -21,7 +21,7 @@ public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
-    static constexpr const char* kVersion = "0.4.12";
+    static constexpr const char* kVersion = "0.4.13";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -127,6 +127,8 @@ public:
     void setValue (P p, float v, bool broadcast = true);
     float value (P p) const { return engine.getParam (p); }
     bool tunerOn() const;
+    bool watchLive() const;
+    void watchWristForTests (float w, float x, float y, float z) { const float q[4] = { w, x, y, z }; watchWrist (q); }
     void notify (const std::string& text) { queueToast (text); }
     std::string lastToast() const { return toast; }
 
@@ -140,6 +142,12 @@ private:
     std::string toast;
 
     void onFootswitch (int sw, int event);
+    // the watch: hold C in Grit and the wrist works the pedal's job, glides back on release
+    bool watchConnected() const;
+    void watchStart();
+    void watchEnd();
+    void watchWrist (const float* q);
+    void watchTick();
     void handleMessageInner (const std::string& line, const std::function<void (const std::string&)>& reply);
     void applySong (int i, bool keepGoing = false);   // keepGoing: a part of the same song
     void saveSetlist() const;
