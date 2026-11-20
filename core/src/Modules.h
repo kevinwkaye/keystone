@@ -200,6 +200,11 @@ public:
     {
         eng.prepare (sampleRate);
         right.assign (kChunk, 0.0f);
+        sr = (float) sampleRate;
+        lpA.reset(); lpB.reset();
+        sweepMix.setTime (0.02f, sr); sweepMix.reset (0.0f);
+        hzNow = std::log (6000.0f);
+        hzGlide = onePoleCoef (0.012f, sr);
     }
     void reset() { /* the engine clears itself in prepare */ }
     void update (const Vals& v)
@@ -237,8 +242,44 @@ public:
     }
     float lock() const { return eng.uiLock.load (std::memory_order_relaxed); }
 
+    // The pedal's Sweep: a resonant low-pass on the synth alone. Two state variable stages,
+    // the second carrying the resonance, so it closes steeply and squeals at the cutoff
+    // with Peak up. Fades in and out over 20 ms, so switching it never clicks.
+    void setSweep (bool on, float cutoffHz, float peak)
+    {
+        sweepMix.set (on ? 1.0f : 0.0f);
+        hzWant = std::log (clampf (cutoffHz, 40.0f, 12000.0f));
+        res = 0.15f + 0.8f * clampf (peak, 0.0f, 1.0f);
+    }
+    void sweep (float* buf, int n)
+    {
+        if (sweepMix.target <= 0.0f && sweepMix.current() < 1.0e-4f) { lpA.reset(); lpB.reset(); hzNow = hzWant; return; }
+        // a resonant peak adds level, so trim back what it adds at the top of Peak
+        const float trim = 1.0f / (1.0f + 1.6f * res * res);
+        for (int at = 0; at < n; at += kCoefEvery)
+        {
+            const int m = std::min (kCoefEvery, n - at);
+            for (int i = 0; i < m; ++i) hzNow = hzWant + (hzNow - hzWant) * hzGlide;
+            const float f = std::exp (hzNow);
+            lpA.set (f, 0.0f, sr);
+            lpB.set (f, res, sr);
+            for (int i = at; i < at + m; ++i)
+            {
+                float a, b, c, e;
+                lpA.process (buf[i], a, b);
+                lpB.process (a, c, e);
+                const float w = sweepMix.next();
+                buf[i] += (c * trim - buf[i]) * w;
+            }
+        }
+    }
+
 private:
     static constexpr int kChunk = 256;
+    static constexpr int kCoefEvery = 16;
+    float sr = 48000.0f, hzWant = 8.7f, hzNow = 8.7f, hzGlide = 0.0f, res = 0.55f;
+    Svf lpA, lpB;
+    Smoothed sweepMix;
     bit::BitrotEngine eng;
     bit::EngineParams p;
     std::vector<float> right;

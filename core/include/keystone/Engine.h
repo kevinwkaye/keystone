@@ -32,10 +32,10 @@ struct Meters
     // pedal jobs: the bank the pedal is working for, each job's value and whether the
     // pedal has taken it yet (a job not taken plays its saved sound)
     int pedalBank = 0;                           // 0 Grit, 1 Groove, 2 Glow
-    int pedalTarget = 0;                         // 0 dirt, 1 wah, 2 volume, 3 Bloom
+    int pedalTarget = 0;                         // 0 dirt, 1 wah, 2 volume, 3 Bloom, 4 Bitrot
     float pedal = -1;                            // last raw position after calibration, -1 not moved
-    float dirt = 1, wah = 0.5f, volume = 1;
-    bool dirtActive = false, wahActive = false, volumeActive = false, bloomActive = false;
+    float dirt = 1, wah = 0.5f, volume = 1, bitrot = 0;
+    bool dirtActive = false, wahActive = false, volumeActive = false, bloomActive = false, bitrotActive = false;
     bool waiting = false;                        // the pedal hasn't caught up with its job yet
     int rig = 0;                                 // 0 Keystone, 1 Kuddle
     float melt = 0;                              // Kuddle's pedal
@@ -54,8 +54,9 @@ enum class Action
     Spill,           // the next few blocks: delay and reverb switched off keep their tails
 };
 
-// What the expression pedal does: one job per bank, and in Groove, wah or volume.
-enum class PedalJob { Dirt = 0, Wah = 1, Volume = 2, Bloom = 3 };
+// What the expression pedal does: one job per bank, and in Groove, wah or volume. In Grit
+// it's the dirt blend, or Bitrot's own job when Bitrot is on and its Pedal does isn't Blend.
+enum class PedalJob { Dirt = 0, Wah = 1, Volume = 2, Bloom = 3, Bitrot = 4 };
 
 class Recorder;
 
@@ -81,7 +82,7 @@ public:
     // pedal left earlier waits until the pedal passes its value (soft takeover). Volume
     // starts full and always waits, so it never drops out on a bank change.
     void setPedal (float pos01);
-    void setPedalBank (int bank);         // 0 Grit (dirt), 1 Groove (wah or volume), 2 Glow (Bloom)
+    void setPedalBank (int bank);         // 0 Grit (dirt or Bitrot), 1 Groove (wah or volume), 2 Glow (Bloom)
     void resetPedalJobs();                // new song or part: every job back to its saved sound
     void setJob (PedalJob job, float v);  // the phone's bar: set a job directly
     void setBloom (float pos01) { setJob (PedalJob::Bloom, pos01); }
@@ -136,7 +137,7 @@ private:
     double sr = 48000.0;
     std::array<std::atomic<float>, kNumParams> values;
     struct JobState { std::atomic<float> value { 0.0f }; std::atomic<bool> active { false }, caught { false }; };
-    std::array<JobState, 4> job;
+    std::array<JobState, 5> job;
     std::atomic<int> pedalBank { 0 }, lastTarget { -1 };
     std::atomic<float> lastPedal { -1.0f }, cpuLoad { 0.0f };
     std::atomic<int> rigNow { 0 };

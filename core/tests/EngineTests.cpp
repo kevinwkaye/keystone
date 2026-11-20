@@ -1126,6 +1126,123 @@ static void testPedalJobs()
     }
 }
 
+// Bitrot's own pedal job: six configurations, each heel to toe.
+static double tiltDb (const std::vector<float>& x, size_t from)
+{
+    // how much brighter than dark: 2.5 kHz against 150 Hz
+    double lo = bandDb (x, 150, from), hi = bandDb (x, 2500, from);
+    return hi - lo;
+}
+
+static void testBitrotPedal()
+{
+    std::printf ("Bitrot pedal: Blend, Rev, Sweep, Rev and sweep, Corrupt, Morph\n");
+    auto in = bassLine (2.0, 0.5);
+    auto setup = [] (Engine& e, int cfg)
+    {
+        e.prepare (kSr, 64); neutral (e); e.setParam (P::DroneOn, 0);
+        e.setParam (P::BitrotOn, 1); e.setParam (P::BitrotPedal, (float) cfg); e.setParam (P::BitrotPlace, 2);
+        e.setPedalBank (0);
+    };
+    const size_t from = in.size() / 2;
+
+    // Blend keeps the dirt blend; any other choice gives the pedal to Bitrot
+    {
+        Engine e; setup (e, 0);
+        CHECK (e.meters().pedalTarget == (int) PedalJob::Dirt, "Blend: Grit's pedal is still the dirt blend");
+        e.setParam (P::BitrotPedal, 2);
+        CHECK (e.meters().pedalTarget == (int) PedalJob::Bitrot, "Sweep: Grit's pedal works Bitrot");
+        e.setParam (P::BitrotOn, 0);
+        CHECK (e.meters().pedalTarget == (int) PedalJob::Dirt, "Bitrot off: the pedal goes back to the dirt blend");
+    }
+    // with the pedal on Bitrot, Bitrot plays at full level even at the heel
+    {
+        Engine heel, untouched;
+        setup (heel, 4); setup (untouched, 4);
+        heel.setPedal (0.0f);
+        Engine clean; clean.prepare (kSr, 64); neutral (clean); clean.setParam (P::DroneOn, 0);
+        const double d = maxDiff (render (heel, in), render (clean, in));
+        CHECK (d > 0.05, "Corrupt at the heel: Bitrot still fully in (differs from clean by %.3f)", d);
+    }
+    // the untouched job plays the saved sound
+    {
+        Engine a, b; setup (a, 1); setup (b, 0);
+        b.setPedalBank (2);   // Blend, pedal elsewhere: the dirt blend plays its saved sound (fully in)
+        const double d = maxDiff (render (a, in), render (b, in));
+        CHECK (d < 1.0e-4, "Rev, pedal not moved yet: the song's saved Bitrot (%.6f)", d);
+    }
+    // Rev: the toe pitches the oscillator up
+    {
+        Engine heel, toe; setup (heel, 1); setup (toe, 1);
+        for (Engine* e : { &heel, &toe }) { e->setParam (P::BitrotSquare, 0); e->setParam (P::BitrotSub, 0); e->setParam (P::BitrotOsc, 1); e->setParam (P::BitrotClean, 0); }
+        heel.setPedal (0.0f); toe.setPedal (1.0f);
+        const double up = tiltDb (render (toe, in), from) - tiltDb (render (heel, in), from);
+        CHECK (up > 10, "Rev: the toe moves the synth's energy up (2.5 kHz against 150 Hz rises %.1f dB)", up);
+    }
+    // Sweep: the heel closes the top, the toe opens it; Peak lifts the cutoff
+    {
+        Engine heel, toe; setup (heel, 2); setup (toe, 2);
+        for (Engine* e : { &heel, &toe }) e->setParam (P::BitrotClean, 0);
+        heel.setPedal (0.0f); toe.setPedal (1.0f);
+        auto h = render (heel, in), t = render (toe, in);
+        const double open = bandDb (t, 2500, from) - bandDb (h, 2500, from);
+        CHECK (open > 20, "Sweep: the toe opens 2.5 kHz by %.1f dB over the heel", open);
+        const double hr = 20 * std::log10 (rms (h.data() + from, h.size() - from) + 1e-12), tr = 20 * std::log10 (rms (t.data() + from, t.size() - from) + 1e-12);
+        CHECK (std::isfinite (hr) && tr - hr < 12, "Sweep: closing it doesn't vanish the bass, heel %.1f dB, toe %.1f dB", hr, tr);
+        Engine lo, hi; setup (lo, 2); setup (hi, 2);
+        for (Engine* e : { &lo, &hi }) { e->setParam (P::BitrotClean, 0); e->setPedal (0.35f); }
+        lo.setParam (P::BitrotPeak, 0.0f); hi.setParam (P::BitrotPeak, 1.0f);
+        const float fc = 150.0f * std::pow (40.0f, 0.35f);
+        const double peak = bandDb (render (hi, in), fc, from) - bandDb (render (lo, in), fc, from);
+        CHECK (peak > 3, "Sweep: Peak up rings at the cutoff (%.0f Hz, +%.1f dB)", fc, peak);
+        double worst = 0;
+        { auto o = render (hi, in); for (float x : o) worst = std::max (worst, (double) std::fabs (x)); }
+        CHECK (worst < 1.5, "Sweep with Peak full stays in bounds (peak %.2f)", worst);
+    }
+    // Rev and sweep: both move together
+    {
+        Engine heel, toe; setup (heel, 3); setup (toe, 3);
+        for (Engine* e : { &heel, &toe }) e->setParam (P::BitrotClean, 0);
+        heel.setPedal (0.0f); toe.setPedal (1.0f);
+        const double open = bandDb (render (toe, in), 2500, from) - bandDb (render (heel, in), 2500, from);
+        CHECK (open > 20, "Rev and sweep: the toe is higher and open (+%.1f dB at 2.5 kHz)", open);
+    }
+    // Corrupt and Morph change the sound from heel to toe
+    for (int cfg : { 4, 5 })
+    {
+        Engine heel, toe; setup (heel, cfg); setup (toe, cfg);
+        for (Engine* e : { &heel, &toe }) e->setParam (P::BitrotClean, 0);
+        heel.setPedal (0.0f); toe.setPedal (1.0f);
+        const double d = maxDiff (render (heel, in), render (toe, in));
+        CHECK (d > 0.05, "%s: heel and toe differ (%.3f)", cfg == 4 ? "Corrupt" : "Morph", d);
+    }
+    // Morph at the heel is the sub alone
+    {
+        Engine heel; setup (heel, 5); heel.setParam (P::BitrotClean, 0); heel.setPedal (0.0f);
+        Engine sub; setup (sub, 0); sub.setParam (P::BitrotClean, 0);
+        sub.setParam (P::BitrotSquare, 0); sub.setParam (P::BitrotOsc, 0);
+        sub.setParam (P::BitrotSub, 0.6f);   // the loudest of the defaults
+        const double d = maxDiff (render (heel, in), render (sub, in));
+        CHECK (d < 0.02, "Morph, heel: the sub on its own (%.4f)", d);
+    }
+    // switching the configuration mid-note never jumps out of bounds
+    {
+        Engine e; setup (e, 2); e.setParam (P::BitrotPeak, 1); e.setPedal (0.0f);
+        std::vector<float> out (in.size());
+        double worst = 0;
+        for (size_t at = 0; at < in.size(); at += 64)
+        {
+            const int n = (int) std::min<size_t> (64, in.size() - at);
+            if (at == in.size() / 3) e.setParam (P::BitrotPedal, 0);
+            if (at == in.size() * 2 / 3) e.setParam (P::BitrotPedal, 3);
+            e.setPedal ((float) at / in.size());
+            e.process (in.data() + at, out.data() + at, n);
+        }
+        for (float x : out) worst = std::max (worst, (double) std::fabs (x));
+        CHECK (worst < 1.5 && std::isfinite (worst), "changing configuration while playing stays in bounds (peak %.2f)", worst);
+    }
+}
+
 // Tails ring over a part change; a plain switch-off still fades them.
 static void testPartTails()
 {
@@ -2093,6 +2210,7 @@ int main (int argc, char** argv)
         testSteadyDrive();
         testTuner();
         testPedalJobs();
+        testBitrotPedal();
         testPartTails();
         testController();
         testBandSetlist();

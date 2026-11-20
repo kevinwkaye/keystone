@@ -65,6 +65,7 @@ struct Engine::Impl
     // Bitrot's synth, matched to the level you play at, so turning it on makes it fuzzier, not louder
     float bitPowIn = 0, bitPowSy = 0, bitMatch = 1, bitAvg = 0.0005f, bitTrim = 1;
     bool bitFresh = true;
+    float bitPedal = 0; bool bitPedalFresh = true;   // Bitrot's pedal job, glided
 
     // tuner: input decimated by 4 into a ring, analysed on the housekeeping thread
     Biquad tunerLp1, tunerLp2;
@@ -232,7 +233,7 @@ int Engine::pedalTarget() const
 {
     switch (pedalBank.load())
     {
-        case 0: return (int) PedalJob::Dirt;
+        case 0: return getParam (P::BitrotOn) > 0.5f && getParam (P::BitrotPedal) > 0.5f ? (int) PedalJob::Bitrot : (int) PedalJob::Dirt;
         case 1: return getParam (P::WahOn) > 0.5f ? (int) PedalJob::Wah : (int) PedalJob::Volume;
         default: return (int) PedalJob::Bloom;
     }
@@ -274,6 +275,7 @@ void Engine::resetPedalJobs()
     job[(size_t) PedalJob::Dirt].value.store (1.0f);
     job[(size_t) PedalJob::Wah].value.store (0.5f);
     job[(size_t) PedalJob::Volume].value.store (1.0f);
+    job[(size_t) PedalJob::Bitrot].value.store (0.0f);
     lastTarget.store (-1);
 }
 
@@ -324,6 +326,7 @@ Meters Engine::meters() const
     m.wah = job[1].value.load(); m.wahActive = job[1].active.load();
     m.volume = job[2].value.load(); m.volumeActive = job[2].active.load();
     m.bloomActive = job[3].active.load();
+    m.bitrot = job[4].value.load(); m.bitrotActive = job[4].active.load();
     m.rig = rigNow.load();
     m.melt = meltPos.load();
     m.kuddleSqueezeDb = d.kudGr.load();
@@ -380,7 +383,45 @@ void Engine::process (const float* in, float* out, int numSamples)
         const float dirt = job[0].active.load() ? job[0].value.load() : 1.0f;
         const float driveMix = clampf (dirt * 2.0f, 0.0f, 1.0f);
         const float bitAt = V (v, P::PedalBitrotAt);
-        const float bitMix = clampf ((dirt - bitAt) / std::max (0.05f, 1.0f - bitAt), 0.0f, 1.0f);
+        // Bitrot's own pedal job (Pedal does, not Blend): Bitrot plays at its full level and
+        // the pedal works one of its configurations; the drive stays where the blend left it
+        const int bitPedal = Vi (v, P::BitrotPedal);
+        const bool bitOwnsPedal = bitPedal > 0;
+        const float bitMix = bitOwnsPedal ? 1.0f : clampf ((dirt - bitAt) / std::max (0.05f, 1.0f - bitAt), 0.0f, 1.0f);
+        {
+            // a job the pedal hasn't taken plays the saved sound
+            const bool bpOn = bitOwnsPedal && job[4].active.load();
+            if (bpOn)
+            {
+                // glide over the pedal's steps (about 20 ms), so sweeps don't zip
+                const float target = job[4].value.load();
+                if (d.bitPedalFresh) { d.bitPedal = target; d.bitPedalFresh = false; }
+                d.bitPedal += (target - d.bitPedal) * (1.0f - std::exp (-(float) n / (0.02f * d.sr)));
+            }
+            else d.bitPedalFresh = true;
+            const float bp = d.bitPedal;
+            auto set = [&] (P p, float x) { d.v[(size_t) p] = x; };
+            const bool rev = bitPedal == 1 || bitPedal == 3, sweep = bitPedal == 2 || bitPedal == 3;
+            if (bpOn && rev)
+            {
+                // heel: the song's own Bend; toe: three octaves up
+                const float b0 = V (v, P::BitrotBend);
+                set (P::BitrotBend, b0 + (1.0f - b0) * bp);
+            }
+            if (bpOn && bitPedal == 4) set (P::BitrotCorrupt, bp);   // heel tight, toe wild
+            if (bpOn && bitPedal == 5)
+            {
+                // heel the sub alone, the square in the middle, the oscillator at the toe,
+                // equal power, at the loudest of the song's three voice levels
+                const float top = std::max ({ V (v, P::BitrotSquare), V (v, P::BitrotSub), V (v, P::BitrotOsc), 0.3f });
+                const float x = bp * 2.0f;
+                set (P::BitrotSub, top * std::sqrt (clampf (1.0f - x, 0.0f, 1.0f)));
+                set (P::BitrotSquare, top * std::sqrt (clampf (1.0f - std::fabs (x - 1.0f), 0.0f, 1.0f)));
+                set (P::BitrotOsc, top * std::sqrt (clampf (x - 1.0f, 0.0f, 1.0f)));
+            }
+            // Sweep: a resonant low-pass on the synth alone, 150 Hz at the heel to 6 kHz at the toe
+            d.bitrot.setSweep (bpOn && sweep, 150.0f * std::pow (40.0f, bp), V (v, P::BitrotPeak));
+        }
         const float wahPos = job[1].active.load() ? job[1].value.load() : 0.5f;
         float volGain = 1.0f;
         if (job[2].active.load())
@@ -531,6 +572,8 @@ void Engine::process (const float* in, float* out, int numSamples)
                     }
                     sy[i] = q * d.bitMatch * d.bitTrim;
                 }
+                // the pedal's sweep goes after the level match, so the match can't undo it
+                d.bitrot.sweep (sy, n);
                 for (int i = 0; i < n; ++i)
                 {
                     const float g = d.bitrotOn.next();

@@ -699,7 +699,8 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
 
 // ---------------------------------------------------------------------------------------
 // Footswitches, in three banks. The bank sets what taps A to C and the pedal do:
-//   Grit:   A Edge/Drive, B Bitrot, C Growl/Cut flip; pedal: dirt blend
+//   Grit:   A Edge/Drive, B Bitrot, C Growl/Cut flip; pedal: dirt blend, or Bitrot's own
+//           job when Bitrot is on and its Pedal does isn't Blend
 //   Groove: A auto filter, B Dimension, C wah; pedal: wah, or volume with the wah off
 //   Glow:   A Speckle, B delay, C reverb; pedal: Bloom
 // Every bank: tap D drone. Hold A next bank, B next song or part, C tuner, D slap.
@@ -947,11 +948,13 @@ void Controller::keep()
     {
         const auto m = engine.meters();
         static const char* banks[] = { "Grit", "Groove", "Glow" };
-        static const char* jobs[] = { "Dirt blend", "Wah", "Volume", "Bloom sweep" };
+        static const char* jobs[] = { "Dirt blend", "Wah", "Volume", "Bloom sweep", "Bitrot" };
         e["bank"] = banks[s->bank];
         e["expression"] = { { "assignment", jobs[m.pedalTarget] }, { "position", m.pedal },
                             { "dirt", m.dirtActive ? json (m.dirt) : json() }, { "wah", m.wahActive ? json (m.wah) : json() },
-                            { "volume", m.volumeActive ? json (m.volume) : json() }, { "bloom", m.bloomActive ? json (m.bloom) : json() } };
+                            { "volume", m.volumeActive ? json (m.volume) : json() }, { "bloom", m.bloomActive ? json (m.bloom) : json() },
+                            { "bitrot", m.bitrotActive ? json (m.bitrot) : json() } };
+        if (m.pedalTarget == (int) PedalJob::Bitrot) e["expression"]["bitrotConfig"] = formatValue (P::BitrotPedal, engine.getParam (P::BitrotPedal));
     }
     e["tempo"] = nullptr;
     e["capture"] = engine.captureName();
@@ -1651,9 +1654,9 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
     j["bank"] = m.pedalBank;
     j["job"] = m.pedalTarget;
     {
-        const float jv[] = { m.dirtActive ? m.dirt : 1.0f, m.wahActive ? m.wah : 0.5f, m.volume, m.bloom };
+        const float jv[] = { m.dirtActive ? m.dirt : 1.0f, m.wahActive ? m.wah : 0.5f, m.volume, m.bloom, m.bitrot };
         j["jobv"] = std::round (jv[m.pedalTarget] * 1000) / 1000;
-        const bool act[] = { m.dirtActive, m.wahActive, m.volumeActive, m.bloomActive };
+        const bool act[] = { m.dirtActive, m.wahActive, m.volumeActive, m.bloomActive, m.bitrotActive };
         j["jobOn"] = act[m.pedalTarget];
     }
     j["wait"] = m.waiting;

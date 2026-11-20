@@ -585,7 +585,14 @@ var KS = (function () {
     { name: 'Grit', col: '#F0997B', pedal: 'Dirt blend', zones: ['Clean', 'Drive', 'Bitrot'] },
     { name: 'Groove', col: '#B38CF0', pedal: 'Volume', zones: ['Heel', '', 'Toe'] },
     { name: 'Glow', col: '#6FA8FF', pedal: 'Bloom', zones: ['Speckle', '', 'Wash'] }];
-  var JOBS = ['Dirt blend', 'Wah', 'Volume', 'Bloom'];
+  var JOBS = ['Dirt blend', 'Wah', 'Volume', 'Bloom', 'Bitrot'];
+  // Bitrot's pedal configurations (Pedal does), heel and toe
+  var BIT_PEDAL = [null,
+    { name: 'Rev', zones: ['Song bend', '', '3 oct up'] },
+    { name: 'Sweep', zones: ['Closed', '', 'Open'] },
+    { name: 'Rev and sweep', zones: ['Low, closed', '', 'High, open'] },
+    { name: 'Corrupt', zones: ['Tight', '', 'Wild'] },
+    { name: 'Morph', zones: ['Sub', 'Square', 'Oscillator'] }];
   function isPart(i) { return !!S.parts[i] && i > 0; }
   function songNo(i) { var n = 0; for (var k = 0; k <= i && k < S.songs.length; k++) if (!isPart(k)) n++; return n; }
   function songsOnly() { return songNo(S.songs.length - 1); }
@@ -627,11 +634,13 @@ var KS = (function () {
       var mv = S.pedalDrag != null ? S.pedalDrag : (S.meter.melt || 0);
       return { job: 4, name: 'Melt', zones: ['Open', 'Warm', 'Melted'], v: mv, text: Math.round(mv * 100) + '%' };
     }
-    var m = S.meter, job = m.job != null ? m.job : [0, on('wah.on') ? 1 : 2, 3][S.bank];
-    var zones = job === 0 ? BANKS[0].zones : job === 3 ? BANKS[2].zones : ['Heel', '', 'Toe'];
+    var bitCfg = on('bitrot.on') ? BIT_PEDAL[Math.round(val('bitrot.pedal'))] : null;
+    var m = S.meter, job = m.job != null ? m.job : [bitCfg ? 4 : 0, on('wah.on') ? 1 : 2, 3][S.bank];
+    if (job === 4 && !bitCfg) bitCfg = BIT_PEDAL[1];
+    var zones = job === 0 ? BANKS[0].zones : job === 3 ? BANKS[2].zones : job === 4 ? bitCfg.zones : ['Heel', '', 'Toe'];
     var v = S.pedalDrag != null ? S.pedalDrag : (m.jobv != null ? m.jobv : job === 3 ? (m.bloom || 0) : 1);
     var text = !m.jobOn && job !== 2 ? 'Saved sound, move the pedal' : m.wait ? 'Waiting: pedal at ' + Math.round((m.pedal || 0) * 100) + '%' : Math.round(v * 100) + '%';
-    return { job: job, name: JOBS[job], zones: zones, v: v, text: text };
+    return { job: job, name: job === 4 ? 'Bitrot: ' + bitCfg.name : JOBS[job], zones: zones, v: v, text: text };
   }
   // Stomp or Song mode, shown above the banks; tap to swap (C and D together on the floor)
   function modeBar() {
@@ -1057,6 +1066,7 @@ var KS = (function () {
     }
     if (mod === 'pedal') {
       pre = '<section class="card"><h2 class="label">One pedal, a job per bank</h2><span class="small">Grit: dirt blend. Heel is clean, the drive is fully in by halfway and Bitrot joins from Bitrot joins at up to the toe. It only blends dirt you have switched on.</span>' +
+        '<span class="small">With Bitrot on and its Pedal does set to anything but Blend, the pedal in Grit works Bitrot alone: Rev, Sweep, Rev and sweep, Corrupt or Morph. Bitrot plays at full level and the drive stays where it was.</span>' +
         '<span class="small">Groove: with the wah on (tap C) the pedal sweeps it, on the full sound so the bottom end stays solid. With the wah off it is a volume pedal before the delay and reverb, so tails ring as you pull back.</span>' +
         '<span class="small">Glow: Bloom, see Bloom sweep.</span>' +
         '<span class="small">After a bank change the pedal waits until it passes the value its job was left at, then follows, so nothing jumps. Volume starts full and always waits. A new song or part puts every job back to its saved sound until you move the pedal.</span></section>';

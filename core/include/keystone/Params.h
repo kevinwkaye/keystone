@@ -108,6 +108,8 @@ struct ParamInfo
     P(BitrotCorrupt,  "bitrot.corrupt",  "Corrupt",       "bitrot",  "Tracking",       Flip,   0,    1,    0.25f, "%", "",   None) \
     P(BitrotGate,     "bitrot.gate",     "Sensitivity",   "bitrot",  "Tracking",       Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(BitrotPlace,    "bitrot.place",    "Goes",          "bitrot",  "Order",          Choice, 0,    2,    1,    "",   "Before drive|After drive|After preamp", None) \
+    P(BitrotPedal,    "bitrot.pedal",    "Pedal does",    "bitrot",  "Pedal (Grit)",   Choice, 0,    5,    0,    "",   "Blend|Rev|Sweep|Rev and sweep|Corrupt|Morph", None) \
+    P(BitrotPeak,     "bitrot.peak",     "Peak",          "bitrot",  "Pedal (Grit)",   Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(PreOn,          "preamp.on",       "On",            "preamp",  "",               Toggle, 0,    1,    1,    "",   "",   None) \
     P(PreGain,        "preamp.gain",     "Gain",          "preamp",  "Valve",          Flip,   0,    1,    0.45f,"%",  "",   None) \
     P(PreSag,         "preamp.sag",      "Sag",           "preamp",  "Valve",          Flip,   0,    1,    0.4f, "%",  "",   None) \

@@ -44,6 +44,7 @@ const char* showIf (P p)
         case P::BitrotSubMix: return "bitrot.subRoot=1";
         case P::BitrotFloorHz: return "bitrot.floor=1";
         case P::BitrotFmDepth: return "bitrot.fm=1";
+        case P::BitrotPeak: return "bitrot.pedal=2|3";
         default: return "";
     }
 }
@@ -64,7 +65,7 @@ const ModuleInfo* moduleTable (int& count)
         { "grains", "Speckle", "Full sound", "Eleven effects, filter, mod and space" },
         { "delay", "Delay", "Full sound", "Twelve types, tape machine, tap" },
         { "reverb", "Reverb", "Full sound", "Twelve spaces, shimmer, your own impulses" },
-        { "pedal", "Pedal jobs", "Control", "Dirt blend, wah, volume, Bloom" },
+        { "pedal", "Pedal jobs", "Control", "Dirt blend or Bitrot, wah, volume, Bloom" },
         { "bloom", "Bloom sweep", "Control", "Grains then wash, per song" },
         { "tempo", "Tempo", "Control", "Saved per song, tap on Play" },
         { "recorder", "Recorder", "Control", "Rehearsal takes, room from the phone" },

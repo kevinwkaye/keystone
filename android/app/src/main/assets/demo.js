@@ -37,7 +37,7 @@ window.KSDemo = (function () {
     var inDb = -14 - 30 * (1 - env) + Math.random() * 1.5;
     var outDb = inDb + 4 + (v('drive.on') > 0.5 ? 3 : 0);
     var m = { t: 'meter', out: Math.round(outDb * 10) / 10, rms: Math.round((outDb - 8) * 10) / 10, 'in': Math.round(inDb * 10) / 10,
-      lim: 0, bloom: st.bank === 2 ? pedal : 0, bank: st.bank, job: st.bank === 0 ? 0 : st.bank === 1 ? (v('wah.on') > 0.5 ? 1 : 2) : 3,
+      lim: 0, bloom: st.bank === 2 ? pedal : 0, bank: st.bank, job: st.bank === 0 ? (v('bitrot.on') > 0.5 && v('bitrot.pedal') > 0.5 ? 4 : 0) : st.bank === 1 ? (v('wah.on') > 0.5 ? 1 : 2) : 3,
       jobv: pedal, jobOn: true, wait: false, rig: st.rig, melt: pedal, sq: 0, pedal: pedal, drone: droneOn ? 1 : 0, swell: false,
       grains: v('grains.on') > 0.5 ? 0.5 * env : 0, clip: false, light: false, cpu: 9.5, buf: 128, sr: 48000, lat: 6.1, rec: { on: false } };
     if (tunerOn) {
