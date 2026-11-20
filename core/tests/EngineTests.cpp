@@ -1275,10 +1275,14 @@ static void testWatch()
     press();
     CHECK (c.watchLive() && ! c.tunerOn(), "watch connected: hold C goes live, no tuner");
     wrist (1, 0, 0, 0);                              // where the arm starts
-    wrist (std::cos (h), std::sin (h), 0, 0);        // forearm lifted 30 degrees
+    CHECK (! e.meters().bitrotActive, "hold C, arm still: the sound doesn't change");
+    wrist (std::cos (h / 15), std::sin (h / 15), 0, 0);   // 2 degrees: inside the dead zone
+    CHECK (! e.meters().bitrotActive, "a 2 degree wobble: still hands off");
+    const float h2 = (float) (16.5 * M_PI / 180.0);   // 33 degrees, 30 past the dead zone
+    wrist (std::cos (h2), std::sin (h2), 0, 0);
     auto m = e.meters();
-    CHECK (m.pedalTarget == (int) PedalJob::Bitrot && std::fabs (m.bitrot - 0.5f) < 0.01f, "Reach: 30 degrees away puts Rev at %.2f (mark 0.50)", m.bitrot);
-    wrist (std::cos (h), -std::sin (h), 0, 0);       // 30 degrees the other way: still away
+    CHECK (m.pedalTarget == (int) PedalJob::Bitrot && std::fabs (m.bitrot - 0.5f) < 0.01f, "Reach: 30 degrees past the dead zone puts Rev at %.2f (mark 0.50)", m.bitrot);
+    wrist (std::cos (h2), -std::sin (h2), 0, 0);     // the other way: still away
     CHECK (std::fabs (e.meters().bitrot - 0.5f) < 0.01f, "Reach: away in any direction counts the same (%.2f)", e.meters().bitrot);
     wrist (std::cos (h), 0, std::sin (h), 0);        // a twist about the forearm doesn't move it
     CHECK (e.meters().bitrot < 0.01f, "Reach: a twist alone leaves it at the start (%.2f)", e.meters().bitrot);
@@ -1292,24 +1296,19 @@ static void testWatch()
     e.setJob (PedalJob::Bitrot, 0.2f);
     press();
     wrist (1, 0, 0, 0);
-    wrist (std::cos (h), 0, std::sin (h), 0);
-    CHECK (std::fabs (e.meters().bitrot - 0.5f) < 0.01f, "Twist: live starts at the heel, 30 degrees is %.2f (mark 0.50)", e.meters().bitrot);
-    wrist (std::cos (h), 0, -std::sin (h), 0);
-    CHECK (e.meters().bitrot < 0.01f, "Twist the other way stays at the heel (%.2f)", e.meters().bitrot);
+    CHECK (std::fabs (e.meters().bitrot - 0.2f) < 0.01f, "hold C, arm still: stays at the pedal's 20%% (%.2f)", e.meters().bitrot);
+    wrist (std::cos (h2), 0, std::sin (h2), 0);
+    CHECK (std::fabs (e.meters().bitrot - 0.6f) < 0.01f, "Twist: 30 degrees sweeps up from 20%% to %.2f (mark 0.60)", e.meters().bitrot);
+    wrist (std::cos (h2), 0, -std::sin (h2), 0);
+    CHECK (std::fabs (e.meters().bitrot - 0.2f) < 0.01f, "Twist the other way stays at its start (%.2f)", e.meters().bitrot);
     c.setValue (P::WatchReverse, 1);
-    wrist (std::cos (h), 0, -std::sin (h), 0);
-    CHECK (std::fabs (e.meters().bitrot - 0.5f) < 0.01f, "Reverse twist flips it (%.2f)", e.meters().bitrot);
+    wrist (std::cos (h2), 0, -std::sin (h2), 0);
+    CHECK (std::fabs (e.meters().bitrot - 0.6f) < 0.01f, "Reverse twist flips it (%.2f)", e.meters().bitrot);
     release();
     settle();
     CHECK (std::fabs (e.meters().bitrot - 0.2f) < 0.01f && e.meters().bitrotActive, "let go: back to the pedal's 20%% (%.2f)", e.meters().bitrot);
 
-    // live starts at the heel even when the pedal was up at the toe
-    e.setJob (PedalJob::Bitrot, 0.9f);
-    press();
-    CHECK (e.meters().bitrot < 0.01f, "hold C: the job starts at the heel (%.2f), not the pedal's 0.90", e.meters().bitrot);
-    release();
-    settle();
-    CHECK (std::fabs (e.meters().bitrot - 0.9f) < 0.01f, "let go: back to the pedal's 0.90 (%.2f)", e.meters().bitrot);
+
 
     // with the watch on, Bitrot's own job plays fully wet; on Blend, Clean still counts
     {

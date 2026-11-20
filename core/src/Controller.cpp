@@ -783,8 +783,8 @@ bool Controller::tunerOn() const { return engine.meters().tunerOn; }
 
 // ---------------------------------------------------------------------------------------
 // The watch. It streams its orientation (game rotation vector, a quaternion) over the link
-// about 50 times a second. Hold C in Grit and it goes live: the job starts at the heel
-// and where your arm is now is the heel. Reach: the further your forearm moves
+// about 50 times a second. Hold C in Grit and it goes live: nothing changes until your
+// arm moves, then the job sweeps up from where it was. Reach: the further your forearm moves
 // away from there, in any direction, the further towards the toe, like a theremin. Twist:
 // turning the forearm, both ways. Let go of C and the job glides back to where it was.
 // ---------------------------------------------------------------------------------------
@@ -811,14 +811,12 @@ void Controller::watchStart()
         else if (job == PedalJob::Dirt) from = 1.0f;
         else if (job == PedalJob::Wah) from = 0.5f;
     }
-    // live always starts at the heel, so your arm has the whole sweep; letting go glides
-    // back to where it was
-    s->watchFrom = from;
-    s->watchNow = 0.0f;
+    // pressing C changes nothing: the sound stays put until your arm moves, then sweeps up
+    // from there to the toe over the full movement; letting go glides back to it
+    s->watchFrom = s->watchNow = from;
     s->watchLive = true;
     s->watchGliding = false;
     s->watchHaveRef = false;   // the next wrist message sets where your arm starts
-    engine.setJob (job, 0.0f);
     queueToast ("WATCH LIVE");
     mark ("Watch live");
 }
@@ -869,7 +867,12 @@ void Controller::watchWrist (const float* q)
         if (tw < -kPi) tw += 2 * kPi;
         deg = tw * 57.29578f * (value (P::WatchReverse) > 0.5f ? -1.0f : 1.0f);
     }
-    s->watchNow = std::clamp (deg / std::max (10.0f, value (P::WatchRange)), 0.0f, 1.0f);
+    // a few degrees of dead zone, so a still arm (and the sensor's jitter) leaves it alone
+    const float dead = 3.0f;
+    deg = deg > dead ? deg - dead : deg < -dead ? deg + dead : 0.0f;
+    if (deg == 0.0f && s->watchNow == s->watchFrom) return;   // not moved yet: hands off
+    const float t = std::max (0.0f, deg / std::max (10.0f, value (P::WatchRange)));   // up only
+    s->watchNow = std::clamp (s->watchFrom + (1.0f - s->watchFrom) * t, 0.0f, 1.0f);
     engine.setJob ((PedalJob) s->watchJob, s->watchNow);
 }
 
@@ -880,7 +883,7 @@ void Controller::watchTick()
     const float t = (float) std::min (1.0, (steadyNow() - s->watchGlideAt) / secs);
     const float e = t * t * (3 - 2 * t);
     const auto job = (PedalJob) s->watchJob;
-    if (t >= 1.0f)
+    if (t >= 1.0f || s->watchGlideFrom == s->watchFrom)
     {
         s->watchGliding = false;
         if (s->watchWasActive) engine.setJob (job, s->watchFrom);
