@@ -494,7 +494,8 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.highLevel.set (dbToGain (V (v, P::SplitHighLevel)));
         d.outLevel.set (dbToGain (V (v, P::OutLevel)));
         d.bitrotOn.set (Vb (v, P::BitrotOn) ? bitMix : 0.0f);
-        d.bitrotClean.set (V (v, P::BitrotClean));
+        // with the watch on and the pedal Bitrot's own, Bitrot is all you hear
+        d.bitrotClean.set (Vi (v, P::BitrotPedal) > 0 && watchOn.load() ? 0.0f : V (v, P::BitrotClean));
         d.bitTrim = 0.8f * V (v, P::BitrotVol) / 0.4f;   // Level: 40% sits level with your playing, the clean under it included
         d.preOn.set (Vb (v, P::PreOn) ? 1.0f : 0.0f);
         d.filtOn.set (Vb (v, P::FiltOn) ? 1.0f : 0.0f);

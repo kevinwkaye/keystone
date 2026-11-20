@@ -1293,15 +1293,46 @@ static void testWatch()
     press();
     wrist (1, 0, 0, 0);
     wrist (std::cos (h), 0, std::sin (h), 0);
-    CHECK (std::fabs (e.meters().bitrot - 0.7f) < 0.01f, "Twist: 30 degrees turns 20%% up to %.2f (mark 0.70)", e.meters().bitrot);
+    CHECK (std::fabs (e.meters().bitrot - 0.5f) < 0.01f, "Twist: live starts at the heel, 30 degrees is %.2f (mark 0.50)", e.meters().bitrot);
     wrist (std::cos (h), 0, -std::sin (h), 0);
-    CHECK (e.meters().bitrot < 0.01f, "Twist the other way goes down (%.2f)", e.meters().bitrot);
+    CHECK (e.meters().bitrot < 0.01f, "Twist the other way stays at the heel (%.2f)", e.meters().bitrot);
     c.setValue (P::WatchReverse, 1);
     wrist (std::cos (h), 0, -std::sin (h), 0);
-    CHECK (std::fabs (e.meters().bitrot - 0.7f) < 0.01f, "Reverse twist flips it (%.2f)", e.meters().bitrot);
+    CHECK (std::fabs (e.meters().bitrot - 0.5f) < 0.01f, "Reverse twist flips it (%.2f)", e.meters().bitrot);
     release();
     settle();
     CHECK (std::fabs (e.meters().bitrot - 0.2f) < 0.01f && e.meters().bitrotActive, "let go: back to the pedal's 20%% (%.2f)", e.meters().bitrot);
+
+    // live starts at the heel even when the pedal was up at the toe
+    e.setJob (PedalJob::Bitrot, 0.9f);
+    press();
+    CHECK (e.meters().bitrot < 0.01f, "hold C: the job starts at the heel (%.2f), not the pedal's 0.90", e.meters().bitrot);
+    release();
+    settle();
+    CHECK (std::fabs (e.meters().bitrot - 0.9f) < 0.01f, "let go: back to the pedal's 0.90 (%.2f)", e.meters().bitrot);
+
+    // with the watch on, Bitrot's own job plays fully wet; on Blend, Clean still counts
+    {
+        auto in = bassLine (1.0, 0.5);
+        auto run = [&] (bool watch, int cfg)
+        {
+            Engine x; x.prepare (kSr, 64); neutral (x); x.setParam (P::DroneOn, 0);
+            x.setParam (P::BitrotOn, 1); x.setParam (P::BitrotPedal, (float) cfg); x.setParam (P::BitrotPlace, 2);
+            x.setParam (P::BitrotClean, 0.8f);
+            x.setWatchConnected (watch);
+            return render (x, in);
+        };
+        auto dry = [&] (int cfg)
+        {
+            Engine x; x.prepare (kSr, 64); neutral (x); x.setParam (P::DroneOn, 0);
+            x.setParam (P::BitrotOn, 1); x.setParam (P::BitrotPedal, (float) cfg); x.setParam (P::BitrotPlace, 2);
+            x.setParam (P::BitrotClean, 0.0f);
+            return render (x, in);
+        };
+        CHECK (maxDiff (run (true, 1), dry (1)) < 1.0e-4, "watch on, Bitrot: Rev: fully wet, Clean ignored");
+        CHECK (maxDiff (run (false, 1), dry (1)) > 0.01, "watch off: Clean still mixes in");
+        CHECK (maxDiff (run (true, 0), dry (0)) > 0.01, "watch on, Blend: Clean still mixes in");
+    }
 
     // the meter tells the watch what it needs
     const auto mj = c.meterJson (0, 64, kSr, 0);

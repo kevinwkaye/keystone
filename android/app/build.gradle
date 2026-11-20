@@ -10,8 +10,8 @@ android {
         applicationId 'uk.kevinkaye.keystone'
         minSdk 26
         targetSdk 34
-        versionCode 35
-        versionName '0.4.13'
+        versionCode 36
+        versionName '0.4.14'
     }
 
     // One fixed key, kept in the repo, so each new APK installs over the last one.

@@ -86,7 +86,9 @@ public:
     void setPedalBank (int bank);         // 0 Grit (dirt or Bitrot), 1 Groove (wah or volume), 2 Glow (Bloom)
     void resetPedalJobs();                // new song or part: every job back to its saved sound
     void setJob (PedalJob job, float v);  // the phone's bar: set a job directly
-    void releaseJob (PedalJob job);       // back to its saved sound, as if the pedal never touched it
+    void releaseJob (PedalJob job);
+    // the watch is connected: Bitrot with its own pedal job plays fully wet, no clean under it
+    void setWatchConnected (bool on) { watchOn.store (on); }       // back to its saved sound, as if the pedal never touched it
     bool jobActive (PedalJob job) const { return job_ (job).active.load(); }
     float jobValue (PedalJob job) const { return job_ (job).value.load(); }
     void setBloom (float pos01) { setJob (PedalJob::Bloom, pos01); }
@@ -142,6 +144,7 @@ private:
     std::array<std::atomic<float>, kNumParams> values;
     struct JobState { std::atomic<float> value { 0.0f }; std::atomic<bool> active { false }, caught { false }; };
     std::array<JobState, 5> job;
+    std::atomic<bool> watchOn { false };
     std::atomic<int> pedalBank { 0 }, lastTarget { -1 };
     std::atomic<float> lastPedal { -1.0f }, cpuLoad { 0.0f };
     std::atomic<int> rigNow { 0 };

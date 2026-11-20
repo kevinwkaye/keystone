@@ -47,7 +47,7 @@ struct Controller::State
     double watchSeen = -1;
     bool watchLive = false, watchGliding = false, watchWasActive = false, watchHaveRef = false;
     int watchJob = 0;
-    float watchFrom = 0, watchNow = 0, watchGlideFrom = 0;
+    float watchFrom = 0, watchNow = 0, watchGlideFrom = 0;   // from: where it glides back to
     double watchGlideAt = 0;
     float watchRef[4] = { 1, 0, 0, 0 };
     // Keystone's own Wi-Fi network
@@ -719,6 +719,7 @@ void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, 
 void Controller::tick (double now)
 {
     s->logic.tick (now);
+    engine.setWatchConnected (watchConnected());
     watchTick();
     if (s->listenFinished.exchange (false))
     {
@@ -782,8 +783,8 @@ bool Controller::tunerOn() const { return engine.meters().tunerOn; }
 
 // ---------------------------------------------------------------------------------------
 // The watch. It streams its orientation (game rotation vector, a quaternion) over the link
-// about 50 times a second. Hold C in Grit and it goes live: where your arm is now picks up
-// the pedal job where it is now, so nothing jumps. Reach: the further your forearm moves
+// about 50 times a second. Hold C in Grit and it goes live: the job starts at the heel
+// and where your arm is now is the heel. Reach: the further your forearm moves
 // away from there, in any direction, the further towards the toe, like a theremin. Twist:
 // turning the forearm, both ways. Let go of C and the job glides back to where it was.
 // ---------------------------------------------------------------------------------------
@@ -810,11 +811,14 @@ void Controller::watchStart()
         else if (job == PedalJob::Dirt) from = 1.0f;
         else if (job == PedalJob::Wah) from = 0.5f;
     }
-    s->watchFrom = s->watchNow = from;
+    // live always starts at the heel, so your arm has the whole sweep; letting go glides
+    // back to where it was
+    s->watchFrom = from;
+    s->watchNow = 0.0f;
     s->watchLive = true;
     s->watchGliding = false;
     s->watchHaveRef = false;   // the next wrist message sets where your arm starts
-    engine.setJob (job, from);
+    engine.setJob (job, 0.0f);
     queueToast ("WATCH LIVE");
     mark ("Watch live");
 }
@@ -865,7 +869,7 @@ void Controller::watchWrist (const float* q)
         if (tw < -kPi) tw += 2 * kPi;
         deg = tw * 57.29578f * (value (P::WatchReverse) > 0.5f ? -1.0f : 1.0f);
     }
-    s->watchNow = std::clamp (s->watchFrom + deg / std::max (10.0f, value (P::WatchRange)), 0.0f, 1.0f);
+    s->watchNow = std::clamp (deg / std::max (10.0f, value (P::WatchRange)), 0.0f, 1.0f);
     engine.setJob ((PedalJob) s->watchJob, s->watchNow);
 }
 
