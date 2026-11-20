@@ -86,9 +86,14 @@ public:
     void setPedalBank (int bank);         // 0 Grit (dirt or Bitrot), 1 Groove (wah or volume), 2 Glow (Bloom)
     void resetPedalJobs();                // new song or part: every job back to its saved sound
     void setJob (PedalJob job, float v);  // the phone's bar: set a job directly
-    void releaseJob (PedalJob job);
-    // the watch is connected: Bitrot with its own pedal job plays fully wet, no clean under it
-    void setWatchConnected (bool on) { watchOn.store (on); }       // back to its saved sound, as if the pedal never touched it
+    void releaseJob (PedalJob job);       // back to its saved sound, as if the pedal never touched it
+    // a watch has been used: Bitrot with its own pedal job plays fully wet, no clean under it
+    void setWatchConnected (bool on) { watchOn.store (on); }
+    // the watch working Sweep or Rev and sweep: Rev and the filter apart (0..1 each, filter
+    // 1 = open, as if off), in place of the pedal's job while live and gliding back
+    // the watch is live or gliding back: Bitrot's level match holds still meanwhile
+    void setWatchMoving (bool on) { watchMoving.store (on); }
+    void setWatchBitrot (bool on, float rev, float cut) { watchRev.store (rev); watchCut.store (cut); watchBit.store (on); }
     bool jobActive (PedalJob job) const { return job_ (job).active.load(); }
     float jobValue (PedalJob job) const { return job_ (job).value.load(); }
     void setBloom (float pos01) { setJob (PedalJob::Bloom, pos01); }
@@ -144,7 +149,8 @@ private:
     std::array<std::atomic<float>, kNumParams> values;
     struct JobState { std::atomic<float> value { 0.0f }; std::atomic<bool> active { false }, caught { false }; };
     std::array<JobState, 5> job;
-    std::atomic<bool> watchOn { false };
+    std::atomic<bool> watchOn { false }, watchBit { false }, watchMoving { false };
+    std::atomic<float> watchRev { 0.0f }, watchCut { 1.0f };
     std::atomic<int> pedalBank { 0 }, lastTarget { -1 };
     std::atomic<float> lastPedal { -1.0f }, cpuLoad { 0.0f };
     std::atomic<int> rigNow { 0 };

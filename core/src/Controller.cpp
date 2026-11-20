@@ -48,6 +48,9 @@ struct Controller::State
     bool watchLive = false, watchGliding = false, watchWasActive = false, watchHaveRef = false;
     int watchJob = 0;
     float watchFrom = 0, watchNow = 0, watchGlideFrom = 0;   // from: where it glides back to
+    float watchT = 0;                  // how far the arm has moved, 0 to 1 of the sweep
+    bool watchSplit = false;           // Sweep, Rev and sweep: Rev up, the filter down
+    float watchRevFrom = 0, watchCutFrom = 1;
     double watchGlideAt = 0;
     float watchRef[4] = { 1, 0, 0, 0 };
     // Keystone's own Wi-Fi network
@@ -514,7 +517,9 @@ void Controller::applySong (int i, bool keepGoing)
     if (keepGoing) engine.action (Action::Spill);
     applyValues (engine, s->songs[(size_t) i].values);
     if (s->rig == 1) return;   // Kuddle: no banks, no drone
-    s->watchLive = s->watchGliding = false;   // a new song starts on its saved sound
+    s->watchLive = s->watchGliding = s->watchSplit = false;   // a new song starts on its saved sound
+    s->watchT = 0;
+    engine.setWatchBitrot (false, 0.0f, 1.0f);
     engine.resetPedalJobs();
     s->bank = std::clamp ((int) std::lround (engine.getParam (P::BankStart)), 0, 2);
     engine.setPedalBank (s->bank);
@@ -719,7 +724,9 @@ void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, 
 void Controller::tick (double now)
 {
     s->logic.tick (now);
-    engine.setWatchConnected (watchConnected());
+    // once a watch has been used, Bitrot stays fully wet, so a Wi-Fi blip can't swing the level
+    engine.setWatchConnected (s->watchSeen > 0);
+    engine.setWatchMoving (s->watchLive || s->watchGliding);
     watchTick();
     if (s->listenFinished.exchange (false))
     {
@@ -800,20 +807,26 @@ void Controller::watchStart()
     s->watchJob = t;
     s->watchWasActive = engine.jobActive (job);
     float from = engine.jobValue (job);
-    if (! s->watchWasActive)
+    const int cfg = (int) std::lround (value (P::BitrotPedal));
+    s->watchSplit = job == PedalJob::Bitrot && (cfg == 2 || cfg == 3);
+    if (s->watchSplit)
+    {
+        // Sweep and Rev and sweep: from where they are, the filter closes as the arm moves
+        // (and Rev rises); untouched, that's Rev at the song's Bend and the filter open
+        s->watchRevFrom = s->watchWasActive ? from : 0.0f;
+        s->watchCutFrom = s->watchWasActive ? from : 1.0f;
+    }
+    else if (! s->watchWasActive)
     {
         // the value that sounds like the saved sound, near enough
-        if (job == PedalJob::Bitrot)
-        {
-            const int cfg = (int) std::lround (value (P::BitrotPedal));
-            from = cfg == 2 ? 1.0f : cfg == 4 ? value (P::BitrotCorrupt) : cfg == 5 ? 0.5f : 0.0f;
-        }
+        if (job == PedalJob::Bitrot) from = cfg == 4 ? value (P::BitrotCorrupt) : cfg == 5 ? 0.5f : 0.0f;
         else if (job == PedalJob::Dirt) from = 1.0f;
         else if (job == PedalJob::Wah) from = 0.5f;
     }
-    // pressing C changes nothing: the sound stays put until your arm moves, then sweeps up
-    // from there to the toe over the full movement; letting go glides back to it
+    // pressing C changes nothing: the sound stays put until your arm moves, then sweeps
+    // from there over the full movement; letting go glides back to it
     s->watchFrom = s->watchNow = from;
+    s->watchT = 0;
     s->watchLive = true;
     s->watchGliding = false;
     s->watchHaveRef = false;   // the next wrist message sets where your arm starts
@@ -821,12 +834,27 @@ void Controller::watchStart()
     mark ("Watch live");
 }
 
+// puts the arm's movement (0 to 1 of the sweep) on the sound
+void Controller::watchApply (float t)
+{
+    s->watchT = t;
+    if (s->watchSplit)
+    {
+        const float rev = s->watchRevFrom + (1.0f - s->watchRevFrom) * t, cut = s->watchCutFrom * (1.0f - t);
+        engine.setWatchBitrot (true, rev, cut);
+        s->watchNow = (int) std::lround (value (P::BitrotPedal)) == 2 ? cut : rev;   // what the watch shows
+        return;
+    }
+    s->watchNow = std::clamp (s->watchFrom + (1.0f - s->watchFrom) * t, 0.0f, 1.0f);
+    engine.setJob ((PedalJob) s->watchJob, s->watchNow);
+}
+
 void Controller::watchEnd()
 {
     if (! s->watchLive) return;
     s->watchLive = false;
     s->watchGliding = true;
-    s->watchGlideFrom = s->watchNow;
+    s->watchGlideFrom = s->watchT;
     s->watchGlideAt = steadyNow();
 }
 
@@ -870,10 +898,9 @@ void Controller::watchWrist (const float* q)
     // a few degrees of dead zone, so a still arm (and the sensor's jitter) leaves it alone
     const float dead = 3.0f;
     deg = deg > dead ? deg - dead : deg < -dead ? deg + dead : 0.0f;
-    if (deg == 0.0f && s->watchNow == s->watchFrom) return;   // not moved yet: hands off
-    const float t = std::max (0.0f, deg / std::max (10.0f, value (P::WatchRange)));   // up only
-    s->watchNow = std::clamp (s->watchFrom + (1.0f - s->watchFrom) * t, 0.0f, 1.0f);
-    engine.setJob ((PedalJob) s->watchJob, s->watchNow);
+    const float t = std::clamp (deg / std::max (10.0f, value (P::WatchRange)), 0.0f, 1.0f);   // one way only
+    if (t == 0.0f && s->watchT == 0.0f) return;   // not moved yet: hands off
+    watchApply (t);
 }
 
 void Controller::watchTick()
@@ -882,15 +909,18 @@ void Controller::watchTick()
     const float secs = std::max (0.05f, value (P::WatchGlide));
     const float t = (float) std::min (1.0, (steadyNow() - s->watchGlideAt) / secs);
     const float e = t * t * (3 - 2 * t);
-    const auto job = (PedalJob) s->watchJob;
-    if (t >= 1.0f || s->watchGlideFrom == s->watchFrom)
+    if (t >= 1.0f || s->watchGlideFrom == 0.0f)
     {
+        // back where it was: the job as the pedal left it, or the saved sound
         s->watchGliding = false;
+        s->watchT = 0;
+        if (s->watchSplit) { engine.setWatchBitrot (false, 0.0f, 1.0f); s->watchSplit = false; return; }
+        const auto job = (PedalJob) s->watchJob;
         if (s->watchWasActive) engine.setJob (job, s->watchFrom);
-        else engine.releaseJob (job);   // back to the saved sound
+        else engine.releaseJob (job);
         return;
     }
-    engine.setJob (job, s->watchGlideFrom + (s->watchFrom - s->watchGlideFrom) * e);
+    watchApply (s->watchGlideFrom * (1.0f - e));
 }
 
 void Controller::onFootswitch (int sw, int ev)
@@ -1790,6 +1820,7 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
         j["jobName"] = m.pedalTarget == (int) PedalJob::Bitrot ? "Bitrot: " + formatValue (P::BitrotPedal, engine.getParam (P::BitrotPedal))
                                                                : std::string (names[std::clamp (m.pedalTarget, 0, 3)]);
     }
+    if (s->watchSplit && (s->watchLive || s->watchGliding)) { j["jobv"] = std::round (s->watchNow * 1000) / 1000; j["jobOn"] = true; }
     j["watch"] = { { "on", watchConnected() }, { "live", s->watchLive }, { "motion", (int) std::lround (value (P::WatchMotion)) } };
     j["rig"] = m.rig;
     j["melt"] = std::round (m.melt * 1000) / 1000;
@@ -1851,6 +1882,13 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     else if (t == "song") selectSong (m.value ("i", 0));
     else if (t == "songStep") stepSong (m.value ("d", 1));
     else if (t == "setlist") setlistOp (m.value ("op", std::string()), m.value ("i", s->current), m.value ("to", -1), m.value ("name", std::string()));
+    else if (t == "watchHello")
+    {
+        // the watch keeps Keystone's own Wi-Fi so it can ask for that network by name
+        s->watchSeen = steadyNow();
+        if (s->wifiOn && s->wifiPass.size() >= 8)
+            reply (json ({ { "t", "watchWifi" }, { "ssid", s->wifiSsid }, { "pass", s->wifiPass } }).dump());
+    }
     else if (t == "wrist")   // the watch, about 50 times a second
     {
         if (m.contains ("q") && m["q"].is_array() && m["q"].size() == 4)

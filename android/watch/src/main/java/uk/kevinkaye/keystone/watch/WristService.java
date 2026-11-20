@@ -19,6 +19,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.RouteInfo;
+import android.net.wifi.WifiNetworkSpecifier;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
@@ -142,17 +143,46 @@ public final class WristService extends Service implements SensorEventListener {
     }
 
     // ---------------------------------------------------------------- Wi-Fi
+    /**
+     * Once the watch knows Keystone's network (Keystone sends it on the first connection), it
+     * asks for that network by name. Android then holds the watch on it while the app runs,
+     * instead of hopping back to a home network that has internet. The first time, the watch
+     * asks you to allow it. Until then, any Wi-Fi will do.
+     */
     private void askForWifi() {
         cm = getSystemService(ConnectivityManager.class);
-        NetworkRequest req = new NetworkRequest.Builder()
+        String ssid = prefs().getString("ssid", null), pass = prefs().getString("pass", null);
+        NetworkRequest.Builder b = new NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build();
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        pinned = ssid != null && pass != null && pass.length() >= 8;
+        if (pinned) b.setNetworkSpecifier(new WifiNetworkSpecifier.Builder().setSsid(ssid).setWpa2Passphrase(pass).build());
+        final boolean wasPinned = pinned;
         netCallback = new ConnectivityManager.NetworkCallback() {
             @Override public void onAvailable(Network n) { wifi = n; }
             @Override public void onLost(Network n) { if (n.equals(wifi)) { wifi = null; closeSocket(); } }
+            @Override public void onUnavailable() {
+                // declined, or Keystone's network isn't around: fall back to any Wi-Fi
+                if (wasPinned) { unpinned = true; rerequestWifi(false); }
+            }
         };
-        try { cm.requestNetwork(req, netCallback); } catch (Exception e) { STATE.status = "Wi-Fi not allowed: " + e.getMessage(); }
+        try {
+            if (pinned && !unpinned) cm.requestNetwork(b.build(), netCallback, 60000);
+            else {
+                pinned = false;
+                cm.requestNetwork(new NetworkRequest.Builder()
+                        .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                        .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), netCallback);
+            }
+        } catch (Exception e) { STATE.status = "Wi-Fi not allowed: " + e.getMessage(); }
+    }
+
+    private volatile boolean pinned, unpinned;   // unpinned: this run only, it tries again next time
+
+    private void rerequestWifi(boolean pin) {
+        if (netCallback != null) try { cm.unregisterNetworkCallback(netCallback); } catch (Exception ignored) { }
+        if (pin) unpinned = false;
+        askForWifi();
     }
 
     private SharedPreferences prefs() { return getSharedPreferences("link", Context.MODE_PRIVATE); }
@@ -181,6 +211,7 @@ public final class WristService extends Service implements SensorEventListener {
                 STATE.connected = true;
                 STATE.status = "Connected";
                 buzz(new long[] { 0, 30, 80, 30 });
+                send("{\"t\":\"watchHello\"}");
                 BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
                 String line;
                 while (alive && (line = in.readLine()) != null) onLine(line);
@@ -243,6 +274,16 @@ public final class WristService extends Service implements SensorEventListener {
     private void onLine(String line) {
         try {
             JSONObject m = new JSONObject(line);
+            if ("watchWifi".equals(m.optString("t"))) {
+                String ssid = m.optString("ssid", ""), pass = m.optString("pass", "");
+                boolean changed = !ssid.equals(prefs().getString("ssid", "")) || !pass.equals(prefs().getString("pass", ""));
+                if (!ssid.isEmpty() && pass.length() >= 8 && (changed || !pinned)) {
+                    prefs().edit().putString("ssid", ssid).putString("pass", pass).apply();
+                    // pin to it from now on (only when new, so a decline isn't asked again)
+                    if (changed) rerequestWifi(true);
+                }
+                return;
+            }
             if (!"meter".equals(m.optString("t"))) return;
             STATE.bank = m.optInt("bank", STATE.bank);
             STATE.jobName = m.optString("jobName", STATE.jobName);

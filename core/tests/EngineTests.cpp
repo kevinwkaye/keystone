@@ -1310,6 +1310,31 @@ static void testWatch()
 
 
 
+    // Sweep, untouched: holding C leaves the filter off, moving closes it, letting go opens it
+    c.setValue (P::WatchMotion, 0);
+    c.setValue (P::BitrotPedal, 2);
+    e.releaseJob (PedalJob::Bitrot);
+    press();
+    wrist (1, 0, 0, 0);
+    wrist (1, 0, 0, 0);
+    {
+        const auto mj = c.meterJson (0, 64, kSr, 0);
+        CHECK (! e.meters().bitrotActive && mj.find ("\"jobv\":0.5") == std::string::npos, "Sweep, hold C, arm still: the job and the filter stay as they were");
+    }
+    wrist (std::cos (h2), std::sin (h2), 0, 0);
+    {
+        const auto mj = c.meterJson (0, 64, kSr, 0);
+        CHECK (mj.find ("\"jobv\":0.5") != std::string::npos && ! e.meters().bitrotActive,
+               "Sweep: 30 degrees closes the filter halfway (the watch shows 50), the pedal's job untouched");
+    }
+    release();
+    settle();
+    {
+        const auto mj = c.meterJson (0, 64, kSr, 0);
+        CHECK (mj.find ("\"jobv\":0.5") == std::string::npos && ! e.meters().bitrotActive, "Sweep: let go and the filter opens back to the saved sound");
+    }
+    c.setValue (P::BitrotPedal, 1);
+
     // with the watch on, Bitrot's own job plays fully wet; on Blend, Clean still counts
     {
         auto in = bassLine (1.0, 0.5);

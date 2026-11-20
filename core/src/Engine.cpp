@@ -66,6 +66,7 @@ struct Engine::Impl
     float bitPowIn = 0, bitPowSy = 0, bitMatch = 1, bitAvg = 0.0005f, bitTrim = 1;
     bool bitFresh = true;
     float bitPedal = 0; bool bitPedalFresh = true;   // Bitrot's pedal job, glided
+    float wRev = 0, wCut = 1; bool watchFresh = true, bitHold = false;   // the watch on Bitrot
 
     // tuner: input decimated by 4 into a ring, analysed on the housekeeping thread
     Biquad tunerLp1, tunerLp2;
@@ -410,7 +411,27 @@ void Engine::process (const float* in, float* out, int numSamples)
             const float bp = d.bitPedal;
             auto set = [&] (P p, float x) { d.v[(size_t) p] = x; };
             const bool rev = bitPedal == 1 || bitPedal == 3, sweep = bitPedal == 2 || bitPedal == 3;
-            if (bpOn && rev)
+            // the watch on Sweep or Rev and sweep: Rev rises and the filter closes from where
+            // they were, each on its own glide
+            const bool wb = bitOwnsPedal && sweep && watchBit.load();
+            const float a = 1.0f - std::exp (-(float) n / (0.02f * d.sr));
+            if (wb)
+            {
+                if (d.watchFresh) { d.wRev = watchRev.load(); d.wCut = watchCut.load(); d.watchFresh = false; }
+                d.wRev += (watchRev.load() - d.wRev) * a;
+                d.wCut += (watchCut.load() - d.wCut) * a;
+            }
+            else d.watchFresh = true;
+            // the level match holds still while the watch is working Bitrot, so a gesture
+            // isn't followed by the level swelling back
+            d.bitHold = bitOwnsPedal && watchMoving.load();
+            if (wb)
+            {
+                const float b0 = V (v, P::BitrotBend);
+                if (bitPedal == 3) set (P::BitrotBend, b0 + (1.0f - b0) * d.wRev);
+                d.bitrot.setSweep (d.wCut < 0.995f, 150.0f * std::pow (40.0f, d.wCut), V (v, P::BitrotPeak));
+            }
+            if (bpOn && rev && ! wb)
             {
                 // heel: the song's own Bend; toe: three octaves up
                 const float b0 = V (v, P::BitrotBend);
@@ -428,7 +449,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                 set (P::BitrotOsc, top * std::sqrt (clampf (x - 1.0f, 0.0f, 1.0f)));
             }
             // Sweep: a resonant low-pass on the synth alone, 150 Hz at the heel to 6 kHz at the toe
-            d.bitrot.setSweep (bpOn && sweep, 150.0f * std::pow (40.0f, bp), V (v, P::BitrotPeak));
+            if (! wb) d.bitrot.setSweep (bpOn && sweep, 150.0f * std::pow (40.0f, bp), V (v, P::BitrotPeak));
         }
         const float wahPos = job[1].active.load() ? job[1].value.load() : 0.5f;
         float volGain = 1.0f;
@@ -577,7 +598,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                     if (d.bitPowIn > 1.0e-6f && d.bitPowSy > 1.0e-8f)
                     {
                         const float want = clampf (std::sqrt (d.bitPowIn / d.bitPowSy), 0.05f, 4.0f);
-                        d.bitMatch += (want - d.bitMatch) * d.bitAvg * 0.25f;
+                        if (! d.bitHold) d.bitMatch += (want - d.bitMatch) * d.bitAvg * 0.25f;
                     }
                     sy[i] = q * d.bitMatch * d.bitTrim;
                 }

@@ -21,7 +21,7 @@ public:
     void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
-    static constexpr const char* kVersion = "0.4.15";
+    static constexpr const char* kVersion = "0.4.16";
 
     // dataDir holds setlist.json and settings.json; capturesDir holds .nam files.
     Controller (Engine& engine, std::string dataDir, std::string capturesDir);
@@ -146,6 +146,7 @@ private:
     bool watchConnected() const;
     void watchStart();
     void watchEnd();
+    void watchApply (float t);
     void watchWrist (const float* q);
     void watchTick();
     void handleMessageInner (const std::string& line, const std::function<void (const std::string&)>& reply);
