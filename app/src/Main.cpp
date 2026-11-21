@@ -290,6 +290,7 @@ public:
         {
             try
             {
+                if (line.contains ("\"watchHello\"")) link.markWatch (client);
                 controller->handleMessage (line.toStdString(), [this, client] (const std::string& r) { link.send (client, String::fromUTF8 (r.c_str())); });
                 flush();
             }
@@ -621,7 +622,7 @@ private:
         {
             meterTick = 0;
             if (link.clientCount() > 0)
-                link.broadcast (String::fromUTF8 (controller->meterJson (audio->cpuLoad(), audio->bufferSize(), audio->sampleRate(), audio->latencyMs()).c_str()), true);
+                link.broadcast (String::fromUTF8 (controller->meterJson (audio->cpuLoad(), audio->bufferSize(), audio->sampleRate(), audio->latencyMs()).c_str()), true, true);
         }
         // pedal settings saved by another Flip Fella plugin reload within a couple of seconds
         if (++settingsTick >= 200)

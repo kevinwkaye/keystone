@@ -11,8 +11,8 @@ android {
         applicationId 'uk.kevinkaye.keystone.watch'
         minSdk 30
         targetSdk 34
-        versionCode 3
-        versionName '0.4.17'
+        versionCode 4
+        versionName '0.4.19'
     }
 
     // the same fixed key as the phone app, so each new APK installs over the last one
