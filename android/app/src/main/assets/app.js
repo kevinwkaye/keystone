@@ -451,7 +451,7 @@ var KS = (function () {
       if (S.watchAfterPair) { S.watchAfterPair = false; startWatchUpdate(); }
       return;
     }
-    else if (m.t === 'done' && m.what === 'watch') { u.busy = null; S.watchErr = null; S.watchDone = m.version; S.watchV = m.version; }
+    else if (m.t === 'done' && m.what === 'watch') { u.busy = null; S.watchErr = null; S.watchDone = m.version; }
     else if (m.t === 'done') {
       u.busy = null; u.msg = 'Installing ' + m.version + '. Keystone restarts by itself in about a minute, and goes back to the old version if the new one doesn\'t start.';
       // the watch too, if it's behind and that's switched on
@@ -466,7 +466,7 @@ var KS = (function () {
   function canWatch() { return !!(window.KeystoneNative && KeystoneNative.watchUpdate); }
   function watchInfo() {   // remembered, so the watch can still be updated while Keystone restarts
     var w = S.health && S.health.watch;
-    if (w && w.on) { S.watchIp = w.ip; if (!S.watchDone || newer(w.v, S.watchDone) || w.v === S.watchDone) S.watchV = w.v; }
+    if (w && w.on) { S.watchIp = w.ip; S.watchV = w.v; }   // only ever what the watch itself says
     return { v: S.watchV || '', ip: S.watchIp || '' };
   }
   function watchNew() { var u = S.upd, wi = watchInfo(); return !!(u.latest && wi.v && newer(u.latest, wi.v) && asset(WATCH_APK)); }
@@ -496,7 +496,7 @@ var KS = (function () {
           '<span class="small" style="font-size:13px">Wireless debugging on the watch shows it, like 192.168.137.110:41235.</span></details>' : '') +
         '<span class="small" style="font-size:14px;color:#8A847A">Bugjaeger still works as a backup.</span></section>';
     }
-    if (S.watchDone && !S.upd.busy) out += '<section class="card" style="gap:8px;border:2px solid #5DCAA5"><span style="font-size:17px;font-weight:700;color:#5DCAA5">Watch updated to ' + esc(S.watchDone) + '</span><span class="small">The watch app opens again by itself and reconnects.</span></section>';
+    if (S.watchDone && !S.upd.busy) out += '<section class="card" style="gap:8px;border:2px solid #5DCAA5"><span style="font-size:17px;font-weight:700;color:#5DCAA5">Watch app installed from ' + esc(S.watchDone) + '</span><span class="small">The watch app opens again by itself and reconnects. The Watch row above shows the version the watch reports once it\'s back.</span></section>';
     if (!wi.v) return out;
     var auto = watchAuto();
     return out + '<section class="card" style="gap:10px"><h2 class="label">Watch</h2>' +

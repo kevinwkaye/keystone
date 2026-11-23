@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Keystone VERSION 0.4.22 LANGUAGES C CXX)
+project(Keystone VERSION 0.4.23 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -51,6 +51,8 @@ add_library(keystone_core STATIC
     core/src/Analysis.cpp
     core/src/Controller.cpp
     core/src/Recorder.cpp)
+# the version every part reports (Controller::kVersion) comes from project() above
+target_compile_definitions(keystone_core PUBLIC KEYSTONE_VERSION="${PROJECT_VERSION}")
 target_include_directories(keystone_core PUBLIC core/include PRIVATE core/src kuddle/engine)
 if(KEYSTONE_WITH_NAM)
     # NAM registers its model types from static initialisers, which a static library
@@ -64,7 +66,7 @@ if(KEYSTONE_WITH_NAM)
     else()
         target_compile_options(nam_objects PRIVATE -O3 -w)
     endif()
-    target_compile_definitions(keystone_core PUBLIC KEYSTONE_WITH_NAM NAM_SAMPLE_FLOAT NAM_ENABLE_A2_FAST)
+target_compile_definitions(keystone_core PUBLIC KEYSTONE_WITH_NAM NAM_SAMPLE_FLOAT NAM_ENABLE_A2_FAST)
     target_include_directories(keystone_core SYSTEM PRIVATE ${NAM_DIR} ${EIGEN_DIR} ${NAM_DIR}/Dependencies/nlohmann)
     target_sources(keystone_core INTERFACE $<TARGET_OBJECTS:nam_objects>)
 endif()

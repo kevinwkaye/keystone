@@ -3,6 +3,11 @@ plugins {
 }
 
 // Keystone on the Galaxy Watch: hold C in Grit and your wrist works the pedal.
+// The version comes from CMakeLists.txt, the one place every release sets it, so the phone
+// and watch apps always match the release they ship in. 0.4.22 becomes versionCode 422.
+def ksVersion = (file('../../CMakeLists.txt').text =~ /project\(Keystone VERSION ([0-9.]+)/)[0][1]
+def ksCode = ksVersion.tokenize('.').inject(0) { a, b -> a * 100 + (b as int) }
+
 android {
     namespace 'uk.kevinkaye.keystone.watch'
     compileSdk 34
@@ -11,9 +16,11 @@ android {
         applicationId 'uk.kevinkaye.keystone.watch'
         minSdk 30
         targetSdk 34
-        versionCode 6
-        versionName '0.4.21'
+        versionCode ksCode
+        versionName ksVersion
     }
+
+    buildFeatures { buildConfig true }
 
     // the same fixed key as the phone app, so each new APK installs over the last one
     signingConfigs {

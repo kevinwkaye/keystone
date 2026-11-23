@@ -2,6 +2,11 @@ plugins {
     id 'com.android.application'
 }
 
+// The version comes from CMakeLists.txt, the one place every release sets it, so the phone
+// and watch apps always match the release they ship in. 0.4.22 becomes versionCode 422.
+def ksVersion = (file('../../CMakeLists.txt').text =~ /project\(Keystone VERSION ([0-9.]+)/)[0][1]
+def ksCode = ksVersion.tokenize('.').inject(0) { a, b -> a * 100 + (b as int) }
+
 android {
     namespace 'uk.kevinkaye.keystone'
     compileSdk 34
@@ -10,8 +15,8 @@ android {
         applicationId 'uk.kevinkaye.keystone'
         minSdk 26
         targetSdk 34
-        versionCode 44
-        versionName '0.4.22'
+        versionCode ksCode
+        versionName ksVersion
     }
 
     // One fixed key, kept in the repo, so each new APK installs over the last one.
