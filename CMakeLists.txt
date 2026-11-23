@@ -95,10 +95,37 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(keystone_core PUBLIC Threads::Threads)
 
+# ---------------------------------------------------------------------------
+# The floor screen's drawing: portable C++, no JUCE, with Archivo (SIL OFL, core/fonts)
+# built in as byte arrays.
+# ---------------------------------------------------------------------------
+function(ks_embed_font symbol file out_var)
+    set(src ${CMAKE_CURRENT_BINARY_DIR}/fonts/${symbol}.cpp)
+    if(NOT EXISTS ${src} OR ${file} IS_NEWER_THAN ${src})
+        file(READ ${file} hex HEX)
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${hex}")
+        file(WRITE ${src} "extern const unsigned char ${symbol}[] = {${bytes}};\n")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${file})
+    set(${out_var} ${src} PARENT_SCOPE)
+endfunction()
+ks_embed_font(ks_font_archivo_extrabold ${PROJECT_SOURCE_DIR}/core/fonts/Archivo-ExtraBold.ttf FONT_BOLD)
+ks_embed_font(ks_font_archivo_medium ${PROJECT_SOURCE_DIR}/core/fonts/Archivo-Medium.ttf FONT_MEDIUM)
+add_library(keystone_floor STATIC core/src/FloorScreen.cpp ${FONT_BOLD} ${FONT_MEDIUM})
+target_include_directories(keystone_floor PUBLIC core/src PRIVATE core/third_party)
+if(NOT MSVC)
+    target_compile_options(keystone_floor PRIVATE -O2)
+endif()
+
 if(KEYSTONE_BUILD_TESTS)
     add_executable(keystone_tests core/tests/EngineTests.cpp)
     target_link_libraries(keystone_tests PRIVATE keystone_core)
     target_include_directories(keystone_tests PRIVATE core/src)
+    target_link_libraries(keystone_tests PRIVATE keystone_floor)
+    # the floor screen as PNGs, to check against the designs
+    add_executable(floor_preview tools/floor_preview.cpp)
+    target_link_libraries(floor_preview PRIVATE keystone_floor)
+    target_include_directories(floor_preview PRIVATE core/third_party)
 endif()
 
 if(KEYSTONE_BUILD_APP)

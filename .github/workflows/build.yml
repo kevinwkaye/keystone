@@ -135,7 +135,7 @@ jobs:
           cp build/app/Keystone_artefacts/Release/Keystone dist/keystone/keystone
           cp installer/README.txt dist/keystone/
           echo "$VERSION" > dist/keystone/VERSION
-          mkdir -p dist/keystone/pi && cp pi/* dist/keystone/pi/
+          mkdir -p dist/keystone/pi && cp -r pi/* dist/keystone/pi/
           tar -C dist -czf "Keystone-$VERSION-linux-arm64.tar.gz" keystone
 
       - uses: actions/upload-artifact@v4

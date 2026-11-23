@@ -128,6 +128,16 @@ public:
     float value (P p) const { return engine.getParam (p); }
     bool tunerOn() const;
     bool watchLive() const;
+    bool watchConnected() const;   // heard from a watch in the last two seconds
+
+    // ---- the pedal's floor screen and lights ----
+    bool effectOn (int bank, int sw) const;   // what tap A to C (sw 0..2) switches in that bank, on
+    bool droneOn() const;                     // tap D's drone is holding a note
+    // The Drive capture's name for the floor screen: the short name set for it, otherwise
+    // its own name. Short names are kept per capture file in settings.json and set with
+    // {"t":"captureShort","file":"x.nam","name":"SVT"} (an empty name clears it).
+    std::string captureShortName() const;
+    void setCaptureShort (const std::string& file, const std::string& name);
     void watchWristForTests (float w, float x, float y, float z) { const float q[4] = { w, x, y, z }; watchWrist (q); }
     void notify (const std::string& text) { queueToast (text); }
     std::string lastToast() const { return toast; }
@@ -143,7 +153,6 @@ private:
 
     void onFootswitch (int sw, int event);
     // the watch: hold C in Grit and the wrist works the pedal's job, glides back on release
-    bool watchConnected() const;
     void watchStart();
     void watchEnd();
     void watchApply (float t);

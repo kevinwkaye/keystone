@@ -34,6 +34,7 @@ public:
     void broadcast (const juce::String& line, bool droppable = false, bool toWatches = false);
     void markWatch (int client);
     int clientCount() const;
+    int phoneCount() const;   // clients that aren't watches
     juce::String addresses() const;
     juce::StringArray clientAddresses() const;
 

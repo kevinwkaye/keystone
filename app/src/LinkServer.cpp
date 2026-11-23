@@ -281,6 +281,14 @@ void LinkServer::markWatch (int client)
     it->second->queue.clear();
 }
 
+int LinkServer::phoneCount() const
+{
+    const ScopedLock l (clientsLock);
+    int n = 0;
+    for (auto& [id, c] : clients) n += c->alive && ! c->watch ? 1 : 0;
+    return n;
+}
+
 int LinkServer::clientCount() const
 {
     const ScopedLock l (clientsLock);

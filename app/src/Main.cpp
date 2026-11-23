@@ -6,7 +6,8 @@
 // anyone with a screen. Logs go to Documents/Keystone/keystone.log.
 
 #include "AudioHost.h"
-#include "EyeLights.h"
+#include "FloorPanel.h"
+#include "PixelLink.h"
 #include "Health.h"
 #include "Keeper.h"
 #include "LinkServer.h"
@@ -255,7 +256,10 @@ public:
         controller->load();
         controller->startWifi();   // Keystone's own network, if it's switched on
 #if JUCE_LINUX
-        Logger::writeToLog (eyes.open() ? "Pebble's eyes: on SPI1" : "Pebble's eyes: no /dev/spidev1.0, so no eye LEDs");
+        // the floor screen shows Pebble and KEYSTONE while the rest starts
+        if (screen.start (home.getChildFile ("screen-upside-down").existsAsFile())) screen.show (ks::floor::View {});
+        Logger::writeToLog (screen.ready() ? "Floor screen: on SPI0" : "Floor screen: no /dev/spidev0.0, so no screen");
+        splashUntil = Time::getMillisecondCounterHiRes() * 0.001 + 2.5;
 #endif
 
         audio = std::make_unique<AudioHost> (engine, keeper);
@@ -325,7 +329,8 @@ public:
     void shutdown() override
     {
         stopTimer();
-        eyes.off();
+        lights.off();
+        screen.stop();
         stopWifi();
         watchdog.stopThread (2000);
         link.stop();
@@ -615,27 +620,19 @@ private:
         }
         controller->tick (now);
         flush();
-        // Pebble's eyes about 50 times a second (Song mode's fade and the tuner want it smooth)
-        if (eyes.ready() && ++eyesTick >= 2)
+        // the pedal's lights about 50 times a second (Song mode's fade and the tuner want it
+        // smooth), the floor screen about 25
+        if (++lightsTick >= 2)
         {
-            eyesTick = 0;
-            const auto m = engine.meters();
-            ks::eyes::Input in;
-            in.rig = controller->rig();
-            in.footMode = controller->footMode();
-            in.bank = controller->bank();
-            in.tuner = m.tunerOn;
-            in.noteHeard = m.tunerMidi >= 0;
-            in.cents = m.tunerCents;
-            in.bpm = engine.getParam (ks::P::Tempo);
-            in.now = now;
-            eyes.show (ks::eyes::colours (in), now);
+            lightsTick = 0;
+            updateFloor (now);
         }
         // health once a second: the status window and the phone's Health page
         if (++healthTick >= 100)
         {
             healthTick = 0;
             cachedHealth = health();
+            checkFloorHealth (now);
             if (link.clientCount() > 0) link.broadcast (cachedHealth.toJson(), true);
         }
         // meters about 25 times a second
@@ -655,6 +652,149 @@ private:
             SetThreadExecutionState (ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
 #endif
         }
+    }
+
+    // ---- the pedal's lights and floor screen ----
+    void raiseAlert (const String& top, const String& bottom, const String& note, bool warning, double now)
+    {
+        alert = { top, bottom, note, warning, now + 5.0 };
+        Logger::writeToLog ("Floor screen alert: " + top + " " + bottom + ". " + note);
+    }
+
+    static float piTemperature()
+    {
+       #if JUCE_LINUX
+        return File ("/sys/class/thermal/thermal_zone0/temp").loadFileAsString().trim().getIntValue() / 1000.0f;
+       #else
+        return 0;
+       #endif
+    }
+
+    static bool hdmiConnected()
+    {
+       #if JUCE_LINUX
+        for (auto& d : File ("/sys/class/drm").findChildFiles (File::findDirectories, false, "*HDMI*"))
+            if (d.getChildFile ("status").loadFileAsString().trim() == "connected") return true;
+       #endif
+        return false;
+    }
+
+    // once a second, with the health: the Audio light, the projector and the alerts
+    void checkFloorHealth (double now)
+    {
+        const auto& h = cachedHealth;
+        const float temp = piTemperature();
+        const bool hot = temp >= 80.0f;
+        // Audio light: red with no audio or a dropout in the last minute, amber when the Pi is
+        // busy or hot or the bass input is digital silence
+        audioLight = (! h.audioOk || h.dropoutsRecent > 0) ? 2 : (h.cpu > 0.8f || temp >= 75.0f || h.inputDead) ? 1 : 0;
+        projector = hdmiConnected();
+        const bool started = h.uptimeSec > 10;   // the odd dropout while the audio starts doesn't count
+        if (audioWasOk && ! h.audioOk) raiseAlert ("AUDIO", "LOST", "PLUG THE INTERFACE BACK IN", false, now);
+        else if (started && h.audioOk && h.dropouts > lastDropouts) raiseAlert ("AUDIO", "DROPOUT", "KEYSTONE KEPT GOING", true, now);
+        if (hot && ! piWasHot) raiseAlert ("PI", "HOT", "KEYSTONE IS FINE FOR NOW", true, now);
+        lastDropouts = h.dropouts;
+        audioWasOk = h.audioOk;
+        piWasHot = hot;
+    }
+
+    void updateFloor (double now)
+    {
+        const auto m = engine.meters();
+        const int cur = controller->currentSong();
+        if (cur != lastSong) { lastSong = cur; partStartedAt = now; }   // the phrase counter starts with the part
+
+        // the watch going
+        const bool watchOn = controller->watchConnected();
+        if (watchWas && ! watchOn) raiseAlert ("WATCH", "LOST", watchWasLive ? "BITROT GLIDES BACK" : "CHECK THE WATCH", false, now);
+        watchWas = watchOn;
+        watchWasLive = controller->watchLive();
+
+        // ---- lights ----
+        ks::lights::Input in;
+        in.eyes.rig = controller->rig();
+        in.eyes.footMode = controller->footMode();
+        in.eyes.bank = controller->bank();
+        in.eyes.tuner = m.tunerOn;
+        in.eyes.noteHeard = m.tunerMidi >= 0;
+        in.eyes.cents = m.tunerCents;
+        in.eyes.bpm = engine.getParam (ks::P::Tempo);
+        in.eyes.now = now;
+        in.phone = link.phoneCount() > 0;
+        in.watch = watchOn;
+        in.watchLive = controller->watchLive();
+        in.projector = projector;
+        in.audio = audioLight;
+        const double et = lastExpTime.load();
+        in.pedalShow = in.watchLive || (et > 0 && now - et < 3.0);
+        const float jobs[5] = { m.dirt, m.wah, m.volume, m.bloom, m.bitrot };
+        in.pedal = in.eyes.rig == 1 ? m.melt : jobs[std::clamp (m.pedalTarget, 0, 4)];
+        in.partStartedAt = partStartedAt;
+        for (int b = 0; b < 3; ++b) for (int sw = 0; sw < 3; ++sw) in.fx[b][sw] = controller->effectOn (b, sw);
+        in.drone = controller->droneOn();
+        in.nextPart = cur + 1 < controller->songCount() && controller->isPart (cur + 1);
+        const ks::P kud[4] = { ks::P::KMuteOn, ks::P::KWahOn, ks::P::KRoomOn, ks::P::KTapeOn };
+        for (int i = 0; i < 4; ++i) in.kuddle[i] = engine.getParam (kud[i]) > 0.5f;
+        lights.show (ks::lights::frame (in), now);
+        if (lights.connected() != lightsWere)
+        {
+            lightsWere = lights.connected();
+            Logger::writeToLog (lightsWere ? "Pedal lights: Pixel Trinkey on " + String (lights.device()) : "Pedal lights: Pixel Trinkey gone");
+        }
+
+        // ---- floor screen, every other time ----
+        if (! screen.ready() || (++screenTick & 1)) return;
+        ks::floor::View v;
+        auto name = [this] (int i) { auto n = controller->songName (i); if (! n.empty() && n[0] == '/') n.erase (0, 1); return n; };
+        if (now < splashUntil) v.screen = ks::floor::Screen::Splash;
+        else if (now < alert.until)
+        {
+            v.screen = ks::floor::Screen::Alert;
+            v.alertTop = alert.top.toStdString();
+            v.alertBottom = alert.bottom.toStdString();
+            v.alertNote = alert.note.toStdString();
+            v.alertWarning = alert.warning;
+            v.alertSeconds = (int) std::ceil (alert.until - now);
+        }
+        else if (m.tunerOn)
+        {
+            static const char* notes[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+            v.screen = ks::floor::Screen::Tuner;
+            if (m.tunerMidi >= 0) v.note = notes[m.tunerMidi % 12];
+            v.cents = std::round (m.tunerCents);
+            v.muted = engine.getParam (ks::P::TunerMute) > 0.5f;
+        }
+        else if (controller->rig() == 1)
+        {
+            v.screen = ks::floor::Screen::Kuddle;
+            v.preset = name (cur);
+        }
+        else if (controller->footMode() == 1)
+        {
+            v.screen = ks::floor::Screen::Song;
+            int head = cur;
+            while (head > 0 && controller->isPart (head)) --head;
+            v.song = name (head);
+            if (controller->isPart (cur)) v.part = name (cur);
+            else if (cur + 1 < controller->songCount() && controller->isPart (cur + 1)) v.part = "Start";
+            if (cur + 1 < controller->songCount())
+            {
+                v.nextIsSong = ! controller->isPart (cur + 1);
+                v.next = name (cur + 1);
+            }
+            v.songNumber = controller->songNumber (cur);
+            v.songCount = controller->songsOnly();
+            v.bpm = engine.getParam (ks::P::Tempo);
+        }
+        else
+        {
+            v.screen = ks::floor::Screen::Stomp;
+            v.bank = controller->bank();
+            v.capture = controller->captureShortName();
+            for (int b = 0; b < 3; ++b) for (int sw = 0; sw < 3; ++sw) v.fx[b][sw] = in.fx[b][sw];
+            v.drone = in.drone;
+        }
+        screen.show (v);
     }
 
     void stopWifi()
@@ -677,8 +817,14 @@ private:
     std::unique_ptr<Tray> tray;
 #endif
     std::atomic<int> learnTarget { -1 }, lastExpRaw { 0 };
-    int meterTick = 0, settingsTick = 0, heartbeatTick = 0, healthTick = 95, eyesTick = 0;
-    EyeLights eyes;   // Pebble's eye LEDs on the Pi
+    int meterTick = 0, settingsTick = 0, heartbeatTick = 0, healthTick = 95, lightsTick = 0;
+    PixelLink lights;    // the pedal's lights on the Pi (a Pixel Trinkey on USB)
+    FloorPanel screen;   // the floor screen in the lid
+    // what the lights and screen follow
+    double splashUntil = 0, partStartedAt = 0;
+    int lastSong = -1, audioLight = 0, lastDropouts = 0, screenTick = 0;
+    bool projector = false, watchWas = false, watchWasLive = false, audioWasOk = false, piWasHot = false, lightsWere = false;
+    struct Alert { String top, bottom, note; bool warning = false; double until = 0; } alert;
     double startedAt = Time::getMillisecondCounterHiRes() * 0.001;
     double lastFsTime = -1;
     String lastFsName;

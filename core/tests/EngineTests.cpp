@@ -10,6 +10,8 @@
 
 #include "Analysis.h"
 #include "PebbleEyes.h"
+#include "PedalLights.h"
+#include "FloorScreen.h"
 #include "Drone.h"
 #include "Valve.h"
 #include "Recorder.h"
@@ -18,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <atomic>
 #include <mutex>
 #include <random>
@@ -2355,6 +2358,157 @@ static void testPebbleEyes()
     CHECK (e[0].r < kGrit.r && e[0].r > 0, "Brightness scales everything down for the stage (%d of 255)", e[0].r);
 }
 
+// Every light on the top plate: the wire order, status lights, the meter, the footswitch
+// lights (including an effect left on in another bank) and the spacer staying dark.
+static void testPedalLights()
+{
+    std::printf ("\nPedal lights\n");
+    using namespace ks::lights;
+    using ks::eyes::Rgb;
+    Input in;
+    in.eyes.brightness = 1.0f;
+    in.eyes.now = 100.0;
+    auto f = frame (in);
+    CHECK (f[at::leftEye] == ks::eyes::kGrit && f[at::rightEye] == ks::eyes::kGrit, "eyes first on the strand, in Grit orange");
+    CHECK (f[at::phone] == Rgb {} && f[at::watch] == Rgb {} && f[at::projector] == Rgb {}, "nothing connected: Phone, Watch and Projector dark");
+    CHECK (f[at::audio] == kOk, "Audio fine: green");
+    for (int sw = 0; sw < 3; ++sw) CHECK (f[(size_t) at::foot[sw]] == ks::eyes::scale (kBank[0], kFaint), "footswitch %c off: a faint orange, so you can see its job", 'A' + sw);
+
+    in.phone = true; in.watch = true; in.projector = true; in.audio = 2;
+    f = frame (in);
+    CHECK (f[at::phone] == kStatus && f[at::projector] == kStatus, "phone and projector connected: their lights on");
+    CHECK (f[at::watch] == ks::eyes::scale (kStatus, kWatchReady), "watch connected: its light dim");
+    CHECK (f[at::audio] == kBad, "a dropout: Audio red");
+    in.watchLive = true;
+    f = frame (in);
+    CHECK (f[at::watch] == kStatus, "watch live: its light bright");
+
+    // footswitches in Stomp mode, on Grit
+    in.fx[0][0] = true;          // Grit A on
+    in.fx[1][1] = true;          // Groove B left on
+    in.fx[1][2] = in.fx[2][2] = true;   // C on in both other banks
+    in.drone = true;
+    f = frame (in);
+    CHECK (f[at::foot[0]] == kBank[0], "A on in Grit: bright orange");
+    CHECK (f[at::foot[1]] == ks::eyes::scale (kBank[1], kElsewhere), "B off in Grit but on in Groove: a faint purple glow");
+    const auto c1 = frame (in)[at::foot[2]];
+    in.eyes.now += 1.0;
+    const auto c2 = frame (in)[at::foot[2]];
+    CHECK (c1 != c2 && (c1 == ks::eyes::scale (kBank[1], kElsewhere) || c1 == ks::eyes::scale (kBank[2], kElsewhere)), "C on in Groove and Glow: the glow takes turns between purple and blue");
+    CHECK (f[at::foot[3]] == kWhite, "drone held: D warm white");
+    in.eyes.bank = 1;
+    f = frame (in);
+    CHECK (f[at::foot[1]] == kBank[1], "on Groove, B is Groove's own: bright purple");
+    CHECK (f[at::foot[0]] == ks::eyes::scale (kBank[0], kElsewhere), "on Groove, A shows Grit's Drive left on");
+
+    // the meter
+    in.eyes.bank = 0;
+    for (int i : at::meter) CHECK (f[(size_t) i] == Rgb {}, "meter light %d dark in Stomp mode with the pedal resting", i);
+    in.pedalShow = true; in.pedal = 0.5f;
+    f = frame (in);
+    int lit = 0;
+    for (int i : at::meter) lit += f[(size_t) i] == kBank[0] ? 1 : 0;
+    CHECK (lit == 4 && f[at::meter[0]] == kBank[0] && f[at::meter[6]] == Rgb {}, "pedal halfway: the meter fills four lights from the left (%d)", lit);
+    in.pedalShow = false;
+    in.eyes.footMode = 1; in.eyes.bpm = 120; in.partStartedAt = 100.0; in.eyes.now = 100.1;
+    f = frame (in);
+    lit = 0;
+    for (int i : at::meter) lit += f[(size_t) i] != Rgb {} ? 1 : 0;
+    CHECK (lit == 1, "Song mode, the first beat of a part: one meter light");
+    in.eyes.now = 100.0 + 0.5 * 11 + 0.1;   // the last beat of bar three
+    f = frame (in);
+    lit = 0;
+    for (int i : at::meter) lit += f[(size_t) i] != Rgb {} ? 1 : 0;
+    CHECK (lit == 7, "Song mode, end of bar three: the meter full (%d)", lit);
+    in.eyes.now = 100.0 + 0.5 * 12 + 0.02;   // the first beat of bar four
+    f = frame (in);
+    CHECK (f[at::meter[0]].b > f[at::meter[0]].g && f[at::meter[6]] != Rgb {}, "Song mode, bar four: every light flashes purple");
+    in.nextPart = true;
+    f = frame (in);
+    CHECK (f[at::foot[1]].g > f[at::foot[0]].g, "Song mode: B brighter while there's a next part");
+
+    in.eyes.tuner = true; in.eyes.noteHeard = true; in.eyes.cents = 0;
+    f = frame (in);
+    lit = 0;
+    for (int i : at::meter) lit += f[(size_t) i] != Rgb {} ? 1 : 0;
+    CHECK (lit == 0, "tuner: the meter stays dark, the eyes do the tuning");
+
+    for (int i : { at::spacer, 18, 19 }) CHECK (f[(size_t) i] == Rgb {}, "light %d (the spacer or a spare) always dark", i);
+    in = Input {};
+    f = frame (in);
+    CHECK (f[at::audio].g < 255 && f[at::audio].g > 0, "overall brightness applies to every light (%d of 255)", f[at::audio].g);
+}
+
+// The controller's side of the floor screen: which effects are on in each bank, the drone,
+// and the capture's short name.
+static void testFloorController()
+{
+    std::printf ("\nFloor screen: the controller\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_floor_test";
+    { std::error_code ec; std::filesystem::remove_all (dir, ec); }
+    std::filesystem::create_directories (dir);
+    Engine e; e.prepare (kSr, 64);
+    {
+        Controller c (e, dir.string(), (dir / "caps").string());
+        c.load();
+        auto none = [] (const std::string&) {};
+        c.setValue (P::DriveOn, 0); c.setValue (P::DimOn, 0); c.setValue (P::RvOn, 0);
+        CHECK (! c.effectOn (0, 0) && ! c.effectOn (1, 1) && ! c.effectOn (2, 2), "effects off read as off");
+        c.setValue (P::DimOn, 1);
+        c.setValue (P::RvOn, 1);
+        CHECK (c.effectOn (1, 1) && c.effectOn (2, 2) && ! c.effectOn (0, 1), "Groove B (Dimension) and Glow C (reverb) on");
+        c.handleMessage (R"({"t":"captureShort","file":"Ampeg SVT Classic with 8x10.nam","name":"  SVT  "})", none);
+        c.handleMessage (R"({"t":"captureShort","file":"blank.nam","name":"Blank"})", none);
+        c.handleMessage (R"({"t":"captureShort","file":"blank.nam","name":""})", none);
+    }
+    std::ifstream in (dir / "settings.json");
+    const std::string saved ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+    CHECK (saved.find ("Ampeg SVT Classic with 8x10.nam") != std::string::npos && saved.find ("\"SVT\"") != std::string::npos, "a capture's short name is saved, trimmed");
+    CHECK (saved.find ("blank.nam") == std::string::npos, "an empty short name clears it");
+}
+
+// The floor screen's drawing: every screen draws, long names fit, and the bank strip shows
+// an effect left on in another bank.
+static void testFloorScreen()
+{
+    std::printf ("\nFloor screen: drawing\n");
+    using namespace ks::floor;
+    Renderer r;
+    Picture pic;
+    auto lit = [&] { int n = 0; for (size_t i = 0; i < pic.rgb.size(); i += 3) n += (pic.rgb[i] | pic.rgb[i + 1] | pic.rgb[i + 2]) ? 1 : 0; return n; };
+    auto at = [&] (int x, int y) { const size_t i = ((size_t) y * kWidth + (size_t) x) * 3; return std::array<int, 3> { pic.rgb[i], pic.rgb[i + 1], pic.rgb[i + 2] }; };
+    for (auto s : { Screen::Splash, Screen::Song, Screen::Stomp, Screen::Tuner, Screen::Alert, Screen::Kuddle })
+    {
+        View v;
+        v.screen = s;
+        v.song = "Blumes"; v.part = "Chorus"; v.next = "Verse 2"; v.note = "E"; v.cents = -12;
+        v.alertTop = "Watch"; v.alertBottom = "Lost"; v.preset = "Dub"; v.capture = "EQD BLUMES";
+        r.draw (v, pic);
+        CHECK (lit() > 4000, "screen %d draws (%d pixels lit)", (int) s, lit());
+    }
+    View v;
+    v.screen = Screen::Stomp;
+    v.bank = 0;
+    r.draw (v, pic);
+    const auto offB = at ((int) ((434 + 80 + 8 + 40) * 0.5f), (int) ((22 + 14 + 30 + 10 + 30) * 0.5f));   // Groove's B block
+    v.fx[1][1] = true;
+    r.draw (v, pic);
+    const auto onB = at ((int) ((434 + 80 + 8 + 40) * 0.5f), (int) ((22 + 14 + 30 + 10 + 30) * 0.5f));
+    CHECK (onB[2] > 200 && offB[2] < 80, "Stomp on Grit: Groove's B left on fills purple in the bank strip");
+    // long names shrink and then cut, and never run off the screen
+    v = {};
+    v.screen = Screen::Song;
+    v.song = "When the Circus Comes to Town and Then Leaves Again";
+    v.part = "Breakdown";
+    r.draw (v, pic);
+    bool edgeClear = true;
+    for (int y = 0; y < kHeight; ++y) for (int x : { 0, 1, kWidth - 2, kWidth - 1 }) { const auto p = at (x, y); edgeClear = edgeClear && p[0] + p[1] + p[2] == 0; }
+    CHECK (edgeClear, "a long song name and BREAKDOWN stay inside the screen");
+    std::vector<uint8_t> px565;
+    pic.toRgb565 (px565);
+    CHECK (px565.size() == (size_t) kWidth * kHeight * 2, "the picture packs to RGB565 for the screen");
+}
+
 int main (int argc, char** argv)
 {
     std::setvbuf (stdout, nullptr, _IONBF, 0);   // unbuffered (Windows has no line buffering), so a crash shows where it was
@@ -2388,6 +2542,9 @@ int main (int argc, char** argv)
         testSteadyDrive();
         testTuner();
         testPebbleEyes();
+        testPedalLights();
+        testFloorController();
+        testFloorScreen();
         testPedalJobs();
         testBitrotPedal();
         testWatch();

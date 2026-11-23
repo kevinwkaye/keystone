@@ -75,6 +75,7 @@ struct Controller::State
     FootswitchLogic logic;
     std::vector<std::string> outbox;
     std::string captureFile, spaceFile;
+    std::map<std::string, std::string> captureShort;   // capture file to its floor-screen name
     double lastDTap = -10;
     int bank = 0;
     // the two rigs: songs and current are the playing rig's list, other the resting one's
@@ -349,6 +350,10 @@ void Controller::load()
                 if (i >= 0 && isGlobal (i) && it.value().is_number()) engine.setParam ((P) i, it.value().get<float>());
             }
         s->captureFile = st.value ("capture", std::string());
+        s->captureShort.clear();
+        if (st.contains ("captureShort") && st["captureShort"].is_object())
+            for (auto it = st["captureShort"].begin(); it != st["captureShort"].end(); ++it)
+                if (it.value().is_string()) s->captureShort[it.key()] = it.value().get<std::string>();
         startRig = st.value ("rig", 0) == 1 ? 1 : 0;
         s->footMode = st.value ("footMode", 0) == 1 ? 1 : 0;
         s->spaceFile = st.value ("space", std::string());
@@ -439,6 +444,7 @@ void Controller::saveSettings() const
         if (isGlobal (i)) g[paramTable()[i].id] = engine.getParam ((P) i);
     j["globals"] = g;
     j["capture"] = s->captureFile;
+    j["captureShort"] = s->captureShort;
     j["space"] = s->spaceFile;
     j["rig"] = s->rig;
     j["footMode"] = s->footMode;
@@ -810,6 +816,47 @@ static double steadyNow() { return std::chrono::duration<double> (std::chrono::s
 
 bool Controller::watchConnected() const { return s->watchSeen > 0 && steadyNow() - s->watchSeen < 2.0; }
 bool Controller::watchLive() const { return s->watchLive; }
+
+// ---------------------------------------------------------------------------------------
+// For the pedal's floor screen and lights
+// ---------------------------------------------------------------------------------------
+bool Controller::effectOn (int bank, int sw) const
+{
+    // the same jobs as tap A to C in onFootswitch
+    static const P jobs[3][3] = { { P::DriveOn, P::BitrotOn, P::PreFlip },
+                                  { P::FiltOn, P::DimOn, P::WahOn },
+                                  { P::GrOn, P::DlOn, P::RvOn } };
+    if (bank < 0 || bank > 2 || sw < 0 || sw > 2) return false;
+    return value (jobs[bank][sw]) > 0.5f;
+}
+
+bool Controller::droneOn() const
+{
+    // as tap D sees it: a held drone that has died away on its own counts as off
+    if (! s->droneHeld) return false;
+    return engine.meters().droneLayers > 0 || steadyNow() - s->lastDTap < 2.0;
+}
+
+std::string Controller::captureShortName() const
+{
+    const auto it = s->captureShort.find (s->captureFile);
+    if (it != s->captureShort.end() && ! it->second.empty()) return it->second;
+    auto name = engine.captureName();
+    if (name.size() > 4 && name.compare (name.size() - 4, 4, ".nam") == 0) name.resize (name.size() - 4);
+    return name;
+}
+
+void Controller::setCaptureShort (const std::string& file, const std::string& name)
+{
+    if (file.empty()) return;
+    std::string n = name;
+    while (! n.empty() && n.back() == ' ') n.pop_back();
+    while (! n.empty() && n.front() == ' ') n.erase (n.begin());
+    if (n.size() > 24) n.resize (24);
+    if (n.empty()) s->captureShort.erase (file);
+    else s->captureShort[file] = n;
+    saveSettings();
+}
 
 void Controller::watchStart()
 {
@@ -1267,6 +1314,7 @@ std::string Controller::stateJson() const
     j["tuner"] = tunerOn();
     j["capture"] = engine.captureName();
     j["captureFile"] = s->captureFile;
+    j["captureShort"] = s->captureShort;
     j["captures"] = listCaptures();
     j["space"] = engine.spaceName();
     j["spaceFile"] = s->spaceFile;
@@ -1975,6 +2023,11 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         std::string err;
         if (useCapture (m.value ("file", std::string()), err)) queueToast ("CAPTURE LOADED");
         else queueToast (err);
+        queueState();
+    }
+    else if (t == "captureShort")
+    {
+        setCaptureShort (m.value ("file", s->captureFile), m.value ("name", std::string()));
         queueState();
     }
     else if (t == "space")

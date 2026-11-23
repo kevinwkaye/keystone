@@ -60,6 +60,7 @@ target_compile_definitions(Keystone PRIVATE
 
 target_link_libraries(Keystone PRIVATE
     keystone_core
+    keystone_floor
     KeystoneData
     juce::juce_core
     juce::juce_events
