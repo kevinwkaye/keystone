@@ -45,7 +45,9 @@ int main (int argc, char** argv)
     ok &= save ("stomp-grit", v);
     v.bank = 1; v.drone = true;
     ok &= save ("stomp-groove", v);
-    v.bank = 0; v.drone = false; v.capture = "AMPEG SVT CLASSIC WITH 8X10 CAB";
+    v.bank = 2; v.drone = false; v.fx[2][0] = true; v.speckleHold = true;
+    ok &= save ("stomp-glow-hold", v);
+    v.bank = 0; v.speckleHold = false; v.fx[2][0] = false; v.capture = "AMPEG SVT CLASSIC WITH 8X10 CAB";
     ok &= save ("stomp-long-capture", v);
 
     v = {};

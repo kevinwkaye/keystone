@@ -336,6 +336,8 @@ struct Renderer::Impl
         {
             const bool lit = i < 3 ? v.fx[b][i] : v.drone;
             block (42 + i * (bw + 8), 270, bw, 170, letters[i], lit, i < 3 ? c : kCream, 44, 8);
+            if (b == 2 && i == 0 && v.speckleHold)   // Speckle frozen on Hold
+                textCentred ("HOLD", 42, 270 + 118, bw, 40, 18, lit ? kDark : kOffText, 0.06f, 12);
         }
         // the other two banks, stacked on the right
         int row = 0;

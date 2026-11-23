@@ -723,7 +723,8 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
 //           job when Bitrot is on and its Pedal does isn't Blend
 //   Groove: A auto filter, B Dimension, C wah; pedal: wah, or volume with the wah off
 //   Glow:   A Speckle, B delay, C reverb; pedal: Bloom
-// Every bank: tap D drone. Hold A next bank, B next song or part, C tuner, D slap.
+// Every bank: tap D drone. Hold A next bank, B next song or part (in Glow: Speckle's Hold,
+// freezing the last beat, on and off), C tuner, D slap.
 // Hold C and D together: Keep. Changing bank never changes the sound.
 // ---------------------------------------------------------------------------------------
 void Controller::footswitchPress (int sw, double now) { s->logic.press (sw, now); }
@@ -1107,7 +1108,18 @@ void Controller::onFootswitch (int sw, int ev)
         switch (sw)
         {
             case 0: if (! tuning) setBank ((s->bank + 1) % 3); break;
-            case 1: if (! tuning) stepSong (1); break;
+            case 1:
+                if (tuning) break;
+                // Glow: Speckle's Hold, on and off (next part from Glow is Song mode's job)
+                if (s->bank == 2)
+                {
+                    toggle (P::GrHold);
+                    const bool on = value (P::GrHold) > 0.5f;
+                    queueToast (on ? (value (P::GrOn) > 0.5f ? "HOLD" : "HOLD, SPECKLE IS OFF") : "HOLD OFF");
+                    mark (on ? "Speckle hold on" : "Speckle hold off");
+                }
+                else stepSong (1);
+                break;
             case 2:
                 // Glow: runaway while held (Grotto's footswitch B). Groove: the vinyl brake
                 // (Lathe's). Grit: the tuner

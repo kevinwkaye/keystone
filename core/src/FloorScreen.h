@@ -42,6 +42,7 @@ struct View
     std::string capture;            // the Drive capture's short name
     bool fx[3][3] {};               // [bank][A to C] on
     bool drone = false;             // D
+    bool speckleHold = false;       // Glow's A block says HOLD
 
     // Tuner
     std::string note;               // "E", "F#"; empty while no note is heard

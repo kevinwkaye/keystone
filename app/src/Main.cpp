@@ -732,6 +732,7 @@ private:
         in.partStartedAt = partStartedAt;
         for (int b = 0; b < 3; ++b) for (int sw = 0; sw < 3; ++sw) in.fx[b][sw] = controller->effectOn (b, sw);
         in.drone = controller->droneOn();
+        in.speckleHold = engine.getParam (ks::P::GrHold) > 0.5f;
         in.nextPart = cur + 1 < controller->songCount() && controller->isPart (cur + 1);
         const ks::P kud[4] = { ks::P::KMuteOn, ks::P::KWahOn, ks::P::KRoomOn, ks::P::KTapeOn };
         for (int i = 0; i < 4; ++i) in.kuddle[i] = engine.getParam (kud[i]) > 0.5f;
@@ -793,6 +794,7 @@ private:
             v.capture = controller->captureShortName();
             for (int b = 0; b < 3; ++b) for (int sw = 0; sw < 3; ++sw) v.fx[b][sw] = in.fx[b][sw];
             v.drone = in.drone;
+            v.speckleHold = in.speckleHold;
         }
         screen.show (v);
     }

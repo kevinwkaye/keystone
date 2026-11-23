@@ -15,12 +15,15 @@ The logic is pure C++ with no hardware: `core/src/PebbleEyes.h` (the eyes), `cor
 | Audio | green fine, amber when the Pi is busy or hot or the bass input is silent, red with no audio or a dropout in the last minute |
 | Meter (7) | the expression pedal's (or the watch's) amount in the bank's colour, for 3 seconds after it moves. In Song mode otherwise a four-bar phrase counter from the moment the part was picked: green filling over three bars, purple flashing on every beat of the fourth. Off in the tuner. |
 | Footswitches A to C | Stomp mode: the bank's colour, bright when that effect is on, faint when it's off. Off here but on in another bank: a faint glow in that bank's colour (on in both other banks: they take turns, a second each). |
+| Glow's A | pulses slowly while Speckle's Hold is on, so you can see it's playing a frozen slice |
 | Footswitch D | warm white while the drone holds a note |
 | In Song mode | A and C faint green, B green while there's a next part |
 | In the tuner | all four faint white: any tap leaves it |
 | In Kuddle | amber, bright for each switch's effect (Mute, Auto wah, Room, Tape) when on |
 
 Overall brightness starts at 40%.
+
+Speckle's Hold freezes the last beat you played and keeps the grains on that slice. In Glow, hold B switches it on and off (the phone's Hold switch still works). Hold B in Grit and Groove is still the next song or part; from Glow, use Song mode for that.
 
 ### Where they sit, and the wire's order
 
@@ -51,7 +54,7 @@ Five screens, each with one big thing to read from standing height:
 
 - **Splash**: Pebble and KEYSTONE for a couple of seconds while Keystone starts
 - **Song mode**: the part (big), the song above it, NEXT and what's coming below, the setlist place and tempo along the top. A song without parts shows its name big. The first entry of a song with parts says START.
-- **Stomp mode**: the bank you're on on the left (name, the Drive capture and four big A to D blocks), the other two banks on the right, their blocks filling with the bank's colour when an effect is on there
+- **Stomp mode**: the bank you're on on the left (name, the Drive capture and four big A to D blocks), the other two banks on the right, their blocks filling with the bank's colour when an effect is on there. In Glow, A says HOLD while Speckle's Hold is on.
 - **Tuner**: the note, huge, and the cents beside it, amber, or green within 2 cents. MUTED in the corner when the tuner mutes the output.
 - **Alert**: two red cards (amber for warnings) for five seconds over whatever's on screen: WATCH LOST, AUDIO LOST, AUDIO DROPOUT, PI HOT
 

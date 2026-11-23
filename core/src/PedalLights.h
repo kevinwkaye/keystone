@@ -24,6 +24,7 @@
 //   Footswitch Stomp mode: A to C in the bank's colour, bright when the effect is on and
 //              faint when it's off. When it's off here but on in another bank, a faint
 //              glow in that bank's colour instead (both other banks: they take turns).
+//              Glow's A (Speckle) pulses slowly while Speckle's Hold is on.
 //              D warm white when the drone is held. Song mode: A and C faint green, B
 //              green while there's a next part, D the drone. Tuner: all faint white, as
 //              any tap leaves it. Kuddle: amber, bright for each switch's effect when on.
@@ -70,6 +71,7 @@ struct Input
     double partStartedAt = 0;         // Song mode's phrase counter starts here (same clock as now)
     bool fx[3][3] {};                 // [bank][A to C] effect on
     bool drone = false;
+    bool speckleHold = false;         // Speckle's Hold: Glow's A pulses while Speckle is on
     bool nextPart = false;            // Song mode: B has a part to go to
     bool kuddle[4] {};                // Kuddle: Mute, Auto wah, Room, Tape on
 };
@@ -145,7 +147,14 @@ inline Frame frame (const Input& in)
     {
         for (int sw = 0; sw < 3; ++sw)
         {
-            if (in.fx[bank][sw]) { put (at::foot[sw], kBank[bank], 1.0f); continue; }
+            if (in.fx[bank][sw])
+            {
+                // Speckle frozen on Hold: a slow pulse, once a second, so it reads as not following you
+                const bool pulse = bank == 2 && sw == 0 && in.speckleHold;
+                const float level = pulse ? 0.35f + 0.65f * (0.5f + 0.5f * (float) std::cos (in.eyes.now * 2.0 * 3.14159265)) : 1.0f;
+                put (at::foot[sw], kBank[bank], level);
+                continue;
+            }
             int others[2], n = 0;
             for (int b = 0; b < 3; ++b) if (b != bank && in.fx[b][sw]) others[n++] = b;
             if (n == 0) put (at::foot[sw], kBank[bank], kFaint);

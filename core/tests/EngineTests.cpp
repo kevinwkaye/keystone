@@ -1457,6 +1457,16 @@ static void testController()
     hold (1);
     CHECK (c.currentSong() == 3 && c.lastToast() == "LAST SONG", "hold B at the last song stays put, no wrap to song one");
     c.selectSong (0);
+    // Glow: hold B is Speckle's Hold, on and off, and the song stays put
+    {
+        const int before = c.currentSong();
+        c.setBank (2);
+        hold (1);
+        CHECK (c.currentSong() == before && c.value (P::GrHold) == 1, "Glow, hold B: Speckle's Hold on, no song change");
+        hold (1);
+        CHECK (c.currentSong() == before && c.value (P::GrHold) == 0 && c.lastToast() == "HOLD OFF", "Glow, hold B again: Hold off");
+        c.setBank (0);
+    }
     hold (3);
     CHECK (c.value (P::CompSlap) == 1, "hold D: slap on");
     hold (2);
@@ -1536,7 +1546,7 @@ static void testController()
 
     // parts: a song split in two, one press of B between them
     c.selectSong (0);
-    c.setValue (P::BankStart, 2); c.setValue (P::DlOn, 1); c.setValue (P::RvOn, 1);
+    c.setValue (P::BankStart, 1); c.setValue (P::DlOn, 1); c.setValue (P::RvOn, 1);
     msg (R"({"t":"setlist","op":"save"})");
     msg (R"({"t":"setlist","op":"addPart","i":0,"name":"Drop"})");
     CHECK (c.songCount() == 15 && c.isPart (1) && c.songName (1) == "Drop" && c.songNumber (1) == 1 && c.songNumber (2) == 2 && c.songsOnly() == 14,
@@ -1545,7 +1555,7 @@ static void testController()
     c.setValue (P::BankStart, 0); c.setValue (P::DlOn, 0); c.setValue (P::RvOn, 0); c.setValue (P::DriveOn, 1); c.setValue (P::DriveVoice, 1);
     msg (R"({"t":"setlist","op":"save"})");
     c.selectSong (0);
-    CHECK (c.bank() == 2 && c.value (P::DlOn) == 1, "the song opens in Glow with the delay on");
+    CHECK (c.bank() == 1 && c.value (P::DlOn) == 1, "the song opens in Groove with the delay on");
     hold (1);
     CHECK (c.currentSong() == 1 && c.bank() == 0 && c.value (P::DlOn) == 0 && c.value (P::DriveVoice) == 1,
            "hold B: one press to the part, in Grit with Drive on and the space off");
@@ -1961,9 +1971,10 @@ static void testBandSetlist()
         CHECK (c.songName (1) == "When the Circus Comes to Town" && c.value (P::DriveVoice) == 1 && c.value (P::PreGain) > 0.55f, "Circus starts heavy: the Blumes and the preamp pushed");
         hold (1);
         CHECK (c.isPart (2) && c.currentSong() == 2 && c.value (P::DriveOn) == 0 && c.value (P::RvOn) == 1 && c.bank() == 2, "Circus verse: clean with reverb, in Glow");
-        hold (1); hold (1); hold (1);
+        // the verse sits in Glow, where hold B is Speckle's Hold: walk on through the list
+        c.stepSong (1); c.stepSong (1); c.stepSong (1);
         CHECK (c.songName (5) == "Bridge" && c.value (P::BitrotOn) == 1 && c.value (P::GrOn) == 1, "Circus bridge: Bitrot and Speckle sparkle");
-        hold (1);
+        c.stepSong (1);
         CHECK (c.songName (6) == "Ending" && c.value (P::PreGain) > 0.55f && c.value (P::DriveOn) == 1, "Circus ending: Blumes and preamp");
         hold (1);
         CHECK (c.songName (7) == "DWHALTS" && c.value (P::DriveOn) == 0, "DWHALTS opens clean");
@@ -2396,6 +2407,15 @@ static void testPedalLights()
     const auto c2 = frame (in)[at::foot[2]];
     CHECK (c1 != c2 && (c1 == ks::eyes::scale (kBank[1], kElsewhere) || c1 == ks::eyes::scale (kBank[2], kElsewhere)), "C on in Groove and Glow: the glow takes turns between purple and blue");
     CHECK (f[at::foot[3]] == kWhite, "drone held: D warm white");
+    {
+        auto hin = in;
+        hin.eyes.bank = 2; hin.fx[2][0] = true; hin.speckleHold = true;
+        hin.eyes.now = 200.0;
+        const auto peak = frame (hin)[at::foot[0]];
+        hin.eyes.now = 200.5;
+        const auto dip = frame (hin)[at::foot[0]];
+        CHECK (peak == kBank[2] && dip.b < peak.b && dip.b > 0, "Glow, Speckle on Hold: A pulses (%d to %d)", peak.b, dip.b);
+    }
     in.eyes.bank = 1;
     f = frame (in);
     CHECK (f[at::foot[1]] == kBank[1], "on Groove, B is Groove's own: bright purple");
