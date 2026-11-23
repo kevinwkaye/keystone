@@ -39,6 +39,7 @@ struct Controller::Song
     std::string name;
     bool part = false;                      // a part of the song above it
     std::map<std::string, float> values;   // non-global parameters only
+    std::string visual;                     // the projector's visual as JSON, empty for the default
 };
 
 struct Controller::State
@@ -283,6 +284,7 @@ static std::vector<Controller::Song> readList (const json& j, const std::map<std
         if (js.contains ("values") && js["values"].is_object())
             for (auto it = js["values"].begin(); it != js["values"].end(); ++it)
                 if (it.value().is_number() && song.values.count (it.key())) song.values[it.key()] = it.value().get<float>();
+        if (js.contains ("visual") && js["visual"].is_object()) song.visual = js["visual"].dump();
         // setlist version 7 (0.4.0): quieter Bitrot, a shorter drone trail, a Blumes that cuts
         // through. Only values still on the old defaults move; ones you'd changed stay.
         if (parts && version < 7)
@@ -426,6 +428,7 @@ void Controller::saveSetlist() const
         js["name"] = song.name;
         if (song.part) js["part"] = true;
         js["values"] = song.values;
+        if (! song.visual.empty()) js["visual"] = json::parse (song.visual, nullptr, false);
         j["songs"].push_back (js);
     }
     writeJsonAtomic (toPath (dataDir) / listFile (s->rig), j);
@@ -537,6 +540,17 @@ void Controller::selectSong (int i)
     saveSetlist();
     queueState();
     queueToast (isPart (i) ? songName (i) : songName (s->current));
+    // the projector moves on with the song; a part with no visual of its own leaves it be
+    if (s->rig == 0 && onSongVisual && ! (keepGoing && s->songs[(size_t) i].visual.empty())) onSongVisual (currentVisual());
+}
+
+std::string Controller::currentVisual() const
+{
+    if (s->songs.empty()) return R"({"kind":"next"})";
+    int i = s->current;
+    while (s->songs[(size_t) i].visual.empty() && i > 0 && s->songs[(size_t) i].part) --i;   // a part: its song's
+    const auto& v = s->songs[(size_t) i].visual;
+    return v.empty() ? std::string (R"({"kind":"next"})") : v;
 }
 
 // whole songs: to the first part of the song before or after this one
@@ -654,6 +668,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
         while (head > 0 && songs[(size_t) head].part) --head;
         Song c = songs[(size_t) i];
         c.part = true;
+        c.visual.clear();   // a new part carries on with its song's visuals
         c.name = name.empty() ? "Part " + std::to_string (end - head + 2) : name;
         songs.insert (songs.begin() + end + 1, c);
         if (s->current > end) ++s->current;
@@ -1257,6 +1272,9 @@ std::string Controller::stateJson() const
     j["songs"] = json::array();
     j["parts"] = json::array();
     for (const auto& song : s->songs) { j["songs"].push_back (song.name); j["parts"].push_back (song.part); }
+    j["visuals"] = json::array();
+    for (const auto& song : s->songs) j["visuals"].push_back (song.visual.empty() ? json() : json::parse (song.visual, nullptr, false));
+    j["projector"] = (bool) onProjector;
     j["current"] = s->current;
     j["bank"] = s->bank;
     j["rig"] = s->rig;
@@ -1826,6 +1844,11 @@ std::string Controller::meterJson (float cpuLoad, int bufferSize, double sampleR
         j["jobOn"] = act[m.pedalTarget];
     }
     j["wait"] = m.waiting;
+    if (projectorStatus)
+    {
+        const auto ps = projectorStatus();
+        if (! ps.empty()) { auto pj = json::parse (ps, nullptr, false); if (! pj.is_discarded()) j["proj"] = pj; }
+    }
     {
         static const char* names[] = { "Dirt blend", "Wah", "Volume", "Bloom" };
         j["jobName"] = m.pedalTarget == (int) PedalJob::Bitrot ? "Bitrot: " + formatValue (P::BitrotPedal, engine.getParam (P::BitrotPedal))
@@ -1892,6 +1915,31 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     }
     else if (t == "song") selectSong (m.value ("i", 0));
     else if (t == "songStep") stepSong (m.value ("d", 1));
+    else if (t == "proj") { if (onProjector) onProjector (line); }
+    else if (t == "visual")
+    {
+        // a song's visual from the phone: kind scene (n), range (a, b), clip (file) or next;
+        // null or "same" clears it (a part then follows its song)
+        const int i = m.value ("i", -1);
+        if (i >= 0 && i < songCount())
+        {
+            std::string v;
+            if (m.contains ("v") && m["v"].is_object())
+            {
+                const auto kind = m["v"].value ("kind", std::string());
+                json c { { "kind", kind } };
+                if (kind == "scene") c["n"] = std::clamp (m["v"].value ("n", 1), 1, 99);
+                else if (kind == "range") { c["a"] = std::clamp (m["v"].value ("a", 1), 1, 99); c["b"] = std::clamp (m["v"].value ("b", 1), 1, 99); }
+                else if (kind == "clip") c["file"] = m["v"].value ("file", std::string()).substr (0, 200);
+                else if (kind != "next") c = json();
+                if (! c.is_null()) v = c.dump();
+            }
+            s->songs[(size_t) i].visual = v;
+            saveSetlist();
+            queueState();
+            if (i == s->current && onSongVisual) onSongVisual (currentVisual());
+        }
+    }
     else if (t == "setlist") setlistOp (m.value ("op", std::string()), m.value ("i", s->current), m.value ("to", -1), m.value ("name", std::string()));
     else if (t == "watchHello")
     {

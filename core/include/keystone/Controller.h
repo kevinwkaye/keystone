@@ -63,6 +63,13 @@ public:
     std::function<void (bool start)> onBufferFind;   // Find the best buffer, or stop
     std::function<std::string()> bufferFinder;        // its progress as JSON, empty when idle
     std::function<void()> onAsioPanel;   // opens the ASIO driver's own settings on the laptop
+    // The projector: visuals on the amp grille. The host plays them; each song and part keeps
+    // its visual in the setlist ("visual": kind scene, range, clip or next). Parts with none
+    // carry on with their song's.
+    std::function<void (const std::string& visualJson)> onSongVisual;   // a song started: its visual, resolved
+    std::function<void (const std::string& lineJson)> onProjector;      // the phone's "proj" messages, as they came
+    std::function<std::string()> projectorStatus;                        // a JSON object, sent with the meters
+    std::string currentVisual() const;   // the visual the current song or part asks for
     // Update firmware: the phone sends the new release a piece at a time; once it has
     // arrived whole the host hands it to its updater. Returns "" when the update is under
     // way, otherwise what went wrong in plain words. Not set: this device can't update itself.

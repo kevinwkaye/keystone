@@ -10,6 +10,7 @@
 #include "Keeper.h"
 #include "LinkServer.h"
 #include "PedalControl.h"
+#include "Projector.h"
 
 #include "keystone/Controller.h"
 #include "keystone/Engine.h"
@@ -254,6 +255,15 @@ public:
         controller->load();
         controller->startWifi();   // Keystone's own network, if it's switched on
 
+        // the projector: visuals on the amp, from Documents\Keystone\Visuals
+        projector = std::make_unique<Projector> (home.getChildFile ("Visuals"));
+        projector->log = [] (const String& msg) { Logger::writeToLog (msg); };
+        controller->onSongVisual = [this] (const std::string& v) { if (projector) projector->songVisual (v); };
+        controller->onProjector = [this] (const std::string& line) { if (projector) projector->handleMessage (line); };
+        controller->projectorStatus = [this] { return projector ? projector->statusJson() : std::string(); };
+        projector->songVisual (controller->currentVisual());
+        projector->start();
+
         audio = std::make_unique<AudioHost> (engine, keeper);
         if (args.contains ("--list-devices")) Logger::writeToLog ("Audio devices:\n" + audio->deviceList());
         audio->onBufferStepLearnt = [this] (int step)
@@ -323,6 +333,7 @@ public:
         stopWifi();
         watchdog.stopThread (2000);
         link.stop();
+        projector.reset();
         if (audio) audio->stop();
         if (housekeeping) housekeeping->stopThread (2000);
         midi.reset();
@@ -550,6 +561,9 @@ public:
         dropHistory.push_back ({ now, h.dropouts });
         while (! dropHistory.empty() && now - dropHistory.front().first > 60) dropHistory.pop_front();
         h.dropoutsRecent = dropHistory.empty() ? 0 : h.dropouts - dropHistory.front().second;
+        // audio comes first: a dropout blacks out the projector until you put it back
+        if (h.dropouts > lastDropouts && lastDropouts >= 0 && h.uptimeSec > 30 && projector) projector->dropout();
+        lastDropouts = h.dropouts;
         h.light = m.light;
         h.phones = link.clientCount();
         h.phoneAddresses = link.clientAddresses().joinIntoString (", ");
@@ -650,6 +664,8 @@ private:
     std::unique_ptr<AudioHost> audio;
     std::unique_ptr<DirectMidiInput> midi;
     std::unique_ptr<Housekeeping> housekeeping;
+    std::unique_ptr<Projector> projector;
+    int lastDropouts = -1;
     LinkServer link;
 #if KEYSTONE_TRAY
     std::unique_ptr<Tray> tray;

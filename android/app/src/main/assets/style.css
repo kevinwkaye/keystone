@@ -242,3 +242,13 @@ nav.nav button.rigbtn.on { background: var(--flip); }
 .wifirow { display: flex; justify-content: space-between; align-items: baseline; font-size: 17px; }
 .wifirow .lab { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 .wifirow .pw { font-family: monospace; letter-spacing: 0.08em; font-size: 18px; }
+
+/* the projector: Visuals card on Play, the Visuals page and a song's visuals */
+.viscard { border: 2px solid var(--blue); color: var(--text); text-align: left; width: 100%; padding: 12px 12px 12px 14px; gap: 10px; align-items: stretch; }
+.viscard .flip { width: 40px; height: 46px; font-size: 24px; flex: none; }
+.vname { font-size: 18px; font-weight: 700; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flip.visnum { width: 52px; height: 60px; font-size: 32px; flex: none; }
+.flips .fbtn .lb { font-size: 13px; line-height: 1.2; }
+.visedit { display: flex; flex-direction: column; gap: 10px; padding: 0 10px 12px; }
+.vissel, .visfile { width: 100%; height: 48px; border-radius: 8px; border: 2px solid var(--flip); background: var(--bg); color: var(--text); font-size: 16px; padding: 0 10px; font-family: inherit; margin-top: 4px; }
+.visedit label { display: flex; flex-direction: column; }

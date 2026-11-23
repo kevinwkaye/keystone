@@ -46,6 +46,10 @@ Source: "{#SourceDir}\Keystone.exe"; DestDir: "{app}"; Flags: ignoreversion; Che
 #else
 Source: "{#SourceDir}\Keystone.exe"; DestDir: "{app}"; Flags: ignoreversion
 #endif
+#ifdef MpvDir
+; the projector's player (mpv, GPLv2+)
+Source: "{#MpvDir}\mpv.exe"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "..\tools\Set up footswitch.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\tools\Set up footswitch.bat"; DestDir: "{app}\Tools"; Flags: ignoreversion
@@ -57,6 +61,7 @@ Source: "..\tools\Keystone Wi-Fi.ps1"; DestDir: "{app}\Tools"; Flags: ignorevers
 [Icons]
 Name: "{group}\Keystone"; Filename: "{app}\Keystone.exe"
 Name: "{group}\Keystone folder (captures, spaces, log, songs)"; Filename: "{userdocs}\Keystone"
+Name: "{group}\Keystone visuals folder"; Filename: "{userdocs}\Keystone\Visuals"
 Name: "{group}\Set up footswitch"; Filename: "{app}\Tools\Set up footswitch.bat"
 Name: "{group}\Set up gig laptop"; Filename: "{app}\Tools\Set up gig laptop.bat"
 Name: "{group}\Uninstall Keystone"; Filename: "{uninstallexe}"

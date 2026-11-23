@@ -12,7 +12,7 @@ var KS = (function () {
     tuner: false, captures: [], capture: '', captureFile: '', namAvailable: true, spaces: [], space: '', spaceFile: '',
     footswitch: '', audio: '', keeperLive: false,
     meter: {}, screen: 'play', module: null, prevScreen: 'play', tunerAuto: false,
-    editVoice: null, sel: null, openRow: -1, renameRow: -1, confirmDel: -1,
+    editVoice: null, sel: null, visuals: [], visEdit: null, projector: false, openRow: -1, renameRow: -1, confirmDel: -1,
     noteFor: 0, noteUntil: 0, pedalDrag: null,
     health: null, rtt: null, healthAt: 0,
     takes: null, takesFree: 0, roomTake: '', roomFailed: '',
@@ -55,6 +55,7 @@ var KS = (function () {
         S.values = m.values; S.songs = m.songs; S.parts = m.parts || []; S.current = m.current; S.edited = m.edited;
         S.bank = m.bank || 0; S.maxEntries = m.maxEntries || 40; S.rig = m.rig || 0; S.footMode = m.footMode || 0;
         S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile; S.spaces = m.spaces || []; S.space = m.space || ''; S.spaceFile = m.spaceFile || '';
+        S.visuals = m.visuals || []; S.projector = !!m.projector;
         S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive; S.wifi = m.wifi || null;
         tunerState(m.tuner);
         try { localStorage.setItem('ks.state', JSON.stringify(m)); } catch (e) {}
@@ -73,6 +74,7 @@ var KS = (function () {
         break;
       case 'meter':
         S.meter = m;
+        if (m.proj) { var pk = JSON.stringify(m.proj); if (pk !== S.projKey) { S.projKey = pk; S.proj = m.proj; if (S.screen === 'play' || S.screen === 'visuals') queueRender(true); } }
         if (m.bank != null && m.bank !== S.bank) { S.bank = m.bank; queueRender(true); }
         if (m.rig != null && m.rig !== S.rig) { S.rig = m.rig; queueRender(); }
         if (m.tuner) tunerState(true); else if (S.tuner) tunerState(false);
@@ -725,6 +727,7 @@ var KS = (function () {
       (S.edited ? ', <span class="edited">edited</span>' : K ? '. Hold B for next.' : S.footMode === 1 ? '. C for next song.' : '. Hold B for next.') + '</span></span></button>' +
       '<button type="button" class="arrow" data-act="next" aria-label="Next song">' + ICON.right + '</button></div>' +
       (K ? '' : modePanel()) +
+      (K ? '' : visualCard()) +
       '<div class="card meter">' + meterSvg() + '<div class="label">Output</div></div>' +
       (K ? '' : S.footMode === 1 ? '<span class="label">Effects in this song (phone only)</span>' : bankBar()) +
       '<div class="stomps' + (!K && S.footMode === 1 ? ' phoneonly' : '') + '">' + stomps + '</div>' + note +
@@ -1119,10 +1122,96 @@ var KS = (function () {
     return '<section class="screen" style="gap:14px">' + header(m.title, { id: 'tone', label: 'Tone' }, right) + pre + body + extra + nav('tone') + '</section>';
   }
 
+  // ---------------------------------------------------------------- the projector (visuals on the amp)
+  // scene names, the same as the laptop's table (Projector.cpp)
+  var SCENES = ['TV static', 'Test card', 'Square tunnel', 'Blocky plasma', 'Copper bars', 'Hypnotic rings', 'Checker floor', 'Static',
+    'Logo wave', 'Pixel kaleidoscope', 'Checker tunnel', 'Oscilloscope', 'Starfield', 'Synthwave sun', 'Moiré ripples', 'Pixel rain',
+    'Channel flicking', 'Equaliser', 'Logo rotozoomer', 'Double spiral', 'Plasma 2', 'Synthwave mountains', 'Broken test card', 'Reverse tunnel',
+    'Wobbling copper bars', 'Checkerboard floor', 'Static', 'Logo wave 2', 'Checker tunnel 2', 'Moiré 2', 'Kaleidoscope 2', 'Starfield 2',
+    'Plasma 3', 'Equaliser 2', 'Rings 2', 'Mountains 2', 'Synthwave grid', 'Spiral 2', 'Channel flicking 2', 'Logo rotozoomer 2', 'Static'];
+  var PMODES = [['loop', 'Loop'], ['black', 'Blackout'], ['align', 'Align'], ['grid', 'Grid']];
+  function proj() { return S.proj || { on: false, mode: 'loop', scene: 1, setting: 'auto', screens: 1 }; }
+  function sceneName(n) { return SCENES[n - 1] || ('Scene ' + n); }
+  // what a song's visual means, in words; i < 0: the visual itself
+  function visText(v, part) {
+    if (!v) return part ? 'As its song' : 'Next scene';
+    if (v.kind === 'scene') return two(v.n) + ' ' + sceneName(v.n);
+    if (v.kind === 'range') return 'Scenes ' + v.a + ' to ' + v.b;
+    if (v.kind === 'clip') return 'Clip: ' + v.file;
+    return 'Next scene';
+  }
+  function nowShowing() {
+    var p = proj();
+    if (!p.on) return { num: '--', name: 'Projector off', sub: p.problem || (p.setting === 'off' ? 'Switched off below' : p.setting === 'auto' ? 'Plug the projector into the laptop, or set it to On' : 'Starting') };
+    if (p.mode === 'black') return { num: '--', name: 'Blackout', sub: p.note || 'The loop keeps its place underneath' };
+    if (p.mode === 'align') return { num: '--', name: 'Alignment card', sub: 'For lining up the projector' };
+    if (p.mode === 'grid') return { num: '--', name: 'Calibration grid', sub: 'For measuring the mapping' };
+    if (p.mode === 'clip') return { num: '--', name: p.clip || 'Clip', sub: 'A clip for this song' };
+    return { num: two(p.scene), name: sceneName(p.scene), sub: (p.a ? 'Scenes ' + p.a + ' to ' + p.b + ', looping' : 'Loop, scene ' + p.scene + ' of ' + SCENES.length) + (p.problem ? '. ' + p.problem : '') };
+  }
+  function visualCard() {
+    if (!S.projector) return '';
+    var w = nowShowing();
+    return '<button type="button" class="card viscard" data-go="visuals" aria-label="Open Visuals">' +
+      '<span class="label" style="display:flex;justify-content:space-between;width:100%"><span>Visuals</span><span>' + esc(visText(S.visuals[S.current], isPart(S.current))) + '</span></span>' +
+      '<span style="display:flex;align-items:center;gap:10px;width:100%">' + flip(w.num) +
+      '<span style="display:flex;flex-direction:column;min-width:0;flex:1;text-align:left"><span class="vname">' + esc(w.name) + '</span><span class="small">' + esc(w.sub) + '</span></span>' + ICON.right + '</span></button>';
+  }
+  function visualsScreen() {
+    var p = proj(), w = nowShowing();
+    var dotCol = p.on ? (p.mode === 'black' ? '#F0997B' : '#5DCAA5') : '#8A847A';
+    var modes = PMODES.map(function (m) { return '<button type="button" data-act="projMode" data-mode="' + m[0] + '" class="' + (p.on && p.mode === m[0] ? 'on' : '') + '">' + m[1] + '</button>'; }).join('');
+    var scenes = SCENES.map(function (nm, k) {
+      var n = k + 1, sel = p.on && p.mode === 'loop' && p.scene === n;
+      return '<button type="button" class="fbtn' + (sel ? ' sel' : '') + '" data-act="projScene" data-n="' + n + '">' + flip(two(n)) + '<span class="lb">' + esc(nm) + '</span></button>';
+    }).join('');
+    var sets = [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']].map(function (x) { return '<button type="button" data-act="projSetting" data-v="' + x[0] + '" class="' + (p.setting === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('');
+    return '<section class="screen" style="gap:14px">' + header('Visuals', { id: 'play', label: 'Play' },
+        '<span class="pill" style="border:none"><span class="dot" style="background:' + dotCol + '"></span>' + (p.on ? 'Projector on' : 'Projector off') + '</span>') +
+      (p.dropout ? '<div class="warnstrip">' + esc(p.note) + '. Tap Loop to bring the visuals back.</div>' : '') +
+      '<div class="card" style="flex-direction:row;align-items:center;gap:12px">' + '<span class="flip visnum">' + esc(w.num) + '</span>' +
+      '<span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span class="label">Now showing</span><span class="vname" style="font-size:20px">' + esc(w.name) + '</span><span class="small">' + esc(w.sub) + '</span></span></div>' +
+      '<div class="seg" style="grid-template-columns:repeat(4,minmax(0,1fr))">' + modes + '</div>' +
+      '<div class="label" style="display:flex;justify-content:space-between"><span>Jump to scene</span><button type="button" class="back" data-act="projNext" style="min-height:24px">Next scene ' + ICON.right + '</button></div>' +
+      '<div class="flips">' + scenes + '</div>' +
+      '<span class="label">Projector</span>' +
+      '<div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))">' + sets + '</div>' +
+      '<span class="small">Auto plays on the laptop\'s second screen when one is plugged in. On uses the only screen, for gigs with the lid shut. ' +
+        'The loop and cards live in Documents\\Keystone\\Visuals on the laptop.</span>' +
+      '<span class="small">Next song moves the visuals on. If Keystone hears a dropout, it switches to Blackout and says so here.</span>' +
+      nav('play') + '</section>';
+  }
+  // a song's Visuals editor, opened from its row in the setlist
+  function visEditor(i) {
+    var e = S.visEdit, pt = isPart(i);
+    var kinds = [['scene', 'Scene'], ['range', 'Range'], ['clip', 'Clip'], ['next', pt ? 'As song' : 'None']];
+    var seg = kinds.map(function (k) { return '<button type="button" data-act="visKind" data-k="' + k[0] + '" class="' + (e.kind === k[0] ? 'on' : '') + '">' + k[1] + '</button>'; }).join('');
+    function pick(id, val) {
+      return '<select id="' + id + '" class="vissel">' + SCENES.map(function (nm, k) { return '<option value="' + (k + 1) + '"' + (val === k + 1 ? ' selected' : '') + '>' + two(k + 1) + ' ' + esc(nm) + '</option>'; }).join('') + '</select>';
+    }
+    var body = e.kind === 'scene' ? pick('visN', e.n) + '<span class="small">Jumps here when the song starts, then the loop carries on.</span>'
+      : e.kind === 'range' ? '<div class="pair"><label class="small">From' + pick('visA', e.a) + '</label><label class="small">To' + pick('visB', e.b) + '</label></div><span class="small">Loops these scenes until the next song.</span>'
+      : e.kind === 'clip' ? '<input id="visFile" class="visfile" maxlength="200" placeholder="File name, e.g. circus.mp4" value="' + esc(e.file || '') + '"><span class="small">From Documents\\Keystone\\Visuals on the laptop.</span>'
+      : '<span class="small">' + (pt ? 'Carries on with its song\'s visuals.' : 'Moves on to the next scene in the loop.') + '</span>';
+    return '<div class="visedit"><span class="label">Visuals for ' + esc(S.songs[i]) + '</span><div class="seg" style="grid-template-columns:repeat(4,minmax(0,1fr))">' + seg + '</div>' + body +
+      '<div class="pair"><button type="button" class="wide" data-act="visPreview" data-i="' + i + '">Preview</button><button type="button" class="wide blue" data-act="visSave" data-i="' + i + '">Save</button></div></div>';
+  }
+  function visRead() {
+    var e = S.visEdit, g = function (id) { var el = document.getElementById(id); return el ? el.value : null; };
+    if (e.kind === 'scene') e.n = +(g('visN') || e.n);
+    if (e.kind === 'range') { e.a = +(g('visA') || e.a); e.b = +(g('visB') || e.b); }
+    if (e.kind === 'clip') e.file = (g('visFile') || e.file || '').trim();
+    if (e.kind === 'scene') return { kind: 'scene', n: e.n };
+    if (e.kind === 'range') return { kind: 'range', a: Math.min(e.a, e.b), b: Math.max(e.a, e.b) };
+    if (e.kind === 'clip') return e.file ? { kind: 'clip', file: e.file } : null;
+    return null;
+  }
+
   function setlistScreen() {
     var rows = S.songs.map(function (name, i) {
       var cur = i === S.current, pt = isPart(i);
       var sub = cur ? (S.edited ? 'Playing now, <span class="edited">edited</span>' : 'Playing now') : pt ? 'Part of ' + esc(S.songs[headOf(i)]) : 'Tap to load';
+      if (S.projector && !kud()) sub += '. Visuals: ' + esc(visText(S.visuals[i], pt));
       var inner = '';
       if (S.renameRow === i) inner = '<div class="rename"><input id="renameText" maxlength="48" value="' + esc(name) + '" aria-label="Song name"><button type="button" data-act="renameSave" data-i="' + i + '">Save</button></div>';
       else if (S.confirmDel === i) inner = '<div class="acts" style="grid-template-columns:2fr 1fr 1fr"><span class="small" style="align-self:center">Delete ' + esc(name) + '?</span><button type="button" class="del" data-act="delYes" data-i="' + i + '">Delete</button><button type="button" data-act="delNo">Keep</button></div>';
@@ -1130,7 +1219,9 @@ var KS = (function () {
         '<button type="button" data-act="up" data-i="' + i + '" aria-label="Move up">Up</button><button type="button" data-act="down" data-i="' + i + '" aria-label="Move down">Down</button>' +
         (kud() ? '' : '<button type="button" data-act="addPart" data-i="' + i + '">Add part</button>') +
         (i > 0 && !kud() ? '<button type="button" data-act="part" data-i="' + i + '">' + (pt ? 'Own song' : 'Part of above') + '</button>' : '<span></span>') +
-        '<span></span><button type="button" class="del" data-act="del" data-i="' + i + '">Delete</button></div>';
+        (kud() || !S.projector ? '<span></span>' : '<button type="button" data-act="visuals" data-i="' + i + '">Visuals</button>') +
+        '<button type="button" class="del" data-act="del" data-i="' + i + '">Delete</button></div>';
+      else if (S.visEdit && S.visEdit.i === i) inner = visEditor(i);
       return '<div class="srow' + (cur ? ' cur' : '') + (pt ? ' part' : '') + '" data-row="' + i + '"><div class="main">' +
         '<button type="button" class="grip" data-grip="' + i + '" aria-label="Drag to reorder">' + ICON.grip + '</button>' +
         '<button type="button" class="sload" data-song="' + i + '">' + (pt ? '<span class="partmark" aria-hidden="true"></span>' : flip(two(songNo(i)), cur ? 'blue' : '')) +
@@ -1163,6 +1254,7 @@ var KS = (function () {
       case 'tone': html = S.schema ? toneScreen() : playScreen(); break;
       case 'module': html = S.schema ? moduleScreen() : playScreen(); break;
       case 'setlist': html = setlistScreen(); break;
+      case 'visuals': html = visualsScreen(); break;
       case 'health': html = healthScreen(); break;
       case 'recorder': html = recorderScreen(); break;
       case 'take': html = takeScreen(); break;
@@ -1249,7 +1341,7 @@ var KS = (function () {
     if (screen === 'listen' && S.take && !S.pack) send({ t: 'listenList', take: S.take });
     if (S.screen === 'listen' && screen !== 'listen') stopListening();
     if (screen === 'health') updateCheck(false);
-    S.screen = screen; S.sel = null; sheetEl.hidden = true; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false; S.showSpaces = false;
+    S.screen = screen; S.sel = null; sheetEl.hidden = true; S.visEdit = null; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false; S.showSpaces = false;
     render();
   }
 
@@ -1284,7 +1376,7 @@ var KS = (function () {
     if (d.flip) { S.sel = S.sel === d.flip ? null : d.flip; render(true); if (!S.sel) sheetEl.hidden = true; return; }
     if (d.step) return step(+d.step);
     if (d.song) { if (send({ t: 'song', i: +d.song })) { S.current = +d.song; render(true); } return; }
-    if (d.menu) { var i = +d.menu; S.openRow = S.openRow === i ? -1 : i; S.renameRow = -1; S.confirmDel = -1; return render(); }
+    if (d.menu) { var i = +d.menu; S.visEdit = null; S.openRow = S.openRow === i ? -1 : i; S.renameRow = -1; S.confirmDel = -1; return render(); }
     if (d.capture) { send({ t: 'capture', file: d.capture }); S.showCaptures = false; return render(); }
     if (d.space) { send({ t: 'space', file: d.space }); S.showSpaces = false; return render(); }
     if (d.learn) { send({ t: 'learn', sw: +d.learn }); return; }
@@ -1332,6 +1424,17 @@ var KS = (function () {
       case 'droneClear': send({ t: 'drone', op: 'clear' }); break;
       case 'tap': send({ t: 'tap' }); break;
       case 'keeperLive': send({ t: 'keeperLive', on: t.checked }); break;
+      case 'projMode': send({ t: 'proj', op: 'mode', mode: d.mode }); break;
+      case 'projScene': send({ t: 'proj', op: 'scene', n: +d.n }); break;
+      case 'projNext': send({ t: 'proj', op: 'next' }); break;
+      case 'projSetting': send({ t: 'proj', op: 'setting', v: d.v }); break;
+      case 'visuals':
+        var cv = S.visuals[i2] || null;
+        S.visEdit = { i: i2, kind: cv ? cv.kind : 'next', n: cv && cv.n || proj().scene || 1, a: cv && cv.a || 1, b: cv && cv.b || 6, file: cv && cv.file || '' };
+        S.openRow = -1; render(); break;
+      case 'visKind': if (S.visEdit) { visRead(); S.visEdit.kind = d.k; render(); } break;
+      case 'visPreview': if (S.visEdit) { var pv = visRead(); send({ t: 'proj', op: 'apply', v: pv || { kind: 'next' } }); toast('PREVIEW'); } break;
+      case 'visSave': if (S.visEdit) { send({ t: 'visual', i: i2, v: visRead() }); S.visEdit = null; render(); } break;
       case 'add': send({ t: 'setlist', op: 'add' }); break;
       case 'save': send({ t: 'setlist', op: 'save' }); break;
       case 'rename': S.renameRow = i2; S.openRow = -1; render(); var r = document.getElementById('renameText'); if (r) { r.focus(); r.select(); } break;
