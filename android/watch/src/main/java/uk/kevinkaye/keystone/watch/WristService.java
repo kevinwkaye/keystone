@@ -73,7 +73,7 @@ public final class WristService extends Service implements SensorEventListener {
         volatile int drops;              // since the app opened
         volatile String net = "";        // which Wi-Fi, pinned or not, and Keystone's address
     }
-    static final String VERSION = "0.4.19";
+    static final String VERSION = "0.4.20";
     static final State STATE = new State();
     static volatile WristService running;
 
@@ -152,10 +152,11 @@ public final class WristService extends Service implements SensorEventListener {
 
     // ---------------------------------------------------------------- Wi-Fi
     /**
-     * Once the watch knows Keystone's network (Keystone sends it on the first connection), it
-     * asks for that network by name. Android then holds the watch on it while the app runs,
-     * instead of hopping back to a home network that has internet. The first time, the watch
-     * asks you to allow it. Until then, any Wi-Fi will do.
+     * The watch uses the Wi-Fi it's already on. Only if Keystone can't be found there for ten
+     * seconds (the watch has wandered to a home network with internet) does it ask for
+     * Keystone's network by name. Asking by name while the watch is already on Keystone's
+     * network made a second connection to it, with a different address, and the two kept
+     * taking over from each other: that was the dropouts in 0.4.19.
      */
     private void askForWifi() {
         cm = getSystemService(ConnectivityManager.class);
@@ -163,7 +164,7 @@ public final class WristService extends Service implements SensorEventListener {
         NetworkRequest.Builder b = new NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
                 .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
-        pinned = ssid != null && pass != null && pass.length() >= 8;
+        pinned = wantPin && ssid != null && pass != null && pass.length() >= 8;
         if (pinned) b.setNetworkSpecifier(new WifiNetworkSpecifier.Builder().setSsid(ssid).setWpa2Passphrase(pass).build());
         final boolean wasPinned = pinned;
         netCallback = new ConnectivityManager.NetworkCallback() {
@@ -171,7 +172,7 @@ public final class WristService extends Service implements SensorEventListener {
             @Override public void onLost(Network n) { if (n.equals(wifi)) { wifi = null; closeSocket(); } }
             @Override public void onUnavailable() {
                 // declined, or Keystone's network isn't around: fall back to any Wi-Fi
-                if (wasPinned) { unpinned = true; rerequestWifi(false); }
+                if (wasPinned) { unpinned = true; wantPin = false; rerequestWifi(false); }
             }
         };
         try {
@@ -205,11 +206,28 @@ public final class WristService extends Service implements SensorEventListener {
     }
 
     private volatile boolean pinned, unpinned;   // unpinned: this run only, it tries again next time
+    private volatile boolean wantPin;            // ask for Keystone's network by name
+    private boolean triedPin;                    // once per run, so it can't flip back and forth
+    private long missingSince;                   // when Keystone was last out of reach, or 0
 
     private void rerequestWifi(boolean pin) {
         if (netCallback != null) try { cm.unregisterNetworkCallback(netCallback); } catch (Exception ignored) { }
+        wifi = null;
+        wantPin = pin;
         if (pin) unpinned = false;
         askForWifi();
+    }
+
+    /** Keystone out of reach on this Wi-Fi: after ten seconds, ask for its network by name. */
+    private void notFound() {
+        long now = System.currentTimeMillis();
+        if (missingSince == 0) { missingSince = now; return; }
+        if (wantPin || triedPin || now - missingSince < 10000) return;
+        String ssid = prefs().getString("ssid", null), pass = prefs().getString("pass", null);
+        if (ssid == null || pass == null || pass.length() < 8) return;
+        triedPin = true;
+        missingSince = 0;
+        rerequestWifi(true);
     }
 
     private SharedPreferences prefs() { return getSharedPreferences("link", Context.MODE_PRIVATE); }
@@ -221,12 +239,14 @@ public final class WristService extends Service implements SensorEventListener {
             if (net == null) {
                 STATE.connected = false;
                 STATE.status = "Waiting for Wi-Fi. Join the Keystone network in this watch's Wi-Fi settings.";
+                notFound();
                 sleep(1000);
                 continue;
             }
             STATE.status = "Looking for Keystone";
             InetSocketAddress target = find(net);
-            if (target == null) { sleep(800); continue; }
+            if (target == null) { notFound(); sleep(800); continue; }
+            missingSince = 0;
             try {
                 Socket s = net.getSocketFactory().createSocket();
                 s.setTcpNoDelay(true);
@@ -238,7 +258,7 @@ public final class WristService extends Service implements SensorEventListener {
                 STATE.connected = true;
                 STATE.status = "Connected";
                 buzz(new long[] { 0, 30, 80, 30 });
-                STATE.net = (pinned && !unpinned ? "Keystone Wi-Fi" : "any Wi-Fi") + ", " + target.getAddress().getHostAddress();
+                STATE.net = (pinned && !unpinned ? "Keystone Wi-Fi by name" : "Wi-Fi") + ", " + target.getAddress().getHostAddress();
                 send("{\"t\":\"watchHello\",\"v\":\"" + VERSION + "\",\"net\":\"" + STATE.net + "\",\"drops\":" + STATE.drops + "}");
                 BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
                 String line;
@@ -306,9 +326,8 @@ public final class WristService extends Service implements SensorEventListener {
                 String ssid = m.optString("ssid", ""), pass = m.optString("pass", "");
                 boolean changed = !ssid.equals(prefs().getString("ssid", "")) || !pass.equals(prefs().getString("pass", ""));
                 if (!ssid.isEmpty() && pass.length() >= 8 && (changed || !pinned)) {
+                    // kept for when the watch wanders off Keystone's network; it's on it now
                     prefs().edit().putString("ssid", ssid).putString("pass", pass).apply();
-                    // pin to it from now on (only when new, so a decline isn't asked again)
-                    if (changed) rerequestWifi(true);
                 }
                 return;
             }
