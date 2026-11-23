@@ -9,6 +9,7 @@
 #include "keystone/Engine.h"
 
 #include "Analysis.h"
+#include "PebbleEyes.h"
 #include "Drone.h"
 #include "Valve.h"
 #include "Recorder.h"
@@ -2304,6 +2305,56 @@ static int renderFile (const char* inPath, const char* outPath, const std::strin
     return 0;
 }
 
+// Pebble's eyes: bank colours in Stomp mode, green and purple swapping in Song mode,
+// the tuner's red and green, and the tuner winning over everything.
+static void testPebbleEyes()
+{
+    std::printf ("\nPebble's eyes\n");
+    using namespace ks::eyes;
+    Input in;
+    in.brightness = 1.0f;
+    const Rgb bankCol[3] = { kGrit, kGroove, kGlow };
+    const char* bankName[3] = { "Grit orange", "Groove purple", "Glow blue" };
+    for (int b = 0; b < 3; ++b)
+    {
+        in.bank = b;
+        const auto e = colours (in);
+        CHECK (e[0] == bankCol[b] && e[1] == bankCol[b], "Stomp mode, %s: both eyes %s", b == 0 ? "Grit" : b == 1 ? "Groove" : "Glow", bankName[b]);
+    }
+
+    in.footMode = 1; in.bpm = 120; in.now = 0.5 * 4 + 0.3;   // well into an even beat
+    auto e = colours (in);
+    CHECK (e[0] == kSongGreen && e[1] == kSongPurple, "Song mode: left green, right purple on one beat");
+    in.now += 0.5;
+    e = colours (in);
+    CHECK (e[0] == kSongPurple && e[1] == kSongGreen, "Song mode: they swap on the next beat");
+    in.now = 0.5 * 5 + 0.03;   // just after a beat: mid fade, neither colour yet
+    e = colours (in);
+    CHECK (e[0] != kSongGreen && e[0] != kSongPurple, "Song mode: the swap fades rather than jumps");
+
+    in.tuner = true; in.noteHeard = true; in.cents = -12;
+    e = colours (in);
+    CHECK (e[0].r > 0 && e[0].g == 0 && e[1] == Rgb {}, "Tuner flat: left eye red, right eye dark (even in Song mode)");
+    in.cents = 30;
+    e = colours (in);
+    CHECK (e[1] == kOutOfTune && e[0] == Rgb {}, "Tuner sharp: right eye full red, left eye dark");
+    in.cents = -4;
+    const auto nearly = colours (in);
+    in.cents = -20;
+    const auto far = colours (in);
+    CHECK (far[0].r > nearly[0].r, "Tuner: the red eye brightens the further out (%d at 4 cents, %d at 20)", nearly[0].r, far[0].r);
+    in.cents = 1.5f;
+    e = colours (in);
+    CHECK (e[0] == kInTune && e[1] == kInTune, "Tuner within 2 cents: both eyes green");
+    in.noteHeard = false;
+    e = colours (in);
+    CHECK (e[0] == Rgb {} && e[1] == Rgb {}, "Tuner with no note: eyes dark");
+
+    in = Input {};
+    e = colours (in);
+    CHECK (e[0].r < kGrit.r && e[0].r > 0, "Brightness scales everything down for the stage (%d of 255)", e[0].r);
+}
+
 int main (int argc, char** argv)
 {
     std::setvbuf (stdout, nullptr, _IONBF, 0);   // unbuffered (Windows has no line buffering), so a crash shows where it was
@@ -2336,6 +2387,7 @@ int main (int argc, char** argv)
         testClicks();
         testSteadyDrive();
         testTuner();
+        testPebbleEyes();
         testPedalJobs();
         testBitrotPedal();
         testWatch();

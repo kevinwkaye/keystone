@@ -6,6 +6,7 @@
 // anyone with a screen. Logs go to Documents/Keystone/keystone.log.
 
 #include "AudioHost.h"
+#include "EyeLights.h"
 #include "Health.h"
 #include "Keeper.h"
 #include "LinkServer.h"
@@ -253,6 +254,9 @@ public:
         wireController();
         controller->load();
         controller->startWifi();   // Keystone's own network, if it's switched on
+#if JUCE_LINUX
+        Logger::writeToLog (eyes.open() ? "Pebble's eyes: on SPI1" : "Pebble's eyes: no /dev/spidev1.0, so no eye LEDs");
+#endif
 
         audio = std::make_unique<AudioHost> (engine, keeper);
         if (args.contains ("--list-devices")) Logger::writeToLog ("Audio devices:\n" + audio->deviceList());
@@ -321,6 +325,7 @@ public:
     void shutdown() override
     {
         stopTimer();
+        eyes.off();
         stopWifi();
         watchdog.stopThread (2000);
         link.stop();
@@ -610,6 +615,22 @@ private:
         }
         controller->tick (now);
         flush();
+        // Pebble's eyes about 50 times a second (Song mode's fade and the tuner want it smooth)
+        if (eyes.ready() && ++eyesTick >= 2)
+        {
+            eyesTick = 0;
+            const auto m = engine.meters();
+            ks::eyes::Input in;
+            in.rig = controller->rig();
+            in.footMode = controller->footMode();
+            in.bank = controller->bank();
+            in.tuner = m.tunerOn;
+            in.noteHeard = m.tunerMidi >= 0;
+            in.cents = m.tunerCents;
+            in.bpm = engine.getParam (ks::P::Tempo);
+            in.now = now;
+            eyes.show (ks::eyes::colours (in), now);
+        }
         // health once a second: the status window and the phone's Health page
         if (++healthTick >= 100)
         {
@@ -656,7 +677,8 @@ private:
     std::unique_ptr<Tray> tray;
 #endif
     std::atomic<int> learnTarget { -1 }, lastExpRaw { 0 };
-    int meterTick = 0, settingsTick = 0, heartbeatTick = 0, healthTick = 95;
+    int meterTick = 0, settingsTick = 0, heartbeatTick = 0, healthTick = 95, eyesTick = 0;
+    EyeLights eyes;   // Pebble's eye LEDs on the Pi
     double startedAt = Time::getMillisecondCounterHiRes() * 0.001;
     double lastFsTime = -1;
     String lastFsName;

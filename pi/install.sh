@@ -14,7 +14,7 @@ USER_NAME=keystone
 
 # the user Keystone runs as (separate from whoever you sign in as)
 id "$USER_NAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USER_NAME"
-for g in audio plugdev; do getent group "$g" >/dev/null && usermod -aG "$g" "$USER_NAME"; done
+for g in audio plugdev spi; do getent group "$g" >/dev/null && usermod -aG "$g" "$USER_NAME"; done
 install -d -o "$USER_NAME" -g "$USER_NAME" "/home/$USER_NAME/Documents" "/home/$USER_NAME/Documents/Keystone" "/home/$USER_NAME/Documents/Keystone/Updates"
 
 # Keystone in slot a, current pointing at it
@@ -51,6 +51,12 @@ WantedBy=multi-user.target
 EOF
 mkdir -p /etc/NetworkManager/conf.d
 printf '[connection]\nwifi.powersave = 2\n' > /etc/NetworkManager/conf.d/keystone-wifi.conf
+
+# Pebble's eyes: two WS2812 pixels on SPI1 (GPIO 20). The screen keeps SPI0.
+CFG=/boot/firmware/config.txt
+if [ -f "$CFG" ] && ! grep -q '^dtoverlay=spi1-1cs' "$CFG"; then
+    printf '\n# Keystone: the eye LEDs for Pebble\ndtoverlay=spi1-1cs\n' >> "$CFG"
+fi
 
 # enable works without a running systemd (inside the image build too)
 systemctl enable keystone-performance.service keystone-update.path keystone-wifi.path keystone.service
