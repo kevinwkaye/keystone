@@ -95,7 +95,9 @@ struct LinkServer::Client : public Thread
                 {
                     const int w = client.socket->write (utf8 + sent, len - sent);
                     if (w > 0) { sent += w; stalls = 0; continue; }
-                    if (++stalls > 200 || ! client.socket->isConnected()) { client.alive = false; break; }
+                    // a watch's Wi-Fi dozes to save battery and can take a few seconds to
+                    // drain, so give it six before calling the connection dead (was one)
+                    if (++stalls > 1200 || ! client.socket->isConnected()) { client.alive = false; break; }
                     Thread::sleep (5);
                 }
             }
@@ -108,6 +110,7 @@ struct LinkServer::Client : public Thread
     std::unique_ptr<StreamingSocket> socket;
     LinkServer& owner;
     std::atomic<bool> alive { true };
+    std::atomic<bool> watch { false };   // a watch only wants the meters
     CriticalSection queueLock;
     std::deque<String> queue;
     Writer writer;
@@ -260,11 +263,22 @@ void LinkServer::send (int client, const String& line)
     if (it != clients.end() && it->second->alive) it->second->enqueue (line, false);
 }
 
-void LinkServer::broadcast (const String& line, bool droppable)
+void LinkServer::broadcast (const String& line, bool droppable, bool toWatches)
 {
     const ScopedLock l (clientsLock);
     for (auto& [id, c] : clients)
-        if (c->alive) c->enqueue (line, droppable);
+        if (c->alive && (toWatches || ! c->watch)) c->enqueue (line, droppable);
+}
+
+void LinkServer::markWatch (int client)
+{
+    const ScopedLock l (clientsLock);
+    auto it = clients.find (client);
+    if (it == clients.end() || it->second->watch) return;
+    it->second->watch = true;
+    // drop anything phone-sized still waiting, so the watch starts on fresh meters
+    const ScopedLock q (it->second->queueLock);
+    it->second->queue.clear();
 }
 
 int LinkServer::clientCount() const

@@ -19,6 +19,7 @@ import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.RouteInfo;
+import android.net.wifi.WifiManager;
 import android.net.wifi.WifiNetworkSpecifier;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -72,13 +73,14 @@ public final class WristService extends Service implements SensorEventListener {
         volatile int drops;              // since the app opened
         volatile String net = "";        // which Wi-Fi, pinned or not, and Keystone's address
     }
-    static final String VERSION = "0.4.17";
+    static final String VERSION = "0.4.19";
     static final State STATE = new State();
     static volatile WristService running;
 
     private SensorManager sensors;
     private Vibrator vibrator;
     private PowerManager.WakeLock wake;
+    private WifiManager.WifiLock wifiLock, wifiLockLow;
     private ConnectivityManager cm;
     private ConnectivityManager.NetworkCallback netCallback;
     private volatile Network wifi;
@@ -104,6 +106,7 @@ public final class WristService extends Service implements SensorEventListener {
         PowerManager pm = getSystemService(PowerManager.class);
         wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "keystone:wrist");
         wake.acquire();
+        holdWifiAwake();
         sensors = getSystemService(SensorManager.class);
         Sensor rv = sensors.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR);
         if (rv == null) rv = sensors.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
@@ -126,6 +129,8 @@ public final class WristService extends Service implements SensorEventListener {
         closeSocket();
         if (linkThread != null) linkThread.interrupt();
         if (wake.isHeld()) wake.release();
+        if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
+        if (wifiLockLow != null && wifiLockLow.isHeld()) wifiLockLow.release();
         sensorThread.quitSafely();
         STATE.connected = false;
         super.onDestroy();
@@ -178,6 +183,25 @@ public final class WristService extends Service implements SensorEventListener {
                         .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build(), netCallback);
             }
         } catch (Exception e) { STATE.status = "Wi-Fi not allowed: " + e.getMessage(); }
+    }
+
+    /**
+     * Wear OS dozes the Wi-Fi radio between packets to save battery, so Keystone's meters
+     * arrive in bursts and its send buffer backs up until it gives up on the watch. These
+     * locks keep the radio awake while the app runs: low latency while the screen is on,
+     * high performance (the older lock, still honoured by Wear OS) with it off.
+     */
+    @SuppressWarnings("deprecation")
+    private void holdWifiAwake() {
+        try {
+            WifiManager wm = getApplicationContext().getSystemService(WifiManager.class);
+            wifiLock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "keystone:wifi");
+            wifiLock.setReferenceCounted(false);
+            wifiLock.acquire();
+            wifiLockLow = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "keystone:wifi-low");
+            wifiLockLow.setReferenceCounted(false);
+            wifiLockLow.acquire();
+        } catch (Exception e) { /* no lock: it still works, just with more drops */ }
     }
 
     private volatile boolean pinned, unpinned;   // unpinned: this run only, it tries again next time
