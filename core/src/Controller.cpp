@@ -618,6 +618,26 @@ void Controller::setValue (P p, float v, bool broadcast)
     }
 }
 
+// the sound you're playing now, as a song's values: every setting the song you're on keeps,
+// plus any the other entry keeps that yours doesn't
+std::map<std::string, float> Controller::soundNow (std::map<std::string, float> into) const
+{
+    if (! s->songs.empty())
+        for (const auto& kv : s->songs[(size_t) s->current].values) into[kv.first] = kv.second;
+    for (auto& [id, v] : into)
+    {
+        const int p = findParam (id.c_str());
+        if (p >= 0) v = engine.getParam ((P) p);
+    }
+    return into;
+}
+
+bool Controller::sameSong (int a, int b) const
+{
+    auto head = [&] (int k) { while (k > 0 && s->songs[(size_t) k].part) --k; return k; };
+    return head (a) == head (b);
+}
+
 void Controller::setlistOp (const std::string& op, int i, int to, const std::string& name)
 {
     auto& songs = s->songs;
@@ -705,6 +725,33 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     else if (op == "revert")
     {
         applySong (s->current);
+    }
+    // Play's Save sheet: what you're playing now, put somewhere other than the song you're on.
+    // Each one moves you onto where it went, and the song you started on keeps its old sound.
+    else if (op == "saveTo" && valid (i))
+    {
+        songs[(size_t) i].values = soundNow (songs[(size_t) i].values);
+        applySong (i, i != s->current && sameSong (i, s->current));
+        queueToast ("SAVED");
+    }
+    else if (op == "saveNewSong")
+    {
+        if (full (true)) return;
+        const auto nm = name.empty() ? (s->rig == 1 ? "Preset " : "Song ") + std::to_string (songsOnly() + 1) : name.substr (0, 48);
+        songs.push_back ({ nm, false, soundNow ({}) });
+        applySong (n);
+        queueToast ("SAVED");
+    }
+    else if (op == "saveNewPart" && valid (i) && s->rig == 0)
+    {
+        if (full (false)) return;
+        const int end = groupEnd (i);
+        int head = i;
+        while (head > 0 && songs[(size_t) head].part) --head;
+        const auto nm = name.empty() ? "Part " + std::to_string (end - head + 2) : name.substr (0, 48);
+        songs.insert (songs.begin() + end + 1, Song { nm, true, soundNow ({}) });
+        applySong (end + 1, true);
+        queueToast ("SAVED");
     }
     else return;
     saveSetlist();

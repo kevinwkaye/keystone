@@ -1562,6 +1562,30 @@ static void testController()
     c2.load();
     CHECK (c2.songCount() == 15 && c2.songName (0) == "Encore" && c2.isPart (1) && c2.songName (1) == "Drop" && c2.songName (2) == "New choon",
            "setlist and its parts survive a restart");
+
+    // Play's Save sheet: save over another entry, or as a new part or song
+    c.selectSong (2);
+    c.setValue (P::DlOn, 0);
+    msg (R"({"t":"setlist","op":"save"})");
+    c.setValue (P::DlOn, 1);
+    CHECK (c.edited(), "a change marks the song edited");
+    msg (R"({"t":"setlist","op":"saveTo","i":0})");
+    CHECK (c.currentSong() == 0 && c.value (P::DlOn) == 1 && ! c.edited() && c.lastToast() == "SAVED",
+           "save over another song: you move onto it with the sound you had");
+    c.selectSong (2);
+    CHECK (c.value (P::DlOn) == 0, "the song you started on keeps its old sound");
+    c.selectSong (0);
+    c.setValue (P::RvOn, 1); c.setValue (P::DriveOn, 0);
+    msg (R"({"t":"setlist","op":"saveNewPart","i":0})");
+    CHECK (c.songCount() == 16 && c.isPart (2) && c.songName (2) == "Part 3" && c.currentSong() == 2 && c.value (P::RvOn) == 1 && ! c.edited(),
+           "save as a new part: after the song's last part, named Part 3, and you're on it");
+    c.selectSong (0);
+    c.setValue (P::DriveOn, 1);
+    msg (R"({"t":"setlist","op":"saveNewSong","name":"Jam"})");
+    CHECK (c.songCount() == 17 && c.songName (16) == "Jam" && ! c.isPart (16) && c.currentSong() == 16 && c.value (P::DriveOn) == 1 && ! c.edited(),
+           "save as a new song: at the end, and you're on it");
+    msg (R"({"t":"setlist","op":"saveNewSong"})");
+    CHECK (c.songCount() == 17 && c.lastToast() == "15 songs is the limit", "no new song past fifteen");
     { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 

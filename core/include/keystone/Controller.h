@@ -164,5 +164,7 @@ private:
     std::vector<std::string> listSpaces() const;
     bool useSpace (const std::string& file, std::string& error);
     void setlistOp (const std::string& op, int i, int to, const std::string& name);
+    std::map<std::string, float> soundNow (std::map<std::string, float> into) const;   // what you're playing, as a song's values
+    bool sameSong (int a, int b) const;   // both in one song (it or its parts)
 };
 } // namespace ks

@@ -800,6 +800,7 @@ var KS = (function () {
       '<span style="display:flex;flex-direction:column;min-width:0"><span class="name">' + esc(song) + (part ? '<span class="partname">, ' + esc(part) + '</span>' : '') + '</span><span class="pos">' + (K ? 'Preset ' : 'Song ') + songNo(i) + ' of ' + n +
       (S.edited ? ', <span class="edited">edited</span>' : K ? '. Hold B for next.' : S.footMode === 1 ? '. C for next song.' : '. Hold B for next.') + '</span></span></button>' +
       '<button type="button" class="arrow" data-act="next" aria-label="Next song">' + ICON.right + '</button></div>' +
+      saveBar() +
       (K ? '' : modePanel()) +
       '<div class="card meter">' + meterSvg() + '<div class="label">Output</div></div>' +
       (K ? '' : S.footMode === 1 ? '<span class="label">Effects in this song (phone only)</span>' : bankBar()) +
@@ -1253,6 +1254,7 @@ var KS = (function () {
     if (key === lastScreenKey) window.scrollTo(0, y); else window.scrollTo(0, 0);
     lastScreenKey = key;
     if (S.sel) sheet();
+    else if (S.save) saveSheet();
     strip();
   }
 
@@ -1283,6 +1285,57 @@ var KS = (function () {
       var b2 = document.getElementById('pedalBar'); if (b2) b2.style.width = (m.bloom * 100) + '%';
     }
   }
+
+  // ---------------------------------------------------------------- save sheet
+  // Play's Save: update the song you're on, or put this sound somewhere else
+  function saveBar() {
+    if (!S.songs.length) return '';
+    return '<div class="savebar"><button type="button" class="wide savebtn' + (S.edited ? ' lit' : '') + '" data-act="saveOpen">' +
+      (S.edited ? 'SAVE CHANGES' : 'SAVE') + '</button>' +
+      (S.edited ? '<button type="button" class="wide undo" data-act="saveUndo">UNDO</button>' : '') + '</div>';
+  }
+  function saveSheet() {
+    var v = S.save; if (!v) { sheetEl.hidden = true; return; }
+    var K = kud(), i = S.current, head = headOf(i), here = labelOf(i);
+    var full = songsOnly() >= S.maxSongs || S.songs.length >= S.maxEntries, fullAll = S.songs.length >= S.maxEntries;
+    var top = function (title, backTo) {
+      return '<div class="label" style="display:flex;justify-content:space-between;align-items:center"><span>' + title + '</span>' +
+        '<button type="button" class="back" data-act="' + (backTo ? 'saveBack' : 'saveClose') + '" style="min-height:24px">' + (backTo ? 'Back' : 'Cancel') + '</button></div>';
+    };
+    var html;
+    if (v.step === 'name') {
+      var part = v.kind === 'part';
+      var def = part ? 'Part ' + (partsIn(head) + 1) : (K ? 'Preset ' : 'Song ') + (songsOnly() + 1);
+      html = top(part ? 'New part of ' + esc(S.songs[head]) : K ? 'New preset' : 'New song', true) +
+        '<input id="saveName" class="namebox" maxlength="48" placeholder="' + esc(def) + '" aria-label="Name" value="' + esc(v.name || '') + '">' +
+        '<span class="small">' + (part ? 'Goes after the last part of ' + esc(S.songs[head]) + '.' : 'Goes at the end of the setlist, as ' + (K ? 'preset ' : 'song ') + (songsOnly() + 1) + '.') +
+        ' Keystone moves you onto it, and ' + esc(here) + ' keeps its old sound.</span>' +
+        '<button type="button" class="wide blue" data-act="saveNew">SAVE</button>';
+    } else if (v.step === 'pick') {
+      html = top('Save over', true) + '<div class="picklist">' + S.songs.map(function (n, k) {
+        var pt = isPart(k), cur = k === i;
+        return '<button type="button" class="row pick' + (pt ? ' part' : '') + '" data-savepick="' + k + '"' + (cur ? ' disabled' : '') + '>' +
+          '<span><span class="t">' + (pt ? esc(n) : songNo(k) + '. ' + esc(n)) + '</span>' + (cur ? '<span class="s">Playing now</span>' : '') + '</span></button>';
+      }).join('') + '</div>';
+    } else if (v.step === 'confirm') {
+      html = top('Save over ' + esc(labelOf(v.target)) + '?', true) +
+        '<span class="small">Its old sound is replaced with what you\'re playing now. Keystone moves you onto it. Last night\'s backup still has the old one.</span>' +
+        '<div class="pair"><button type="button" class="wide" data-act="saveBack">BACK</button><button type="button" class="wide blue" data-act="saveOver">REPLACE</button></div>';
+    } else {
+      html = top('Save this sound') +
+        '<button type="button" class="wide blue big" data-act="saveHere"' + (S.edited ? '' : ' disabled') + '><span>UPDATE ' + esc(S.songs[i]).toUpperCase() + '</span>' +
+        '<span class="sub">' + (S.edited ? 'Replaces the saved sound of ' + esc(here) : esc(here) + ' hasn\'t changed') + '</span></button>' +
+        '<span class="label" style="margin-top:4px">Or save it as</span>' +
+        (K ? '' : '<button type="button" class="row" data-savekind="part"' + (fullAll ? ' disabled' : '') + '><span><span class="t">A new part of ' + esc(S.songs[head]) + '</span><span class="s">' + (fullAll ? 'The setlist is full' : 'After its last part') + '</span></span><span class="r">' + ICON.right + '</span></button>') +
+        '<button type="button" class="row" data-savekind="song"' + (full ? ' disabled' : '') + '><span><span class="t">' + (K ? 'A new preset' : 'A new song') + '</span><span class="s">' + (full ? songsOnly() + ' of ' + S.maxSongs + ', the setlist is full' : (K ? 'Preset ' : 'Song ') + (songsOnly() + 1) + ' of ' + S.maxSongs) + '</span></span><span class="r">' + ICON.right + '</span></button>' +
+        '<button type="button" class="row" data-act="savePick"><span><span class="t">' + (K ? 'Another preset' : 'Another song or part') + '</span><span class="s">Pick it from the setlist</span></span><span class="r">' + ICON.right + '</span></button>';
+    }
+    sheetEl.hidden = false;
+    sheetEl.innerHTML = html;
+    if (v.step === 'name') { var nb = document.getElementById('saveName'); if (nb && !v.typed) { v.typed = true; setTimeout(function () { nb.focus(); }, 30); } }
+  }
+  function partsIn(head) { var n = 0; for (var k = head + 1; k < S.songs.length && isPart(k); k++) n++; return n; }
+  function saveClose() { S.save = null; sheetEl.hidden = true; render(true); }
 
   // ---------------------------------------------------------------- adjuster sheet
   var sheetEl = document.getElementById('sheet');
@@ -1326,7 +1379,7 @@ var KS = (function () {
     if (screen === 'listen' && S.take && !S.pack) send({ t: 'listenList', take: S.take });
     if (S.screen === 'listen' && screen !== 'listen') stopListening();
     if (screen === 'health') updateCheck(false);
-    S.screen = screen; S.sel = null; sheetEl.hidden = true; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false; S.showSpaces = false;
+    S.screen = screen; S.sel = null; S.save = null; sheetEl.hidden = true; S.openRow = -1; S.renameRow = -1; S.confirmDel = -1; S.showCaptures = false; S.showSpaces = false;
     render();
   }
 
@@ -1366,8 +1419,20 @@ var KS = (function () {
     if (d.space) { send({ t: 'space', file: d.space }); S.showSpaces = false; return render(); }
     if (d.learn) { send({ t: 'learn', sw: +d.learn }); return; }
     if (d.cal) { send({ t: 'calibrate', step: +d.cal }); return; }
+    if (d.savekind) { S.save = { step: 'name', kind: d.savekind }; return saveSheet(); }
+    if (d.savepick) { S.save = { step: 'confirm', target: +d.savepick }; return saveSheet(); }
     var i2 = d.i != null ? +d.i : -1;
     switch (d.act) {
+      case 'saveOpen': S.sel = null; S.save = { step: 'menu' }; saveSheet(); break;
+      case 'saveClose': saveClose(); break;
+      case 'saveBack': S.save = { step: S.save && S.save.step === 'confirm' ? 'pick' : 'menu' }; saveSheet(); break;
+      case 'savePick': S.save = { step: 'pick' }; saveSheet(); break;
+      case 'saveHere': send({ t: 'setlist', op: 'save' }); saveClose(); break;
+      case 'saveUndo': send({ t: 'setlist', op: 'revert' }); break;
+      case 'saveOver': send({ t: 'setlist', op: 'saveTo', i: S.save.target }); saveClose(); break;
+      case 'saveNew':
+        var nm = (document.getElementById('saveName') || {}).value || '';
+        send({ t: 'setlist', op: S.save.kind === 'part' ? 'saveNewPart' : 'saveNewSong', i: S.current, name: nm.trim() }); saveClose(); break;
       case 'keep': send({ t: 'keep' }); break;
       case 'updateCheck': updateCheck(true); render(true); break;
       case 'updateFirmware':
@@ -1537,6 +1602,7 @@ var KS = (function () {
   // Android back button: step back through the screens, false when already on Play
   function back() {
     if (S.sel) { S.sel = null; sheetEl.hidden = true; render(true); return true; }
+    if (S.save) { saveClose(); return true; }
     if (S.screen === 'module') { go('tone'); return true; }
     if (S.screen === 'listen') { go('take'); return true; }
     if (S.screen === 'take') { go('recorder'); return true; }

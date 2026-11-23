@@ -87,7 +87,15 @@ window.KSDemo = (function () {
         if (taps.length > 1) { var bpm = Math.round(600000 / ((now - taps[0]) / (taps.length - 1))) / 10; set('tempo.bpm', Math.max(40, Math.min(240, bpm))); }
         break;
       case 'setlist':
-        if (m.op === 'save' || m.op === 'revert') { st.edited = false; reply(state()); toast(m.op === 'save' ? 'SAVED' : 'REVERTED'); }
+        if (m.op === 'saveTo' && st.songs[m.i] != null) { st.current = m.i; st.edited = false; reply(state()); toast('SAVED'); }
+        else if (m.op === 'saveNewPart' || m.op === 'saveNewSong') { m.part = m.op === 'saveNewPart';
+          var at = st.songs.length, nm = m.name;
+          if (m.part) { var h = m.i; while (h > 0 && st.parts[h]) h--; at = h + 1; while (at < st.songs.length && st.parts[at]) at++;
+            if (!nm) nm = 'Part ' + (at - h + 1); }
+          else if (!nm) nm = 'Song ' + (st.parts.filter(function (x) { return !x; }).length + 1);
+          st.songs.splice(at, 0, nm); st.parts.splice(at, 0, !!m.part); st.current = at; st.edited = false; reply(state()); toast('SAVED');
+        }
+        else if (m.op === 'save' || m.op === 'revert') { st.edited = false; reply(state()); toast(m.op === 'save' ? 'SAVED' : 'REVERTED'); }
         else if (m.op === 'rename' && st.songs[m.i] != null) { st.songs[m.i] = m.name; reply(state()); }
         else toast('DEMO: NEEDS KEYSTONE');
         break;
