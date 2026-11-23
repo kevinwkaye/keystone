@@ -440,11 +440,86 @@ var KS = (function () {
     var u = S.upd;
     if (m.t === 'latest') { u.latest = m.version; u.assets = m.assets || []; u.checkedAt = Date.now(); u.checking = false; }
     else if (m.t === 'progress') { u.busy = m; u.err = null; }
+    else if (m.t === 'error' && m.what === 'watch') {
+      u.busy = null; S.watchErr = m;
+      if (m.kind === 'pair') { watchSetPaired(false); S.watchErr = null; S.watchAfterPair = true; go('pairWatch'); return; }
+    }
     else if (m.t === 'error') { u.busy = null; u.checking = false; u.err = m; }
-    else if (m.t === 'done') { u.busy = null; u.msg = 'Installing ' + m.version + '. Keystone restarts by itself in about a minute, and goes back to the old version if the new one doesn\'t start.'; }
-    if (S.screen === 'health') render(true);
+    else if (m.t === 'paired') {
+      u.busy = null; S.watchErr = null; watchSetPaired(true); S.pairCode = '';
+      go('health');
+      if (S.watchAfterPair) { S.watchAfterPair = false; startWatchUpdate(); }
+      return;
+    }
+    else if (m.t === 'done' && m.what === 'watch') { u.busy = null; S.watchErr = null; S.watchDone = m.version; S.watchV = m.version; }
+    else if (m.t === 'done') {
+      u.busy = null; u.msg = 'Installing ' + m.version + '. Keystone restarts by itself in about a minute, and goes back to the old version if the new one doesn\'t start.';
+      // the watch too, if it's behind and that's switched on
+      if (watchAuto() && watchNew()) setTimeout(function () { startWatchUpdate(); }, 300);
+    }
+    if (S.screen === 'health' || S.screen === 'pairWatch') render(true);
   }
   function asset(re) { for (var i = 0; i < S.upd.assets.length; i++) if (re.test(S.upd.assets[i].name)) return S.upd.assets[i]; return null; }
+
+  // ---- Update watch: the phone installs the watch app over the watch's wireless debugging
+  var PHONE_APK = /^Keystone-[\d.]+\.apk$/, WATCH_APK = /^Keystone-Watch-[\d.]+\.apk$/;
+  function canWatch() { return !!(window.KeystoneNative && KeystoneNative.watchUpdate); }
+  function watchInfo() {   // remembered, so the watch can still be updated while Keystone restarts
+    var w = S.health && S.health.watch;
+    if (w && w.on) { S.watchIp = w.ip; if (!S.watchDone || newer(w.v, S.watchDone) || w.v === S.watchDone) S.watchV = w.v; }
+    return { v: S.watchV || '', ip: S.watchIp || '' };
+  }
+  function watchNew() { var u = S.upd, wi = watchInfo(); return !!(u.latest && wi.v && newer(u.latest, wi.v) && asset(WATCH_APK)); }
+  function watchAuto() { try { return localStorage.getItem('ks.watchAuto') !== '0'; } catch (e) { return true; } }
+  function watchPaired() { try { return KeystoneNative.watchPaired(); } catch (e) { return false; } }
+  function watchSetPaired(on) { try { KeystoneNative.watchSetPaired(on); } catch (e) { } }
+  function startWatchUpdate(manual) {
+    var wa = asset(WATCH_APK), wi = watchInfo();
+    if (!wa || !canWatch() || S.upd.busy) return;
+    if (!watchPaired()) { S.watchAfterPair = true; go('pairWatch'); return; }
+    S.watchErr = null; S.watchDone = ''; S.upd.err = null;
+    S.upd.busy = { what: 'watch', stage: 'Downloading', pct: 0 };
+    KeystoneNative.watchUpdate(wa.url, wa.size, S.upd.latest, wi.ip, manual || '');
+    render(true);
+  }
+  function watchCards() {
+    if (!canWatch()) return '';
+    var wi = watchInfo(), e = S.watchErr, out = '';
+    if (e && e.kind !== 'code' && e.kind !== 'nopair') {
+      var off = e.kind === 'off';
+      out += '<section class="card" style="gap:12px;border:2px solid #F0997B"><span style="font-size:19px;font-weight:700;color:#F0997B">' + (off ? 'Can\'t reach the watch' : 'The watch didn\'t update') + '</span>' +
+        (off ? '<span class="small" style="font-size:15px">Wireless debugging is off, or the watch isn\'t on Keystone\'s Wi-Fi. The watch turns wireless debugging off when it restarts.</span>' +
+          '<ol style="margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px;font-size:17px;line-height:1.3"><li>On the watch: Settings, Developer options</li><li>Turn <b>Wireless debugging</b> on</li><li>Open the Keystone app on the watch</li></ol>'
+          : '<span class="small" style="font-size:15px">' + esc(e.why) + '</span>') +
+        '<button type="button" class="wide go" style="margin-top:0" data-act="updateWatch">Try again</button>' +
+        (off ? '<details><summary class="small" style="min-height:44px;display:flex;align-items:center">Type the address instead</summary><div class="note" style="margin-top:6px"><input id="watchAddr" type="text" inputmode="url" placeholder="IP address and port, as the watch shows" aria-label="Watch address and port"><button type="button" data-act="updateWatchTyped">Go</button></div>' +
+          '<span class="small" style="font-size:13px">Wireless debugging on the watch shows it, like 192.168.137.110:41235.</span></details>' : '') +
+        '<span class="small" style="font-size:14px;color:#8A847A">Bugjaeger still works as a backup.</span></section>';
+    }
+    if (S.watchDone && !S.upd.busy) out += '<section class="card" style="gap:8px;border:2px solid #5DCAA5"><span style="font-size:17px;font-weight:700;color:#5DCAA5">Watch updated to ' + esc(S.watchDone) + '</span><span class="small">The watch app opens again by itself and reconnects.</span></section>';
+    if (!wi.v) return out;
+    var auto = watchAuto();
+    return out + '<section class="card" style="gap:10px"><h2 class="label">Watch</h2>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:48px"><span style="font-size:17px">Update the watch with Update firmware</span>' +
+      '<button type="button" class="pill' + (auto ? ' lit' : '') + '" data-act="watchAuto">' + (auto ? 'ON' : 'OFF') + '</button></div>' +
+      '<span class="small" style="color:#8A847A">' + (auto ? 'On: one tap on Update firmware does the laptop, then the watch.' : 'Off: update the watch with its own button.') + '</span>' +
+      (watchPaired() ? '<button type="button" class="back" data-act="watchUnpair" style="min-height:44px;font-size:14px;align-self:flex-start">Pair the watch again</button>' : '') + '</section>';
+  }
+  function pairWatchScreen() {
+    var b = S.upd.busy, e = S.watchErr, code = S.pairCode || '';
+    var tiles = '';
+    for (var i = 0; i < 6; i++) tiles += '<span class="flip' + (i === code.length ? ' blue' : '') + '" style="width:46px;height:66px;font-size:38px">' + esc(code.charAt(i)) + '</span>';
+    return '<section class="screen" style="gap:16px">' + header('Pair watch', { id: 'health', label: 'Rig' }) +
+      '<section class="card" style="gap:12px"><h2 class="label">On the watch</h2><ol style="margin:0;padding-left:22px;display:flex;flex-direction:column;gap:10px;font-size:17px;line-height:1.3">' +
+      '<li>Settings, Developer options, <b>Wireless debugging</b>: turn it on</li><li>Tap <b>Pair new device</b></li><li>Type the six numbers it shows</li></ol></section>' +
+      '<section class="card" style="gap:14px;align-items:center"><label for="pairCode" class="label">Pairing code</label>' +
+      '<div style="position:relative;display:flex;gap:8px">' + tiles +
+      '<input id="pairCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" value="' + esc(code) + '" aria-label="Six-digit pairing code" style="position:absolute;inset:0;opacity:0;width:100%;height:100%;font-size:16px"></div>' +
+      (b ? '<span class="small" style="color:#5DCAA5">' + esc(b.stage) + '</span>' : e && (e.kind === 'code' || e.kind === 'nopair') ? '<span class="small" style="color:#F0997B">' + esc(e.why) + '</span>' : '<span class="small">Tap the boxes to type</span>') + '</section>' +
+      '<button type="button" class="wide blue" data-act="pairWatch"' + (code.length === 6 && !b ? '' : ' disabled') + '>Pair</button>' +
+      '<details><summary class="small" style="min-height:44px;display:flex;align-items:center">The phone can\'t find the watch? Type its address</summary><div class="note" style="margin-top:6px"><input id="pairAddr" type="text" inputmode="url" placeholder="IP address and port under the code" aria-label="Pairing address and port"></div></details>' +
+      '<span class="small">You only do this once. The phone finds the watch by itself, so normally there\'s nothing else to type.</span></section>';
+  }
   function rigDevice() { return S.health && S.health.device === 'pi' ? 'pi' : 'laptop'; }
   // Buffer: one tap finds the smallest size this laptop plays without dropouts
   function bufferCard() {
@@ -483,7 +558,7 @@ var KS = (function () {
     var u = S.upd, h = S.health, rigV = h ? h.version : '', phoneV = phoneVersion();
     if (!window.KeystoneNative || !KeystoneNative.updateCheck) return '';
     var dev = rigDevice(), devName = dev === 'pi' ? 'Pi' : 'Laptop';
-    var fwAsset = asset(dev === 'pi' ? /linux-arm64\.tar\.gz$/ : /-Setup\.exe$/), apk = asset(/\.apk$/);
+    var fwAsset = asset(dev === 'pi' ? /linux-arm64\.tar\.gz$/ : /-Setup\.exe$/), apk = asset(PHONE_APK), wi = watchInfo();
     var fwNew = u.latest && rigV && newer(u.latest, rigV) && fwAsset, appNew = u.latest && phoneV && newer(u.latest, phoneV) && apk;
     function row(name, now, isNew, act, label) {
       var st = !u.latest ? (u.checking ? 'Checking' : '') : isNew ? u.latest + ' is out' : 'Up to date';
@@ -491,10 +566,11 @@ var KS = (function () {
         '<span class="small" style="font-size:13px">' + esc(now) + (st ? ', <span style="color:' + (isNew ? '#5DCAA5' : '#8A847A') + '">' + st + '</span>' : '') + '</span></span>' +
         (isNew ? '<button type="button" class="ubtn" data-act="' + act + '"' + (u.busy ? ' disabled' : '') + '>' + label + '</button>' : '') + '</div>';
     }
-    var busy = u.busy ? '<div class="small">' + esc(u.busy.stage) + (u.busy.what === 'app' ? ' the phone app' : '') + ', ' + u.busy.pct + '%</div><div class="bar" style="height:8px"><div style="width:' + u.busy.pct + '%;background:#5DCAA5;height:8px"></div></div>' : '';
+    var busy = u.busy ? '<div class="small">' + esc(u.busy.stage) + (u.busy.what === 'app' ? ' the phone app' : u.busy.what === 'watch' && u.busy.stage === 'Downloading' ? ' the watch app' : '') + ', ' + u.busy.pct + '%</div><div class="bar" style="height:8px"><div style="width:' + u.busy.pct + '%;background:#5DCAA5;height:8px"></div></div>' : '';
     return '<section class="card" style="gap:6px"><div style="display:flex;justify-content:space-between;align-items:center"><h2 class="label">Updates</h2>' +
       '<button type="button" class="back" data-act="updateCheck" style="min-height:32px;font-size:14px">' + (u.checking ? 'Checking' : 'Check again') + '</button></div>' +
       (connected() && h ? row(devName, 'Keystone ' + rigV, fwNew, 'updateFirmware', 'Update firmware') : '') +
+      (canWatch() && wi.v ? row('Watch', 'App ' + wi.v, watchNew(), 'updateWatch', 'Update watch') : '') +
       row('This phone', 'App ' + (phoneV || '?'), appNew, 'updateApp', 'Update app') + busy +
       (u.err ? '<div class="small" style="color:#F0997B">' + esc(u.err.why) + '</div>' : '') +
       (u.msg && !u.busy ? '<div class="small" style="color:#5DCAA5">' + esc(u.msg) + '</div>' : '') + '</section>';
@@ -562,7 +638,7 @@ var KS = (function () {
       bufferCard() +
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
       wifiCard() +
-      updateCard() +
+      updateCard() + watchCards() +
       '<button type="button" class="wide" data-go="recorder">Recorder' + (rec().on ? ': recording ' + clock(rec().s) : on('rec.on') ? ': ready' : ': off') + '</button>' +
       '<div class="small">If something goes wrong on stage, a warning strip appears across the top of Play. Tap it to come here.</div>' +
       nav('health') + '</section>';
@@ -1153,7 +1229,7 @@ var KS = (function () {
   var app = document.getElementById('app');
   var lastScreenKey = '';
   function render(soft) {
-    if (!S.schema && S.screen !== 'play' && S.screen !== 'health') S.screen = 'play';
+    if (!S.schema && S.screen !== 'play' && S.screen !== 'health' && S.screen !== 'pairWatch') S.screen = 'play';
     var active = document.activeElement;
     if (soft && active && active.tagName === 'INPUT' && active.type === 'text') return;   // don't wipe typing
     if (soft && S.dragging) return;
@@ -1164,6 +1240,7 @@ var KS = (function () {
       case 'module': html = S.schema ? moduleScreen() : playScreen(); break;
       case 'setlist': html = setlistScreen(); break;
       case 'health': html = healthScreen(); break;
+      case 'pairWatch': html = pairWatchScreen(); break;
       case 'recorder': html = recorderScreen(); break;
       case 'take': html = takeScreen(); break;
       case 'listen': html = listenScreen(); break;
@@ -1298,8 +1375,20 @@ var KS = (function () {
         if (fa && connected()) { S.upd.msg = ''; S.upd.err = null; S.upd.busy = { what: 'firmware', stage: 'Downloading', pct: 0 }; KeystoneNative.updateFirmware(fa.url, fa.name, fa.size, fa.digest || '', S.upd.latest); render(true); }
         break;
       case 'updateApp':
-        var ap = asset(/\.apk$/);
+        var ap = asset(PHONE_APK);
         if (ap) { S.upd.err = null; S.upd.busy = { what: 'app', stage: 'Downloading', pct: 0 }; KeystoneNative.updateApp(ap.url, ap.size); render(true); }
+        break;
+      case 'updateWatch': startWatchUpdate(); break;
+      case 'updateWatchTyped': var wa2 = document.getElementById('watchAddr'); startWatchUpdate(wa2 ? wa2.value : ''); break;
+      case 'watchAuto': try { localStorage.setItem('ks.watchAuto', watchAuto() ? '0' : '1'); } catch (e) { } render(true); break;
+      case 'watchUnpair': watchSetPaired(false); S.watchAfterPair = false; go('pairWatch'); break;
+      case 'pairWatch':
+        var pa = document.getElementById('pairAddr');
+        if ((S.pairCode || '').length === 6 && !S.upd.busy) {
+          S.watchErr = null; S.upd.busy = { what: 'watch', stage: 'Looking for the watch', pct: 0 };
+          KeystoneNative.watchPair(S.pairCode, watchInfo().ip, pa ? pa.value : '');
+          render(true);
+        }
         break;
       case 'makePack':
         if (send({ t: 'listen', take: S.take, from: S.pickFrom || 0, secs: 30 })) { S.making = true; S.pack = null; render(true); }
@@ -1356,6 +1445,13 @@ var KS = (function () {
 
   document.addEventListener('input', function (e) {
     var t = e.target;
+    if (t.id === 'pairCode') {
+      S.pairCode = t.value.replace(/\D/g, '').slice(0, 6);
+      var tl = t.parentNode.querySelectorAll('.flip');
+      for (var k = 0; k < tl.length; k++) { tl[k].textContent = S.pairCode.charAt(k); tl[k].classList.toggle('blue', k === S.pairCode.length); }
+      var pb = document.querySelector('[data-act="pairWatch"]'); if (pb) pb.disabled = S.pairCode.length !== 6 || !!S.upd.busy;
+      return;
+    }
     if (t.dataset && t.dataset.range) {
       var p = S.params[t.dataset.range];
       var v = fromPos(p, t.value / 1000), st = stepOf(p);

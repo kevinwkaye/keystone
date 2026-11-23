@@ -242,3 +242,7 @@ nav.nav button.rigbtn.on { background: var(--flip); }
 .wifirow { display: flex; justify-content: space-between; align-items: baseline; font-size: 17px; }
 .wifirow .lab { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 .wifirow .pw { font-family: monospace; letter-spacing: 0.08em; font-size: 18px; }
+
+/* Update watch */
+.wide[disabled] { opacity: 0.4; }
+#pairCode { caret-color: transparent; }

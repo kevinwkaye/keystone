@@ -73,7 +73,7 @@ public final class WristService extends Service implements SensorEventListener {
         volatile int drops;              // since the app opened
         volatile String net = "";        // which Wi-Fi, pinned or not, and Keystone's address
     }
-    static final String VERSION = "0.4.20";
+    static final String VERSION = "0.4.21";
     static final State STATE = new State();
     static volatile WristService running;
 

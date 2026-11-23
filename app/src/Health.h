@@ -32,6 +32,7 @@ struct Health
 
     int phones = 0;
     juce::String phoneAddresses, laptopAddresses;
+    juce::String watchVersion, watchAddress;   // empty: no watch connected
 
     juce::String toJson() const
     {
@@ -57,6 +58,7 @@ struct Health
         o->setProperty ("out", obj ({ { "db", juce::roundToInt (outDb) }, { "lim", limDb } }));
         o->setProperty ("laptop", obj ({ { "cpu", juce::roundToInt (cpu * 100) }, { "dropouts", dropouts }, { "recent", dropoutsRecent }, { "light", light } }));
         o->setProperty ("link", obj ({ { "phones", phones }, { "laptop", laptopAddresses } }));
+        o->setProperty ("watch", obj ({ { "on", watchVersion.isNotEmpty() }, { "v", watchVersion }, { "ip", watchAddress } }));
         return juce::JSON::toString (juce::var (o), true);
     }
 };

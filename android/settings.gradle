@@ -10,6 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // the phone's Update watch: libadb-android and its helpers are published there
+        maven { url 'https://jitpack.io' }
     }
 }
 rootProject.name = "Keystone"

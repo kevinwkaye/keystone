@@ -32,7 +32,10 @@ public:
     // toWatches: whether a watch gets it too. Watches only get the meters, never the
     // phone's state, setlist and health, which a dozing watch radio can't keep up with.
     void broadcast (const juce::String& line, bool droppable = false, bool toWatches = false);
-    void markWatch (int client);
+    void markWatch (int client, const juce::String& version);
+    // the watch now connected (empty when none): its app version and address, for the
+    // phone's Update watch
+    juce::String watchVersion() const, watchAddress() const;
     int clientCount() const;
     juce::String addresses() const;
     juce::StringArray clientAddresses() const;
@@ -48,5 +51,6 @@ private:
     std::unique_ptr<Discovery> discovery;
     std::map<int, std::shared_ptr<Client>> clients;
     mutable juce::CriticalSection clientsLock;
+    juce::String lastWatchVersion;
     int nextId = 1;
 };

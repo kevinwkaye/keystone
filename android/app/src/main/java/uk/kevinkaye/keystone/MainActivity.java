@@ -240,5 +240,17 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void updateApp(String url, double size) { updater.app(url, (long) size); }
+
+        @JavascriptInterface
+        public void watchPair(String code, String host, String manual) { updater.pairWatch(code, host, manual); }
+
+        @JavascriptInterface
+        public void watchUpdate(String url, double size, String version, String host, String manual) { updater.watch(url, (long) size, version, host, manual); }
+
+        @JavascriptInterface
+        public boolean watchPaired() { return getSharedPreferences("watch", MODE_PRIVATE).getBoolean("paired", false); }
+
+        @JavascriptInterface
+        public void watchSetPaired(boolean on) { getSharedPreferences("watch", MODE_PRIVATE).edit().putBoolean("paired", on).apply(); }
     }
 }

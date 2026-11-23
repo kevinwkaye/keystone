@@ -270,9 +270,10 @@ void LinkServer::broadcast (const String& line, bool droppable, bool toWatches)
         if (c->alive && (toWatches || ! c->watch)) c->enqueue (line, droppable);
 }
 
-void LinkServer::markWatch (int client)
+void LinkServer::markWatch (int client, const String& version)
 {
     const ScopedLock l (clientsLock);
+    if (version.isNotEmpty()) lastWatchVersion = version;
     auto it = clients.find (client);
     if (it == clients.end() || it->second->watch) return;
     it->second->watch = true;
@@ -287,6 +288,20 @@ int LinkServer::clientCount() const
     int n = 0;
     for (auto& [id, c] : clients) n += c->alive ? 1 : 0;
     return n;
+}
+
+String LinkServer::watchVersion() const
+{
+    const ScopedLock l (clientsLock);
+    for (auto& [id, c] : clients) if (c->alive && c->watch) return lastWatchVersion;
+    return {};
+}
+
+String LinkServer::watchAddress() const
+{
+    const ScopedLock l (clientsLock);
+    for (auto& [id, c] : clients) if (c->alive && c->watch) return c->from;
+    return {};
 }
 
 StringArray LinkServer::clientAddresses() const

@@ -290,7 +290,7 @@ public:
         {
             try
             {
-                if (line.contains ("\"watchHello\"")) link.markWatch (client);
+                if (line.contains ("\"watchHello\"")) link.markWatch (client, JSON::parse (line).getProperty ("v", var()).toString());
                 controller->handleMessage (line.toStdString(), [this, client] (const std::string& r) { link.send (client, String::fromUTF8 (r.c_str())); });
                 flush();
             }
@@ -555,6 +555,8 @@ public:
         h.phones = link.clientCount();
         h.phoneAddresses = link.clientAddresses().joinIntoString (", ");
         h.laptopAddresses = link.addresses();
+        h.watchVersion = link.watchVersion();
+        h.watchAddress = link.watchAddress();
         return h;
     }
 

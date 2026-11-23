@@ -10,8 +10,8 @@ android {
         applicationId 'uk.kevinkaye.keystone'
         minSdk 26
         targetSdk 34
-        versionCode 42
-        versionName '0.4.20'
+        versionCode 43
+        versionName '0.4.21'
     }
 
     // One fixed key, kept in the repo, so each new APK installs over the last one.
@@ -39,8 +39,20 @@ android {
         buildConfig true
     }
 
+    packaging {
+        resources { excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF', 'META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*'] }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    // Update watch: the watch's wireless debugging, as Bugjaeger uses it
+    implementation 'com.github.MuntashirAkon:libadb-android:3.1.1'
+    implementation 'com.github.MuntashirAkon:sun-security-android:1.1'
+    implementation 'org.conscrypt:conscrypt-android:2.5.3'
+    implementation 'androidx.annotation:annotation:1.9.1'
 }

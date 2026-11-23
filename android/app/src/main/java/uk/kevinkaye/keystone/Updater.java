@@ -21,6 +21,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -210,6 +211,83 @@ final class Updater {
                 busy = false;
             }
         }, "app update").start();
+    }
+
+    // ---------------------------------------------------------------- the watch
+    // Over the watch's wireless debugging, like Bugjaeger. host: the watch's address as
+    // Keystone sees it. manual: "address:port" typed from the watch's screen, when the phone
+    // can't find the watch's services by itself.
+
+    void pairWatch(String code, String host, String manual) {
+        if (busy) return;
+        busy = true;
+        new Thread(() -> {
+            try {
+                progress("watch", "Looking for the watch", 0);
+                InetSocketAddress at = typed(manual);
+                if (at == null) at = WatchAdb.find(ctx, WatchAdb.PAIRING, host, 15000);
+                if (at == null) { post(errWatch("Couldn't find the watch's pairing screen. Keep Pair new device open on the watch and try again, or type the address it shows", "nopair")); return; }
+                progress("watch", "Pairing", 50);
+                boolean ok = WatchAdb.get(ctx).pair(at.getAddress().getHostAddress(), at.getPort(), code.trim());
+                if (!ok) { post(errWatch("The watch didn't accept that code. Check the six numbers and try again", "code")); return; }
+                post(new JSONObject().put("t", "paired"));
+            } catch (Exception e) {
+                post(errWatch("Pairing stopped: " + e.getMessage(), "code"));
+            } finally {
+                busy = false;
+            }
+        }, "watch pair").start();
+    }
+
+    void watch(String url, long size, String version, String host, String manual) {
+        if (busy) return;
+        busy = true;
+        new Thread(() -> {
+            WatchAdb adb = null;
+            try {
+                File f = download(url, "Keystone-Watch.apk", size, "watch");
+                if (f == null) return;
+                progress("watch", "Looking for the watch", 0);
+                InetSocketAddress at = typed(manual);
+                if (at == null) at = WatchAdb.find(ctx, WatchAdb.CONNECT, host, 10000);
+                if (at == null) { post(errWatch("Can't reach the watch", "off")); return; }
+                adb = WatchAdb.get(ctx);
+                try { adb.disconnect(); } catch (Exception ignored) { }
+                try {
+                    adb.connect(at.getAddress().getHostAddress(), at.getPort());
+                } catch (io.github.muntashirakon.adb.AdbPairingRequiredException e) {
+                    post(errWatch("The watch needs pairing first", "pair"));
+                    return;
+                }
+                if (!adb.isConnected()) { post(errWatch("The watch said no. Pair it again", "pair")); return; }
+                final WatchAdb a = adb;
+                String why = a.install(f, pct -> progress("watch", "Sending to the watch", pct));
+                if (why != null) { post(errWatch("The install didn't work, so the old watch app is still there. The watch said: " + why, "failed")); return; }
+                a.openWatchApp();
+                f.delete();
+                post(new JSONObject().put("t", "done").put("what", "watch").put("version", version));
+            } catch (Exception e) {
+                post(errWatch("Update stopped: " + e.getMessage(), "failed"));
+            } finally {
+                if (adb != null) try { adb.disconnect(); } catch (Exception ignored) { }
+                busy = false;
+            }
+        }, "watch update").start();
+    }
+
+    private static InetSocketAddress typed(String manual) {
+        if (manual == null) return null;
+        String m = manual.trim();
+        int colon = m.lastIndexOf(':');
+        if (colon <= 0) return null;
+        try { return new InetSocketAddress(m.substring(0, colon), Integer.parseInt(m.substring(colon + 1).trim())); }
+        catch (Exception e) { return null; }
+    }
+
+    private static JSONObject errWatch(String why, String kind) {
+        JSONObject o = err("watch", why);
+        try { o.put("kind", kind); } catch (Exception ignored) { }
+        return o;
     }
 
     /** Android's answer to the install: usually "ask the user first". */
