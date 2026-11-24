@@ -248,13 +248,22 @@ public:
             else if (args[i] == "--buffer" && i + 1 < args.size()) wantBuffer = args[++i].getIntValue();
         }
 
+        // Kaleidoscope: the pedals installed beside Keystone, and any you drop in Documents\Keystone\Pedals
+        rack = std::make_unique<PedalRack>();
+        {
+            const auto mine = home.getChildFile ("Pedals");
+            mine.createDirectory();
+            Array<File> dirs { mine, File::getSpecialLocation (File::currentExecutableFile).getSiblingFile ("Pedals") };
+            rack->setFolders (dirs, mine.getChildFile ("Settings"));
+            Logger::writeToLog ("Kaleidoscope: " + String ((int) rack->installed().size()) + " pedals installed");
+        }
         pedals.load();
         controller = std::make_unique<ks::Controller> (engine, home.getFullPathName().toStdString(), captures.getFullPathName().toStdString());
         wireController();
         controller->load();
         controller->startWifi();   // Keystone's own network, if it's switched on
 
-        audio = std::make_unique<AudioHost> (engine, keeper);
+        audio = std::make_unique<AudioHost> (engine, keeper, rack.get());
         if (args.contains ("--list-devices")) Logger::writeToLog ("Audio devices:\n" + audio->deviceList());
         audio->onBufferStepLearnt = [this] (int step)
         {
@@ -325,6 +334,7 @@ public:
         watchdog.stopThread (2000);
         link.stop();
         if (audio) audio->stop();
+        if (rack) rack->shutdown();   // keeps the pedal's settings for next time
         if (housekeeping) housekeeping->stopThread (2000);
         midi.reset();
 #if KEYSTONE_TRAY
@@ -332,6 +342,7 @@ public:
         tray.reset();
 #endif
         audio.reset();
+        rack.reset();
         controller.reset();
         theApp = nullptr;
         Logger::writeToLog ("Keystone stopped");
@@ -368,6 +379,14 @@ public:
             return;
         }
 
+        // Kaleidoscope with a pedal loaded: the footswitch and expression belong to the pedal,
+        // exactly as if Ableton were sending it the MIDI
+        if (rack && rack->takesPedals())
+        {
+            rack->pushMidi (m);
+            if (cc == pedals.expCC && cc < 128) lastExpRaw.store (val);   // calibration still sees it
+            return;
+        }
         // Expression, after heel and toe calibration: the job of the bank in use (dirt, wah or
         // volume, Bloom), with soft takeover in the engine
         if (cc == pedals.expCC && cc < 128)
@@ -448,6 +467,21 @@ private:
             else { pedals.heel = 0; pedals.toe = 127; pedals.reversed = false; pedals.resetFootswitches(); pedals.expCC = 11; controller->notify ("PEDALS RESET"); }
             pedals.save();
         };
+        // Kaleidoscope
+        controller->kalInstalled = [this] { return rack ? rack->installed() : std::vector<std::string>(); };
+        controller->onKalLoad = [this] (const std::string& id, std::string& error)
+        {
+            if (! rack) { error = "No pedals here"; return false; }
+            const bool ok = rack->load (id, error);
+            Logger::writeToLog ("Kaleidoscope: " + (id.empty() ? String ("pedal put away") : (ok ? "loaded " : "couldn't load ") + String (id)
+                                + (ok ? String() : ": " + String (error))));
+            return ok;
+        };
+        controller->kalParams = [this] { return rack ? rack->paramsJson() : std::string ("[]"); };
+        controller->onKalSet = [this] (int i, float v) { if (rack) rack->setParam (i, v); };
+        controller->onKalMode = [this] (bool on) { if (rack) rack->setMode (on); };
+        rack->onChanged = [this] (const std::string& c) { controller->kalChanged (c); flush(); };
+        rack->onLost = [this] (const std::string& why) { controller->kalLost (why); flush(); };
         controller->footswitchStatus = [this] { return midi ? midi->status().toStdString() : std::string(); };
         controller->audioStatus = [this] { return audio ? audio->status().toStdString() : std::string(); };
         // Keystone's own Wi-Fi. Laptop: a hidden PowerShell runs it for as long as Keystone
@@ -650,6 +684,7 @@ private:
     PedalSettings pedals;
     std::unique_ptr<ks::Controller> controller;
     std::unique_ptr<ChildProcess> wifiProcess;   // the laptop's own network (Tools\Keystone Wi-Fi.ps1)
+    std::unique_ptr<PedalRack> rack;   // Kaleidoscope's pedal (declared before the audio, so it outlives it)
     std::unique_ptr<AudioHost> audio;
     std::unique_ptr<DirectMidiInput> midi;
     std::unique_ptr<Housekeeping> housekeeping;

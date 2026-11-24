@@ -47,6 +47,10 @@ Source: "{#SourceDir}\Keystone.exe"; DestDir: "{app}"; Flags: ignoreversion; Che
 Source: "{#SourceDir}\Keystone.exe"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
+#ifdef PedalsDir
+; Kaleidoscope's pedals, the same plugins as in Ableton, built for Keystone
+Source: "{#PedalsDir}\*"; DestDir: "{app}\Pedals"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 Source: "..\tools\Set up footswitch.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\tools\Set up footswitch.bat"; DestDir: "{app}\Tools"; Flags: ignoreversion
 Source: "..\tools\Set up gig laptop.ps1"; DestDir: "{app}\Tools"; Flags: ignoreversion

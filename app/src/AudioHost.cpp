@@ -2,7 +2,7 @@
 
 using namespace juce;
 
-AudioHost::AudioHost (ks::Engine& e, Keeper& k) : engine (e), keeper (k) {}
+AudioHost::AudioHost (ks::Engine& e, Keeper& k, PedalRack* pedals) : engine (e), keeper (k), rack (pedals) {}
 
 AudioHost::~AudioHost() { stop(); }
 
@@ -188,6 +188,7 @@ void AudioHost::audioDeviceAboutToStart (AudioIODevice* dev)
     monoOut.assign ((size_t) std::max (bs, 4096), 0.0f);
     engine.prepare (sr, std::max (16, std::min (bs, 256)));
     keeper.prepare (sr);
+    if (rack != nullptr) rack->prepare (sr, std::max (bs, 16));
     currentBuffer.store (bs);
     currentRate.store (sr);
     // round trip: device's own input and output latency plus the engine's alignment
@@ -267,6 +268,8 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
     if (allZero && numIn > 0) silentInputBlocks.fetch_add (1); else silentInputBlocks.store (0);
 
     engine.process (monoIn.data(), monoOut.data(), n);
+    // Kaleidoscope: the pedal hears the clean bass and joins the output (Keystone is resting)
+    if (rack != nullptr && rack->running()) rack->process (monoIn.data(), monoOut.data(), n, engine.tunerMuting());
 
     // mono out on every output channel, so either output feeds the amp
     for (int c = 0; c < numOut; ++c)

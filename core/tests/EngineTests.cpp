@@ -1589,6 +1589,55 @@ static void testController()
     { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
+static void testKaleidoscope()
+{
+    std::printf ("Kaleidoscope, one plugin pedal at a time\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_kal";
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
+    auto in = bassLine (2.0, 0.5);
+    Engine e; e.prepare (kSr, 64);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    // a pretend host: three pedals installed, loading always works
+    std::vector<std::string> loads;
+    bool modeOn = false;
+    c.kalInstalled = [] { return std::vector<std::string> { "murmur", "speckle", "grotto" }; };
+    c.onKalLoad = [&] (const std::string& id, std::string&) { loads.push_back (id); return true; };
+    c.kalParams = [] { return std::string ("[{\"i\":0,\"name\":\"Mix\",\"kind\":\"slider\",\"v\":0.5}]"); };
+    c.onKalMode = [&] (bool on) { modeOn = on; };
+    c.load();
+    c.setKaleidoscope (true);
+    CHECK (c.kaleidoscope() && modeOn && c.rig() == 0, "Kaleidoscope comes up on top of Keystone, and the host is told");
+    auto out = render (e, in);
+    const double tail = 20 * std::log10 (rms (out.data() + out.size() * 3 / 4, out.size() / 4) + 1e-12);
+    CHECK (tail < -90, "Keystone rests while Kaleidoscope is up: %.1f dBFS once its tails have gone (mark -90)", tail);
+    double t = 0;
+    auto tap = [&] (int sw) { c.footswitchPress (sw, t); t += 0.1; c.footswitchRelease (sw, t); c.tick (t); t += 0.5; };
+    tap (1); tap (1);
+    CHECK (c.lastToast() == "GROTTO", "on the floor, B steps through the pedals (%s)", c.lastToast().c_str());
+    tap (1);
+    CHECK (c.lastToast() == "MURMUR", "and wraps round to the first");
+    tap (3);
+    CHECK (c.kalLoaded() == "murmur" && ! loads.empty() && loads.back() == "murmur", "D loads the one showing");
+    c.setKaleidoscope (false);
+    CHECK (! c.kaleidoscope() && c.kalLoaded().empty() && loads.back().empty() && ! modeOn, "leaving puts the pedal away");
+    auto back = render (e, in);
+    const double ksDb = 20 * std::log10 (rms (back.data() + back.size() / 4, back.size() * 3 / 4) + 1e-12);
+    CHECK (ksDb > -40, "Keystone plays again straight after (%.1f dBFS)", ksDb);
+    c.handleMessage ("{\"t\":\"gigLock\",\"on\":true}", [] (const std::string&) {});
+    c.setKaleidoscope (true);
+    CHECK (! c.kaleidoscope(), "Gig lock keeps Kaleidoscope shut");
+    c.handleMessage ("{\"t\":\"gigLock\",\"on\":false}", [] (const std::string&) {});
+    {
+        // Gig lock stays on through a restart; Kaleidoscope itself never comes back by itself
+        c.handleMessage ("{\"t\":\"gigLock\",\"on\":true}", [] (const std::string&) {});
+        Engine e2; e2.prepare (kSr, 64);
+        Controller c2 (e2, dir.string(), (dir / "caps").string());
+        c2.load();
+        c2.setKaleidoscope (true);
+        CHECK (! c2.kaleidoscope(), "Gig lock is remembered after a restart");
+    }
+}
+
 static void testKuddle()
 {
     std::printf ("Kuddle, the home rig\n");
@@ -2367,6 +2416,7 @@ int main (int argc, char** argv)
         testController();
         testBandSetlist();
         testKuddle();
+        testKaleidoscope();
         testNewDefaults();
         testRecorder();
         testFirmware();

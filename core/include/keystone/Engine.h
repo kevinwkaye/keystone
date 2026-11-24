@@ -37,7 +37,7 @@ struct Meters
     float dirt = 1, wah = 0.5f, volume = 1, bitrot = 0;
     bool dirtActive = false, wahActive = false, volumeActive = false, bloomActive = false, bitrotActive = false;
     bool waiting = false;                        // the pedal hasn't caught up with its job yet
-    int rig = 0;                                 // 0 Keystone, 1 Kuddle
+    int rig = 0;                                 // 0 Keystone, 1 Kuddle, 2 Kaleidoscope
     float melt = 0;                              // Kuddle's pedal
     float kuddleSqueezeDb = 0;                   // the Opto's gain reduction
     float cpuLoad = 0;                           // filled by the host
@@ -101,7 +101,10 @@ public:
     // ---- the two rigs: Keystone (band) and Kuddle (home), both loaded ----
     // Switching crossfades in 50 ms. Keystone stops hearing the bass while Kuddle plays,
     // so its delay and reverb tails ring out; Kuddle only runs while it's heard.
+    // 2 is Kaleidoscope: both rest (Keystone's tails ring out, then it sleeps) while the
+    // host plays a plugin pedal; only the tuner and the input meter still hear the bass.
     void setRig (int r);
+    bool tunerMuting() const;   // the tuner is up and set to mute: the host mutes its pedal too
     int rig() const { return rigNow.load(); }
     void setMelt (float pos01);            // Kuddle's pedal, from the phone
     void setSqueeze (bool on) { squeezeHeld.store (on); }   // Kuddle: hold D

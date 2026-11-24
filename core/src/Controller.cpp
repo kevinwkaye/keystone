@@ -1,4 +1,5 @@
 #include "keystone/Controller.h"
+#include "keystone/Pedals.h"
 
 #include "Analysis.h"
 #include "Dsp.h"
@@ -23,6 +24,12 @@
 
 namespace fs = std::filesystem;
 using json = nlohmann::json;
+
+static std::string toUpper (std::string t)
+{
+    for (auto& c : t) c = (char) std::toupper ((unsigned char) c);
+    return t;
+}
 
 namespace ks
 {
@@ -90,6 +97,10 @@ struct Controller::State
     int otherCurrent = 0;
     bool droneHeld = false;
     bool dTapCaptured = false;
+    // Kaleidoscope
+    bool kal = false, gigLock = false;
+    int kalPick = 0;              // the pedal highlighted on the floor screen
+    std::string kalId;            // the pedal loaded, or ""
 };
 
 static bool isGlobal (int i) { return (paramTable()[i].flags & Global) != 0; }
@@ -351,6 +362,7 @@ void Controller::load()
         s->captureFile = st.value ("capture", std::string());
         startRig = st.value ("rig", 0) == 1 ? 1 : 0;
         s->footMode = st.value ("footMode", 0) == 1 ? 1 : 0;
+        s->gigLock = st.value ("gigLock", false);
         s->spaceFile = st.value ("space", std::string());
         if (st.contains ("wifi") && st["wifi"].is_object())
         {
@@ -442,6 +454,7 @@ void Controller::saveSettings() const
     j["space"] = s->spaceFile;
     j["rig"] = s->rig;
     j["footMode"] = s->footMode;
+    j["gigLock"] = s->gigLock;
     j["myDefaults"] = s->myDefaults;
     j["wifi"] = { { "on", s->wifiOn }, { "ssid", s->wifiSsid }, { "pass", s->wifiPass } };
     writeJsonAtomic (toPath (dataDir) / "settings.json", j);
@@ -481,7 +494,8 @@ void Controller::setRig (int r, bool announce)
     engine.setRunaway (false);   // never left running
     engine.setBrake (false);
     r = r == 1 ? 1 : 0;
-    if (r == s->rig) return;
+    if (s->kal) setKaleidoscope (false, false);   // picking a rig puts Kaleidoscope away
+    if (r == s->rig) { if (announce) { queueState(); queueToast (r == 1 ? "KUDDLE" : "KEYSTONE"); } return; }
     saveSetlist();                           // the resting rig's list as it was
     std::swap (s->songs, s->other);
     std::swap (s->current, s->otherCurrent);
@@ -844,6 +858,90 @@ bool Controller::backup (const std::string& day)
     return true;
 }
 
+
+// ---------------------------------------------------------------------------------------
+// Kaleidoscope
+// ---------------------------------------------------------------------------------------
+bool Controller::kaleidoscope() const { return s->kal; }
+std::string Controller::kalLoaded() const { return s->kalId; }
+
+void Controller::setKaleidoscope (bool on, bool announce)
+{
+    if (on == s->kal) { if (announce) queueState(); return; }
+    if (on && s->gigLock) { queueToast ("GIG LOCK IS ON"); queueState(); return; }
+    engine.setRunaway (false);
+    engine.setBrake (false);
+    engine.setSqueeze (false);
+    if (on)
+    {
+        engine.action (Action::DroneClear);   // a held drone trails off with the rest
+        s->droneHeld = false;
+    }
+    else if (! s->kalId.empty())
+    {
+        // put the pedal away so it costs nothing while the band rig plays
+        std::string err;
+        if (onKalLoad) onKalLoad ("", err);
+        s->kalId.clear();
+    }
+    s->kal = on;
+    engine.setRig (on ? 2 : s->rig);
+    if (! on && s->rig == 0) engine.setPedalBank (s->bank);
+    if (onKalMode) onKalMode (on);
+    if (announce) { queueState(); queueToast (on ? "KALEIDOSCOPE" : (s->rig == 1 ? "KUDDLE" : "KEYSTONE")); }
+    mark (on ? std::string ("Kaleidoscope") : (s->rig == 1 ? "Kuddle: " + songName (s->current) : "Keystone: " + songLabel (s->current)));
+}
+
+void Controller::loadPedal (const std::string& id)
+{
+    if (! s->kal) { queueToast ("SWITCH TO KALEIDOSCOPE FIRST"); return; }
+    if (id == s->kalId) { queueState(); return; }
+    std::string err;
+    if (! onKalLoad) { queueToast ("PEDALS NEED THE KEYSTONE APP"); return; }
+    if (! onKalLoad (id, err))
+    {
+        queueToast (err.empty() ? std::string ("COULDN'T LOAD IT") : toUpper (err));
+        if (onLog) onLog ("Kaleidoscope: couldn't load " + id + ": " + err);
+        s->kalId.clear();
+        queueState();
+        return;
+    }
+    s->kalId = id;
+    if (! id.empty())
+    {
+        const auto ids = kalInstalled ? kalInstalled() : std::vector<std::string>();
+        for (size_t i = 0; i < ids.size(); ++i) if (ids[i] == id) s->kalPick = (int) i;
+    }
+    const auto* info = findPedal (id);
+    queueState();
+    queue (dumps (json { { "t", "kalParams" }, { "id", s->kalId }, { "params", json::parse (kalParamsJson()) } }));
+    queueToast (id.empty() ? std::string ("PEDAL PUT AWAY") : toUpper (info != nullptr ? info->name : id));
+    mark (id.empty() ? std::string ("Kaleidoscope: no pedal") : "Kaleidoscope: " + std::string (info != nullptr ? info->name : id));
+}
+
+std::string Controller::kalParamsJson() const
+{
+    if (s->kalId.empty() || ! kalParams) return "[]";
+    auto p = json::parse (kalParams(), nullptr, false);
+    return p.is_array() ? p.dump() : std::string ("[]");
+}
+
+void Controller::kalChanged (const std::string& changesJson)
+{
+    auto c = json::parse (changesJson, nullptr, false);
+    if (! c.is_array() || c.empty()) return;
+    queue (dumps (json { { "t", "kalValues" }, { "id", s->kalId }, { "v", c } }));
+}
+
+void Controller::kalLost (const std::string& why)
+{
+    if (s->kalId.empty()) return;
+    s->kalId.clear();
+    queueToast (toUpper (why));
+    queueState();
+    queue (dumps (json { { "t", "kalParams" }, { "id", "" }, { "params", json::array() } }));
+}
+
 bool Controller::tunerOn() const { return engine.meters().tunerOn; }
 
 // ---------------------------------------------------------------------------------------
@@ -987,6 +1085,27 @@ void Controller::onFootswitch (int sw, int ev)
     const bool tuning = tunerOn();
     auto toggle = [&] (P p) { setValue (p, value (p) > 0.5f ? 0.0f : 1.0f); };
     auto now = [] { return std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count(); };
+    if (s->kal)
+    {
+        // Kaleidoscope, picking a pedal (once one is loaded the host hands it the footswitches):
+        // tap A back, B on, D load the one showing; hold C the tuner; hold A and B to leave
+        if (ev == E::ComboHoldAB) { if (! tuning) setKaleidoscope (false); return; }
+        if (ev == E::HoldStart && sw == 2) { engine.action (Action::TunerToggle); queueState(); return; }
+        if (ev != E::Tap) return;
+        if (tuning) { engine.action (Action::TunerOff); queueState(); return; }
+        const auto ids = kalInstalled ? kalInstalled() : std::vector<std::string>();
+        if (ids.empty()) { queueToast ("NO PEDALS INSTALLED"); return; }
+        const int n = (int) ids.size();
+        if (sw == 0 || sw == 1)
+        {
+            s->kalPick = ((s->kalPick + (sw == 0 ? -1 : 1)) % n + n) % n;
+            const auto* info = findPedal (ids[(size_t) s->kalPick]);
+            queueToast (info != nullptr ? toUpper (info->name) : toUpper (ids[(size_t) s->kalPick]));
+            queueState();
+        }
+        else if (sw == 3) loadPedal (ids[(size_t) std::clamp (s->kalPick, 0, n - 1)]);
+        return;
+    }
     // hold A and B for a second: the other rig (Stomp mode in Keystone, any time in Kuddle)
     if (ev == E::ComboHoldAB) { if (! tuning) setRig (1 - s->rig); return; }
     if (s->rig == 1)
@@ -1287,6 +1406,13 @@ std::string Controller::schemaJson() const
         j["params"].push_back (jp);
     }
     int count = 0;
+    j["pedals"] = json::array();
+    for (const auto& pd : pedalTable())
+    {
+        json sw = json::array();
+        for (const auto& w : pd.sw) sw.push_back ({ { "label", w.label }, { "tap", w.tap }, { "hold", w.hold } });
+        j["pedals"].push_back ({ { "id", pd.id }, { "name", pd.name }, { "from", pd.from }, { "colour", pd.colour }, { "sw", sw }, { "combos", pd.combos } });
+    }
     const auto* mods = moduleTable (count);
     j["modules"] = json::array();
     for (int i = 0; i < count; ++i)
@@ -1309,6 +1435,11 @@ std::string Controller::stateJson() const
     j["rig"] = s->rig;
     j["footMode"] = s->footMode;
     j["maxEntries"] = kMaxEntries;
+    {
+        const auto ids = kalInstalled ? kalInstalled() : std::vector<std::string>();
+        j["kal"] = { { "on", s->kal }, { "loaded", s->kalId }, { "pick", ids.empty() ? 0 : std::clamp (s->kalPick, 0, (int) ids.size() - 1) },
+                     { "installed", ids }, { "gigLock", s->gigLock } };
+    }
     j["edited"] = edited();
     j["maxSongs"] = kMaxSongs;
     j["tuner"] = tunerOn();
@@ -1986,6 +2117,31 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     }
     else if (t == "footMode") setFootMode (m.value ("m", 1 - s->footMode));
     else if (t == "rig") setRig (m.value ("r", 1 - s->rig));
+    else if (t == "kal")
+    {
+        const bool on = m.value ("on", ! s->kal);
+        if (! on && m.contains ("rig")) setRig (m.value ("rig", s->rig));   // straight to a rig
+        else setKaleidoscope (on);
+    }
+    else if (t == "kalLoad") loadPedal (m.value ("id", std::string()));
+    else if (t == "kalPick")
+    {
+        s->kalPick = std::max (0, m.value ("i", 0));
+        queueState();
+    }
+    else if (t == "kalSet")
+    {
+        if (s->kal && ! s->kalId.empty() && onKalSet) onKalSet (m.value ("i", -1), std::clamp (m.value ("v", 0.0f), 0.0f, 1.0f));
+    }
+    else if (t == "kalParams") reply (dumps (json { { "t", "kalParams" }, { "id", s->kalId }, { "params", json::parse (kalParamsJson()) } }));
+    else if (t == "gigLock")
+    {
+        s->gigLock = m.value ("on", ! s->gigLock);
+        if (s->gigLock && s->kal) setKaleidoscope (false, false);
+        saveSettings();
+        queueState();
+        queueToast (s->gigLock ? "GIG LOCK ON" : "GIG LOCK OFF");
+    }
     else if (t == "bank") setBank (m.value ("i", 0));
     else if (t == "tuner")
     {

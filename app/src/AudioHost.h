@@ -5,6 +5,7 @@
 // interface. Re-opens the device by itself if it's unplugged and plugged back in.
 
 #include "Keeper.h"
+#include "PedalRack.h"
 #include "keystone/Engine.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -13,7 +14,7 @@
 class AudioHost : public juce::AudioIODeviceCallback, private juce::Timer
 {
 public:
-    AudioHost (ks::Engine& e, Keeper& k);
+    AudioHost (ks::Engine& e, Keeper& k, PedalRack* pedals = nullptr);
     ~AudioHost() override;
 
     // preferredDevice: part of a device name, or empty for automatic.
@@ -59,6 +60,7 @@ private:
 
     ks::Engine& engine;
     Keeper& keeper;
+    PedalRack* rack = nullptr;   // Kaleidoscope's pedal, played after the engine
     juce::AudioDeviceManager deviceManager;
     juce::String wantDevice, lastError, openType, openName;
     int wantBuffer = 0;

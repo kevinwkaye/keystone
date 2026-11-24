@@ -26,6 +26,7 @@ target_sources(Keystone PRIVATE
     src/Main.cpp
     src/AudioHost.cpp
     src/LinkServer.cpp
+    src/PedalRack.cpp
     ${PROJECT_SOURCE_DIR}/shared/PedalControl.cpp
     ${PROJECT_SOURCE_DIR}/shared/Keeper.cpp)
 
@@ -46,6 +47,11 @@ endif()
 
 target_compile_definitions(Keystone PRIVATE
     JUCE_WEB_BROWSER=0
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_PLUGINHOST_VST=0
+    JUCE_PLUGINHOST_AU=0
+    JUCE_PLUGINHOST_LADSPA=0
+    JUCE_PLUGINHOST_LV2=0
     JUCE_USE_CURL=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_REPORT_APP_USAGE=0
@@ -66,6 +72,7 @@ target_link_libraries(Keystone PRIVATE
     juce::juce_audio_basics
     juce::juce_audio_devices
     juce::juce_audio_formats
+    juce::juce_audio_processors
     juce::juce_recommended_config_flags)
 
 if(WIN32 OR KEYSTONE_FORCE_TRAY)
@@ -75,3 +82,11 @@ if(WIN32 OR KEYSTONE_FORCE_TRAY)
 else()
     target_compile_definitions(Keystone PRIVATE KEYSTONE_TRAY=0)
 endif()
+
+# Pedal bench: every Kaleidoscope pedal through the rack, offline (CI runs it on each build)
+juce_add_console_app(pedal_bench PRODUCT_NAME "pedal_bench")
+target_sources(pedal_bench PRIVATE tests/PedalBench.cpp src/PedalRack.cpp)
+target_include_directories(pedal_bench PRIVATE src ${PROJECT_SOURCE_DIR}/core/include)
+target_compile_definitions(pedal_bench PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_PLUGINHOST_VST3=1
+    JUCE_PLUGINHOST_VST=0 JUCE_PLUGINHOST_AU=0 JUCE_PLUGINHOST_LADSPA=0 JUCE_PLUGINHOST_LV2=0 JUCE_DISPLAY_SPLASH_SCREEN=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+target_link_libraries(pedal_bench PRIVATE juce::juce_audio_processors juce::juce_recommended_config_flags)

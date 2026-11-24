@@ -171,7 +171,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.kudL.assign ((size_t) d.maxBlock, 0.0f);
     d.kudR.assign ((size_t) d.maxBlock, 0.0f);
     d.rigMix.setTime (0.05f, s); d.rigMix.reset (rigNow.load() == 1 ? 1.0f : 0.0f);
-    d.ksIn.setTime (0.05f, s); d.ksIn.reset (rigNow.load() == 1 ? 0.0f : 1.0f);
+    d.ksIn.setTime (0.05f, s); d.ksIn.reset (rigNow.load() == 0 ? 1.0f : 0.0f);
     d.kuddleRunning = false;
     d.ksQuiet = 0;
     d.dim.prepare (s);
@@ -240,13 +240,16 @@ int Engine::pedalTarget() const
     }
 }
 
-void Engine::setRig (int r) { rigNow.store (r == 1 ? 1 : 0); }
+void Engine::setRig (int r) { rigNow.store (r == 1 || r == 2 ? r : 0); }
+
+bool Engine::tunerMuting() const { return impl->tunerOn.load() && getParam (P::TunerMute) > 0.5f; }
 void Engine::setMelt (float pos) { meltPos.store (clampf (pos, 0.0f, 1.0f)); }
 
 void Engine::setPedal (float pos)
 {
     pos = clampf (pos, 0.0f, 1.0f);
     if (rigNow.load() == 1) { meltPos.store (pos); lastPedal.store (pos); return; }   // Kuddle: the Melt sweep
+    if (rigNow.load() == 2) return;   // Kaleidoscope: the pedal belongs to the loaded plugin
     const int t = pedalTarget();
     auto& j = job[(size_t) t];
     const float last = lastPedal.load();
@@ -531,7 +534,7 @@ void Engine::process (const float* in, float* out, int numSamples)
         // ---- Keystone ----
         // While Kuddle plays and Keystone's tails have died away, Keystone sleeps: only the
         // tuner and the input meter still hear the bass, so the two rigs never cost double.
-        const bool ksAsleep = rigNow.load() == 1 && d.ksQuiet > (int64_t) (0.5f * d.sr);
+        const bool ksAsleep = rigNow.load() != 0 && d.ksQuiet > (int64_t) (0.5f * d.sr);
         if (ksAsleep)
         {
             for (int i = 0; i < n; ++i)
@@ -674,13 +677,13 @@ void Engine::process (const float* in, float* out, int numSamples)
             // asleep once Kuddle has the bass and nothing is left ringing
             float pk = 0;
             for (int i = 0; i < n; ++i) pk = std::max (pk, std::fabs (y[i]));
-            d.ksQuiet = rigNow.load() == 1 && d.ksIn.current() < 1.0e-6f && pk < 1.0e-5f ? d.ksQuiet + n : 0;
+            d.ksQuiet = rigNow.load() != 0 && d.ksIn.current() < 1.0e-6f && pk < 1.0e-5f ? d.ksQuiet + n : 0;
         }
 
         // ---- Kuddle: runs while it's heard, crossfaded with Keystone ----
         const bool kudWanted = rigNow.load() == 1;
         d.rigMix.set (kudWanted ? 1.0f : 0.0f);
-        d.ksIn.set (kudWanted ? 0.0f : 1.0f);
+        d.ksIn.set (rigNow.load() == 0 ? 1.0f : 0.0f);   // Kuddle or Kaleidoscope: Keystone's tails ring out
         const bool kudHeard = kudWanted || d.rigMix.current() > 1.0e-4f;
         if (kudHeard)
         {

@@ -17,7 +17,9 @@ var KS = (function () {
     health: null, rtt: null, healthAt: 0,
     takes: null, takesFree: 0, roomTake: '', roomFailed: '',
     take: '', takeInfo: null, pickFrom: null, pack: null, making: false,
-    upd: { latest: '', assets: [], checkedAt: 0, checking: false, busy: null, err: null, msg: '' }
+    upd: { latest: '', assets: [], checkedAt: 0, checking: false, busy: null, err: null, msg: '' },
+    // Kaleidoscope: one plugin pedal at a time
+    kal: { on: false, loaded: '', pick: 0, installed: [], gigLock: false }, kalParams: [], kalId: '', pedalTable: [], kalSel: null
   };
 
   // ---------------------------------------------------------------- transport
@@ -56,6 +58,9 @@ var KS = (function () {
         S.bank = m.bank || 0; S.maxEntries = m.maxEntries || 40; S.rig = m.rig || 0; S.footMode = m.footMode || 0;
         S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile; S.spaces = m.spaces || []; S.space = m.space || ''; S.spaceFile = m.spaceFile || '';
         S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive; S.wifi = m.wifi || null;
+        S.kal = m.kal || { on: false, loaded: '', pick: 0, installed: [], gigLock: false };
+        if (!S.kal.loaded) { S.kalParams = []; S.kalId = ''; }
+        else if (S.kal.loaded !== S.kalId) send({ t: 'kalParams' });
         tunerState(m.tuner);
         try { localStorage.setItem('ks.state', JSON.stringify(m)); } catch (e) {}
         queueRender(); break;
@@ -114,6 +119,18 @@ var KS = (function () {
         S.takes = m.list || []; S.takesFree = m.free || 0;
         if (S.screen === 'recorder') queueRender(true);
         break;
+      case 'kalParams':
+        S.kalParams = m.params || []; S.kalId = m.id || '';
+        queueRender(); break;
+      case 'kalValues':
+        if (m.id !== S.kalId) break;
+        (m.v || []).forEach(function (c) {
+          var p = S.kalParams[c[0]]; if (!p) return;
+          if (!(S.dragging && S.kalDrag === c[0])) p.v = c[1];
+          p.text = c[2];
+          var lab = document.querySelector('[data-kaltext="' + c[0] + '"]'); if (lab) lab.textContent = c[2];
+        });
+        queueRender(true); break;
       case 'toast':
         toast(m.text);
         if (m.text === 'KEPT') { S.noteUntil = Date.now() + 20000; nod(); render(true); }
@@ -140,7 +157,7 @@ var KS = (function () {
   }
 
   function useSchema(m) {
-    S.schema = m; S.params = {}; S.modules = m.modules;
+    S.schema = m; S.params = {}; S.modules = m.modules; S.pedalTable = m.pedals || [];
     m.params.forEach(function (p) { S.params[p.id] = p; });
   }
   // Menus work before Keystone is found: the last state seen, or the built-in defaults
@@ -239,7 +256,8 @@ var KS = (function () {
   // which parameter switches a module on and off (Kuddle's are named their own way)
   var KON = { 'k.mute': 'kuddle.muteOn', 'k.wah': 'kuddle.wahOn', 'k.opto': 'kuddle.optoOn', 'k.tape': 'kuddle.tapeOn', 'k.tone': 'kuddle.toneOn', 'k.room': 'kuddle.roomOn' };
   function onp(mod) { return KON[mod] || (S.params[mod + '.on'] ? mod + '.on' : ''); }
-  function kud() { return S.rig === 1; }
+  function kud() { return S.rig === 1 && !kalOn(); }
+  function kalOn() { return !!(S.kal && S.kal.on); }
 
   // ---- the rehearsal recorder
   function rec() { return (S.meter && S.meter.rec) || { on: false }; }
@@ -637,6 +655,7 @@ var KS = (function () {
       (Math.round(val('output.mode')) === 2 ? '<button type="button" class="wide" data-act="asioPanel">ASIO panel (opens on the laptop)</button>' : '') +
       bufferCard() +
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
+      '<section class="card"><h2 class="label">Kaleidoscope</h2>' + gigLockRow() + '<span class="small">Fourteen pedal plugins to mess about with, one at a time. Tap the name on Play to get there. Gig lock keeps it shut and never costs the band rig anything.</span></section>' +
       wifiCard() +
       updateCard() + watchCards() +
       '<button type="button" class="wide" data-go="recorder">Recorder' + (rec().on ? ': recording ' + clock(rec().s) : on('rec.on') ? ': ready' : ': off') + '</button>' +
@@ -648,7 +667,7 @@ var KS = (function () {
     // Rig: health, the recorder, updates and Keystone's Wi-Fi, with a light for how it's going
     var r = rec(), dot = r.on ? '#E5484D' : !connected() || warnings().length ? '#F0997B' : '#5DCAA5';
     var rig = ['health', 'recorder', 'take', 'listen'].indexOf(active) >= 0;
-    return '<nav class="nav">' + b('play', 'Play') + b('tuner', 'Tuner') + b('tone', 'Tone') +
+    return '<nav class="nav">' + b('play', kalOn() ? 'Pedals' : 'Play') + b('tuner', 'Tuner') + b('tone', 'Tone') +
       '<button type="button" data-go="health" class="rigbtn' + (rig ? ' on' : '') + '"><span class="rdot2' + (r.on ? ' rec' : '') + '" style="background:' + dot + '"></span>Rig</button></nav>';
   }
   function header(title, backTo, right) {
@@ -792,8 +811,8 @@ var KS = (function () {
       '<span class="small">Type the laptop\'s address, not the phone\'s. Your hotspot settings list the laptop under Connected devices, and Keystone writes its address in Documents\\Keystone\\keystone.log.</span></div>' : '';
     var note = Date.now() < S.noteUntil ? '<div class="note"><input id="noteText" maxlength="200" placeholder="Add a note to that Keep (optional)" aria-label="Note for the last Keep"><button type="button" data-act="note">Save</button></div>' : '';
     return '<section class="screen">' +
-      '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to ' + (K ? 'Keystone' : 'Kuddle') + '">' + (K ? PEBBLE_K : PEBBLE) +
-      '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">' + (K ? 'Kuddle' : 'Keystone') + '</span><span class="swap">TAP FOR ' + (K ? 'KEYSTONE' : 'KUDDLE') + '</span></span></button><span class="tops">' + recPill() + pill() + '</span></div>' +
+      '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to ' + rigNext().name + '">' + (K ? PEBBLE_K : PEBBLE) +
+      '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">' + (K ? 'Kuddle' : 'Keystone') + '</span><span class="swap">TAP FOR ' + rigNext().name.toUpperCase() + '</span></span></button><span class="tops">' + recPill() + pill() + '</span></div>' +
       offline +
       '<div class="songbar"><button type="button" class="arrow" data-act="prev" aria-label="Previous song">' + ICON.left + '</button>' +
       '<button type="button" class="song" data-go="setlist" aria-label="Open the setlist">' + flip(n ? two(songNo(i)) : '--', 'blue') +
@@ -1226,6 +1245,97 @@ var KS = (function () {
       nav('play') + '</section>';
   }
 
+  // ---------------------------------------------------------------- Kaleidoscope
+  // Tapping the name goes Keystone, Kuddle, Kaleidoscope and round again (Gig lock skips it)
+  function rigNext() {
+    if (kalOn()) return { name: 'Keystone', rig: 0 };
+    if (S.rig === 0) return { name: 'Kuddle', rig: 1 };
+    if (S.kal && !S.kal.gigLock) return { name: 'Kaleidoscope', kal: true };
+    return { name: 'Keystone', rig: 0 };
+  }
+  function pedalMeta(id) {
+    for (var k = 0; k < S.pedalTable.length; k++) if (S.pedalTable[k].id === id) return S.pedalTable[k];
+    var blank = { label: '', tap: 'Its own job', hold: '' };
+    return { id: id, name: id.charAt(0).toUpperCase() + id.slice(1), from: 'A plugin in the Pedals folder', colour: '#B9B2A6', sw: [blank, blank, blank, blank], combos: '' };
+  }
+  var kalPending = {}, kalTimer = null;
+  function kalSet(i, v) {          // throttled while dragging, like setParam
+    var p = S.kalParams[i]; if (!p) return;
+    p.v = v;
+    kalPending[i] = v;
+    if (!kalTimer) kalTimer = setTimeout(function () {
+      kalTimer = null;
+      for (var k in kalPending) send({ t: 'kalSet', i: +k, v: kalPending[k] });
+      kalPending = {};
+    }, 25);
+  }
+  function kalFlip(letter, colour) {
+    return '<span class="flip" style="width:36px;height:42px;font-size:22px;flex:none;' + (colour ? 'background:' + colour + ';color:#111111' : '') + '">' + esc(letter) + '</span>';
+  }
+  function gigLockRow() {
+    return '<label class="switch"><span style="display:flex;flex-direction:column;gap:2px"><span>Gig lock</span><span class="small">Hides Kaleidoscope so nothing loads mid-set</span></span>' +
+      '<input type="checkbox" data-act="gigLock"' + (S.kal && S.kal.gigLock ? ' checked' : '') + '></label>';
+  }
+  function kalPedalsScreen() {
+    var ids = S.kal.installed || [], loaded = S.kal.loaded, lm = loaded ? pedalMeta(loaded) : null;
+    if (S.kalSel == null || ids.indexOf(S.kalSel) < 0) S.kalSel = loaded || ids[S.kal.pick] || ids[0] || null;
+    var sel = S.kalSel ? pedalMeta(S.kalSel) : null;
+    var grid = ids.map(function (id) {
+      var m = pedalMeta(id), on = id === S.kalSel;
+      return '<button type="button" class="kpedal" data-kalpick="' + esc(id) + '" style="border-color:' + (on ? m.colour : 'var(--card)') + '">' +
+        '<span class="flip" style="width:36px;height:42px;font-size:22px;flex:none;' + (on ? 'background:' + m.colour + ';color:#111111' : 'color:' + m.colour) + '">' + esc(m.name.charAt(0)) + '</span>' +
+        '<span class="kp"><span class="n">' + esc(m.name) + '</span><span class="f">' + esc(m.from) + '</span></span></button>';
+    }).join('');
+    var loadBtn = !sel ? '' : sel.id === loaded
+      ? '<button type="button" class="wide" disabled>' + esc(sel.name) + ' is loaded</button>'
+      : '<button type="button" class="wide" data-act="kalLoad" style="background:' + sel.colour + ';color:#111111">Load ' + esc(sel.name) + '</button>';
+    return '<section class="screen">' +
+      '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to Keystone">' + PEBBLE +
+      '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">Kaleidoscope</span><span class="swap">TAP FOR KEYSTONE</span></span></button><span class="tops">' + pill() + '</span></div>' +
+      (lm ? '<section class="card" style="flex-direction:row;align-items:center;gap:14px">' + kalFlip(lm.name.charAt(0), lm.colour) +
+        '<span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span class="label">Loaded now</span><span style="font-size:22px;font-weight:700">' + esc(lm.name) + '</span><span class="small">' + esc(lm.from) + '</span></span>' +
+        '<button type="button" class="wide" style="height:44px;padding:0 16px" data-go="tone">Controls</button></section>'
+        : '<section class="card"><span style="font-size:17px;font-weight:700">No pedal loaded</span><span class="small">Pick one and load it. On the floor: tap A and B to look through them, D to load, hold A and B to go back to Keystone.</span></section>') +
+      '<h2 class="label">Pedals</h2>' +
+      (ids.length ? '<div class="kgrid">' + grid + '</div>' + loadBtn +
+        '<span class="small" style="text-align:center">The old pedal fades out, then the new one fades in.</span>'
+        : '<section class="card"><span class="small">No pedals found. Updating Keystone puts them in its Pedals folder, or drop a .vst3 into Documents\\Keystone\\Pedals.</span></section>') +
+      (loaded ? '<button type="button" class="wide" data-act="kalUnload" style="color:#F0997B">Put ' + esc(lm.name) + ' away</button>' : '') +
+      gigLockRow() + nav('play') + '</section>';
+  }
+  function kalToneScreen() {
+    var id = S.kal.loaded;
+    if (!id) return kalPedalsScreen();
+    var m = pedalMeta(id), col = m.colour;
+    var keys = ['A', 'B', 'C', 'D'];
+    var sheet = '<section class="card"><h2 class="label">Footswitches: tap and hold</h2><div class="kfoot">' + m.sw.map(function (w, k) {
+      return '<span class="flip" style="width:28px;height:32px;font-size:17px;background:' + col + ';color:#111111">' + keys[k] + '</span><span>' + esc(w.tap) + '</span><span class="muted">' + esc(w.hold || '') + '</span>';
+    }).join('') + '</div>' + (m.combos ? '<span class="small">' + esc(m.combos) + ' Hold C and D for Keep.</span>' : '<span class="small">Hold C and D for Keep.</span>') +
+      '<span class="small">The expression pedal does whatever this pedal gives it. Back to the list on the phone.</span></section>';
+    var body = '';
+    if (!S.kalParams.length || S.kalId !== id) body = '<section class="card"><span class="small">Getting ' + esc(m.name) + '\'s controls…</span></section>';
+    else {
+      var rows = S.kalParams.map(function (p) {
+        if (p.kind === 'toggle')
+          return '<label class="switch" style="background:#262626">' + esc(p.name) + '<input type="checkbox" data-kaltoggle="' + p.i + '"' + (p.v > 0.5 ? ' checked' : '') + '></label>';
+        if (p.kind === 'choice') {
+          var n = p.choices.length, cur = Math.round(p.v * (n - 1)), cols = n <= 4 ? n : 3;
+          return '<div class="small">' + esc(p.name) + '</div><div class="seg kseg" style="grid-template-columns:repeat(' + cols + ',minmax(0,1fr))">' + p.choices.map(function (c, k) {
+            return '<button type="button" class="' + (k === cur ? 'on' : '') + '" data-kalset="' + p.i + '" data-v="' + (n > 1 ? k / (n - 1) : 0) + '">' + esc(c) + '</button>';
+          }).join('') + '</div>';
+        }
+        return '<label class="slider"><span class="ends"><span>' + esc(p.name) + '</span><span data-kaltext="' + p.i + '">' + esc(p.text) + '</span></span>' +
+          '<input type="range" min="0" max="1000" value="' + Math.round(p.v * 1000) + '" data-kalrange="' + p.i + '" aria-label="' + esc(p.name) + '" style="accent-color:' + col + '"></label>';
+      });
+      body = '<section class="card"><h2 class="label">Controls</h2>' + rows.join('') + '</section>';
+    }
+    return '<section class="screen" style="gap:14px">' +
+      '<div class="top"><button type="button" class="back" data-go="play">' + ICON.back + 'Pedals</button><span class="title" style="color:' + col + '">' + esc(m.name) + '</span><span></span></div>' +
+      sheet + body +
+      '<button type="button" class="wide" data-act="kalUnload" style="color:#F0997B">Put ' + esc(m.name) + ' away</button>' +
+      nav('tone') + '</section>';
+  }
+
   // ---------------------------------------------------------------- render
   var app = document.getElementById('app');
   var lastScreenKey = '';
@@ -1237,17 +1347,18 @@ var KS = (function () {
     var html;
     switch (S.screen) {
       case 'tuner': html = tunerScreen(); break;
-      case 'tone': html = S.schema ? toneScreen() : playScreen(); break;
-      case 'module': html = S.schema ? moduleScreen() : playScreen(); break;
+      case 'tone': html = kalOn() ? kalToneScreen() : S.schema ? toneScreen() : playScreen(); break;
+      case 'module': html = kalOn() ? kalToneScreen() : S.schema ? moduleScreen() : playScreen(); break;
       case 'setlist': html = setlistScreen(); break;
       case 'health': html = healthScreen(); break;
       case 'pairWatch': html = pairWatchScreen(); break;
       case 'recorder': html = recorderScreen(); break;
       case 'take': html = takeScreen(); break;
       case 'listen': html = listenScreen(); break;
-      default: html = playScreen();
+      default: html = kalOn() ? kalPedalsScreen() : playScreen();
     }
     document.body.classList.toggle('kuddle', kud());
+    document.body.classList.toggle('kal', kalOn());
     var key = S.screen + (S.module || '');
     var y = window.scrollY;
     app.innerHTML = html;
@@ -1421,6 +1532,9 @@ var KS = (function () {
     if (d.cal) { send({ t: 'calibrate', step: +d.cal }); return; }
     if (d.savekind) { S.save = { step: 'name', kind: d.savekind }; return saveSheet(); }
     if (d.savepick) { S.save = { step: 'confirm', target: +d.savepick }; return saveSheet(); }
+    if (d.kalpick) { S.kalSel = d.kalpick; return render(true); }
+    if (d.kalset != null) { kalSet(+d.kalset, +d.v); return render(true); }
+    if (d.kaltoggle != null) { kalSet(+d.kaltoggle, t.checked ? 1 : 0); return render(true); }
     var i2 = d.i != null ? +d.i : -1;
     switch (d.act) {
       case 'saveOpen': S.sel = null; S.save = { step: 'menu' }; saveSheet(); break;
@@ -1470,7 +1584,15 @@ var KS = (function () {
         setParam('rec.room', Math.round(val('rec.room')) === 1 ? 0 : 1); render(true); break;
       case 'tapTempo': send({ t: 'tap' }); t.classList.add('hit'); setTimeout(function () { t.classList.remove('hit'); }, 120); break;
       case 'footMode': if (send({ t: 'footMode', m: S.footMode ? 0 : 1 })) { S.footMode = S.footMode ? 0 : 1; render(true); } break;
-      case 'rig': if (send({ t: 'rig', r: kud() ? 0 : 1 })) { S.rig = kud() ? 0 : 1; render(); } break;
+      case 'rig':
+        var nx = rigNext();
+        if (nx.kal) { if (send({ t: 'kal', on: true })) { S.kal.on = true; S.screen = 'play'; render(); } }
+        else if (kalOn()) { if (send({ t: 'kal', on: false, rig: nx.rig })) { S.kal.on = false; S.rig = nx.rig; render(); } }
+        else if (send({ t: 'rig', r: nx.rig })) { S.rig = nx.rig; render(); }
+        break;
+      case 'kalLoad': if (S.kalSel && send({ t: 'kalLoad', id: S.kalSel })) toast('LOADING'); break;
+      case 'kalUnload': if (send({ t: 'kalLoad', id: '' })) { S.kalSel = null; go('play'); } break;
+      case 'gigLock': send({ t: 'gigLock', on: t.checked }); break;
       case 'manual': var mi = document.getElementById('manualIp'); if (mi && mi.value.trim()) { S.manualIp = mi.value.trim(); if (window.KeystoneNative && KeystoneNative.connectTo) KeystoneNative.connectTo(S.manualIp); toast('TRYING'); } break;
       case 'prev': if (send({ t: 'songStep', d: -1 }) && S.songs.length) { S.current = Math.max(0, S.current - 1); render(true); } break;
       case 'next': if (send({ t: 'songStep', d: 1 }) && S.songs.length) { S.current = Math.min(S.songs.length - 1, S.current + 1); render(true); } break;
@@ -1515,6 +1637,11 @@ var KS = (function () {
       var tl = t.parentNode.querySelectorAll('.flip');
       for (var k = 0; k < tl.length; k++) { tl[k].textContent = S.pairCode.charAt(k); tl[k].classList.toggle('blue', k === S.pairCode.length); }
       var pb = document.querySelector('[data-act="pairWatch"]'); if (pb) pb.disabled = S.pairCode.length !== 6 || !!S.upd.busy;
+      return;
+    }
+    if (t.dataset && t.dataset.kalrange != null) {
+      S.kalDrag = +t.dataset.kalrange;
+      kalSet(S.kalDrag, t.value / 1000);
       return;
     }
     if (t.dataset && t.dataset.range) {

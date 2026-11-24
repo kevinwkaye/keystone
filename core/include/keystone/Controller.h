@@ -103,6 +103,21 @@ public:
     int rig() const;
     void setRig (int r, bool announce = true);
 
+    // ---- Kaleidoscope: one plugin pedal at a time, just for fun ----
+    // Sits on top of whichever rig is playing (both rest while it's up), never comes back
+    // on by itself after a restart, and Gig lock keeps it shut. The host does the plugins:
+    bool kaleidoscope() const;
+    void setKaleidoscope (bool on, bool announce = true);
+    std::string kalLoaded() const;                        // the loaded pedal's id, or ""
+    std::function<std::vector<std::string>()> kalInstalled;   // ids of the pedals on this machine
+    // load a pedal by id ("" unloads); false and a reason in plain words if it can't
+    std::function<bool (const std::string& id, std::string& error)> onKalLoad;
+    std::function<std::string()> kalParams;               // the loaded pedal's controls and values (JSON array)
+    std::function<void (int index, float value01)> onKalSet;
+    std::function<void (bool on)> onKalMode;              // Kaleidoscope up or down: the host routes the pedals
+    void kalChanged (const std::string& changesJson);     // the host: controls moved by the plugin itself
+    void kalLost (const std::string& why);                // the host had to drop the pedal
+
     // Keystone's feet: 0 Stomp mode (banks), 1 Song mode (A previous song, B next part,
     // C next song, on press). C and D pressed together swap them.
     int footMode() const;
@@ -152,6 +167,8 @@ private:
     void watchApply (float t);
     void watchWrist (const float* q);
     void watchTick();
+    void loadPedal (const std::string& id);   // Kaleidoscope: "" puts it away
+    std::string kalParamsJson() const;
     void handleMessageInner (const std::string& line, const std::function<void (const std::string&)>& reply);
     void applySong (int i, bool keepGoing = false);   // keepGoing: a part of the same song
     void saveSetlist() const;

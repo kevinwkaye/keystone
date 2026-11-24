@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: "0.4.23"
+  VERSION: "0.5.0"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.
@@ -32,8 +32,77 @@ jobs:
             gh release create "v$VERSION" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --title "Keystone $VERSION" --notes "Building..." --prerelease
 
+  # Kaleidoscope's pedals: each plugin built from its own repo for the laptop and the Pi.
+  # A pedal is only rebuilt when its repo has changed (cached by its latest commit).
+  pedals:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04-arm]
+        pedal:
+          - { repo: murmur, target: Murmur, tests: MURMUR_BUILD_TESTS }
+          - { repo: afterglow, target: Afterglow, tests: AFTERGLOW_BUILD_TESTS }
+          - { repo: OIlslick, target: OilSlick, tests: OILSLICK_BUILD_TESTS }
+          - { repo: Changeling, target: Changeling, tests: CHANGELING_BUILD_TESTS }
+          - { repo: backtrack, target: Backtrack, tests: BACKTRACK_TESTS }
+          - { repo: Speckle, target: Speckle, tests: SPECKLE_BUILD_TESTS }
+          - { repo: Jetstream, target: Jetstream, tests: JETSTREAM_BUILD_TESTS }
+          - { repo: prism--patch, target: PrismPatch, tests: PRISM_BUILD_TESTS }
+          - { repo: Bitrot, target: Bitrot, tests: BITROT_BUILD_TESTS }
+          - { repo: Monolith, target: Monolith, tests: MONOLITH_BUILD_TESTS }
+          - { repo: Seasick, target: SeaSick, tests: SEASICK_BUILD_TESTS }
+          - { repo: lathe, target: Lathe, tests: LATHE_BUILD_TESTS }
+          - { repo: Grotto, target: Grotto, tests: GROTTO_BUILD_TESTS }
+          - { repo: divebomb, target: Divebomb, tests: DIVEBOMB_BUILD_TESTS }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: kevinwkaye/${{ matrix.pedal.repo }}
+          path: pedal
+
+      - name: Which commit
+        id: sha
+        shell: bash
+        run: echo "sha=$(git -C pedal rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: out
+          key: pedal-v1-${{ matrix.os }}-${{ matrix.pedal.repo }}-${{ steps.sha.outputs.sha }}
+
+      - name: Dependencies
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libasound2-dev libfreetype-dev libfontconfig1-dev libx11-dev \
+            libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libgl-dev libcurl4-openssl-dev
+
+      - name: Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmake -S pedal -B build -A x64 -D${{ matrix.pedal.tests }}=OFF
+          else
+            cmake -S pedal -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -D${{ matrix.pedal.tests }}=OFF
+          fi
+          cmake --build build --config Release --target ${{ matrix.pedal.target }}_VST3 --parallel 4
+          mkdir -p out
+          cp -r build/${{ matrix.pedal.target }}_artefacts/Release/VST3/*.vst3 out/
+          # the Pi's copies without their debugging symbols: a quarter smaller
+          if [ "$RUNNER_OS" = "Linux" ]; then find out -name "*.so" -exec strip --strip-unneeded {} \; ; fi
+          ls -R out | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pedal-${{ runner.os }}-${{ matrix.pedal.repo }}
+          path: out
+          retention-days: 3
+
   windows:
-    needs: prepare
+    needs: [prepare, pedals]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +129,20 @@ jobs:
       - name: Link test (start Keystone, connect like the phone)
         run: python tools/linktest.py build\app\Keystone_artefacts\Release\Keystone.exe
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pedal-Windows-*
+          path: build/app/Keystone_artefacts/Release/Pedals
+          merge-multiple: true
+
+      - name: Pedal bench (every Kaleidoscope pedal through the rack)
+        run: |
+          build\app\pedal_bench_artefacts\Release\pedal_bench.exe build\app\Keystone_artefacts\Release\Pedals bench-pedals-windows.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Kaleidoscope test (load every pedal like the phone)
+        run: python tools/kaltest.py build\app\Keystone_artefacts\Release\Keystone.exe
+
       - name: Check the laptop scripts (Windows PowerShell 5.1, as on the laptop)
         shell: powershell
         run: |
@@ -77,7 +160,7 @@ jobs:
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress | Out-Null
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VERSION "/DSourceDir=..\build\app\Keystone_artefacts\Release" "/DAvx2Dir=..\build-avx2\app\Keystone_artefacts\Release" installer\keystone.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=$env:VERSION "/DSourceDir=..\build\app\Keystone_artefacts\Release" "/DAvx2Dir=..\build-avx2\app\Keystone_artefacts\Release" "/DPedalsDir=..\build\app\Keystone_artefacts\Release\Pedals" installer\keystone.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Get-ChildItem dist
 
@@ -87,10 +170,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release upload "v$env:VERSION" "dist\Keystone-$env:VERSION-Setup.exe" bench-windows.md --clobber -R $env:GITHUB_REPOSITORY
+          gh release upload "v$env:VERSION" "dist\Keystone-$env:VERSION-Setup.exe" bench-windows.md bench-pedals-windows.md --clobber -R $env:GITHUB_REPOSITORY
 
   linux-arm64:
-    needs: prepare
+    needs: [prepare, pedals]
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -125,6 +208,23 @@ jobs:
           cat "$HOME/Documents/Keystone/keystone.log" 2>/dev/null | tail -30 || true
           grep -q '"version"' "$HOME/Documents/Keystone/started.json" && echo "Started with no screen"
 
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pedal-Linux-*
+          path: build/app/Keystone_artefacts/Release/Pedals
+          merge-multiple: true
+
+      - name: Pedal bench (ARM64, like the Pi)
+        run: |
+          unset DISPLAY
+          ./build/app/pedal_bench_artefacts/Release/pedal_bench build/app/Keystone_artefacts/Release/Pedals bench-pedals-linux-arm64.md
+
+      - name: Kaleidoscope test (load every pedal like the phone, no screen)
+        run: |
+          export HOME="$RUNNER_TEMP/kalhome" && mkdir -p "$HOME/Documents"
+          unset DISPLAY
+          python3 tools/kaltest.py ./build/app/Keystone_artefacts/Release/Keystone
+
       # an hour of audio with a gig's worth of footwork, the audio on its own thread
       - name: Soak test (ARM64, like the Pi)
         run: ./build/keystone_tests --soak ${{ github.ref == 'refs/heads/main' && 60 || 10 }} | tee soak-linux-arm64.md
@@ -133,6 +233,7 @@ jobs:
         run: |
           mkdir -p dist/keystone
           cp build/app/Keystone_artefacts/Release/Keystone dist/keystone/keystone
+          cp -r build/app/Keystone_artefacts/Release/Pedals dist/keystone/Pedals
           cp installer/README.txt dist/keystone/
           echo "$VERSION" > dist/keystone/VERSION
           mkdir -p dist/keystone/pi && cp pi/* dist/keystone/pi/
@@ -148,7 +249,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v$VERSION" "Keystone-$VERSION-linux-arm64.tar.gz" bench-linux-arm64.md soak-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
+        run: gh release upload "v$VERSION" "Keystone-$VERSION-linux-arm64.tar.gz" bench-linux-arm64.md bench-pedals-linux-arm64.md soak-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
 
   # The ready-made Pi image: Raspberry Pi OS Lite with Keystone already in it
   pi-image:
@@ -216,6 +317,9 @@ jobs:
             echo
             echo "## Measured on the Linux ARM64 build machine"
             sed 1,2d bench-linux-arm64.md
+            echo
+            echo "## Kaleidoscope pedals, ARM64 (like the Pi)"
+            sed 1,2d bench-pedals-linux-arm64.md
             echo
             echo "Built from ${GITHUB_SHA::7}."
           } > notes.md
