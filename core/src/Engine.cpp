@@ -27,6 +27,9 @@ namespace ks
 {
 // Bitrot on at Level 40%: +3 dB over the sound going into it
 static constexpr float kBitStep = 1.41254f;
+// Bitrot's level: how long the first playing after switching on takes to land it, and how
+// slowly it follows your playing after that
+static constexpr float kBitSettleSec = 1.5f, kBitHoldSec = 4.0f;
 struct Engine::Impl
 {
     float sr = 48000;
@@ -75,6 +78,13 @@ struct Engine::Impl
     std::vector<float> bitG;
     DelayLine bitLow;   // the bottom end, lined up with the drive for Bitrot's reference
     bool bitFresh = true;
+    // Bitrot's level lands quickly when you switch it on, then holds steady: it learns only
+    // while its own gate is open and, once settled, over several seconds, so it no longer
+    // rides each note or sinks in the gaps between phrases (0.5.3)
+    bool bitSounding = false;
+    float bitSettle = 0, bitAvgSlow = 0.0001f;
+    float bitPeakIn = 0, bitPeakFall = 0.99999f;   // recent playing level, so a ringing tail isn't learnt
+    float bitRefPeak = 0;                          // the same for the make-up, per block
     float bitPedal = 0; bool bitPedalFresh = true;   // Bitrot's pedal job, glided
     float wRev = 0, wCut = 1; bool watchFresh = true, bitHold = false;   // the watch on Bitrot
 
@@ -173,7 +183,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.drone.prepare (s);
     d.drive.prepare (s, d.maxBlock);
     d.bitrot.prepare (s);
-    d.bitAvg = 1.0f - std::exp (-1.0f / (0.3f * (float) s)); d.bitPowIn = d.bitPowSy = 0; d.bitMatch = 1; d.bitPostPow = 0; d.bitRefS = d.bitOutS = 0; d.bitDryGain = 1; d.bitMake = 1;
+    d.bitAvg = 1.0f - std::exp (-1.0f / (0.3f * (float) s)); d.bitAvgSlow = 1.0f - std::exp (-1.0f / (kBitHoldSec * (float) s)); d.bitSettle = 0; d.bitSounding = false; d.bitPeakIn = 0; d.bitRefPeak = 0; d.bitPeakFall = std::exp (-1.0f / (3.0f * (float) s)); d.bitPowIn = d.bitPowSy = 0; d.bitMatch = 1; d.bitPostPow = 0; d.bitRefS = d.bitOutS = 0; d.bitDryGain = 1; d.bitMake = 1;
     d.preamp.prepare (s);
     d.iron.prepare (s);
     d.filter.prepare (s);
@@ -617,7 +627,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                     }
                 }
                 const bool active = Vb (v, P::BitrotOn) || d.bitrotOn.current() > 1.0e-4f;
-                if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); d.bitFresh = true; return; }
+                if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); d.bitFresh = true; d.bitSettle = 0; d.bitSounding = false; return; }
                 float* sy = d.synthBuf.data();
                 for (int i = 0; i < n; ++i) sy[i] = d.cleanBuf[(size_t) i];   // the whole bass, sub included, so it tracks the fundamental
                 d.bitrot.process (sy, n);
@@ -631,7 +641,10 @@ void Engine::process (const float* in, float* out, int numSamples)
                     const float lo = d.lowBuf[(size_t) i] * ll;
                     return hb[i] * hb[i] + lo * lo;
                 };
-                if (d.bitFresh)
+                // only learn while Bitrot's own gate is open: between notes the synth is silent
+                // and the bass is down to hiss, and learning there pulled the next phrase down
+                d.bitSounding = d.bitrot.sounding();
+                if (d.bitFresh && d.bitSounding)
                 {
                     // just switched on: start from this block's levels, so it lands level at once
                     double pi = 0, ps = 0;
@@ -640,19 +653,31 @@ void Engine::process (const float* in, float* out, int numSamples)
                     if (d.bitPowIn > 1.0e-6f && d.bitPowSy > 1.0e-8f) d.bitMatch = clampf (std::sqrt (d.bitPowIn / d.bitPowSy), 0.05f, 4.0f);
                     d.bitFresh = false;
                 }
+                // settling: the first moments of playing find the level quickly; after that it
+                // holds, following only slow changes in how hard you play
+                const bool settling = d.bitSettle < kBitSettleSec;
+                const float matchRate = settling ? d.bitAvg * 0.25f : d.bitAvgSlow;
+                const bool learn = d.bitSounding && ! d.bitHold;
                 for (int i = 0; i < n; ++i)
                 {
                     const float q = sy[i];
-                    d.bitPowIn += (refPow (i) - d.bitPowIn) * d.bitAvg;
-                    d.bitPowSy += (q * q - d.bitPowSy) * d.bitAvg;
-                    // only learn while a note sounds, so the gap between notes can't pull the synth up
-                    if (d.bitPowIn > 1.0e-6f && d.bitPowSy > 1.0e-8f)
+                    if (learn)
                     {
-                        const float want = clampf (std::sqrt (d.bitPowIn / d.bitPowSy), 0.05f, 4.0f);
-                        if (! d.bitHold) d.bitMatch += (want - d.bitMatch) * d.bitAvg * 0.25f;
+                        d.bitPowIn += (refPow (i) - d.bitPowIn) * d.bitAvg;
+                        d.bitPowSy += (q * q - d.bitPowSy) * d.bitAvg;
+                        d.bitPeakIn = std::max (d.bitPowIn, d.bitPeakIn * d.bitPeakFall);
+                        // the synth holds full level through a note while the bass dies away, so
+                        // only learn near how hard you're playing, never from a fading tail
+                        const bool playing = settling || d.bitPowIn > d.bitPeakIn * 0.25f;
+                        if (playing && d.bitPowIn > 1.0e-6f && d.bitPowSy > 1.0e-8f)
+                        {
+                            const float want = clampf (std::sqrt (d.bitPowIn / d.bitPowSy), 0.05f, 4.0f);
+                            d.bitMatch += (want - d.bitMatch) * matchRate;
+                        }
                     }
                     sy[i] = q * d.bitMatch * d.bitTrim;
                 }
+                if (d.bitSounding) d.bitSettle += (float) n / d.sr;
                 // the pedal's sweep goes after the level match, so the match can't undo it
                 d.bitrot.sweep (sy, n);
                 for (int i = 0; i < n; ++i)
@@ -748,22 +773,28 @@ void Engine::process (const float* in, float* out, int numSamples)
             // after the preamp sits Level's step over what it would be with Bitrot off.
             {
                 const float a = 1.0f - std::exp (-(float) n / (0.3f * d.sr));
+                // the make-up holds steady once Bitrot has settled, like the match before it
+                const float aMake = d.bitSettle < kBitSettleSec ? a : 1.0f - std::exp (-(float) n / (kBitHoldSec * 1.5f * d.sr));
                 const float ref = (float) (d.bitRefAcc / n), out = (float) (d.bitOutAcc / n);
                 const bool sounding = ref > 1.0e-6f;   // only while a note sounds
-                if (sounding)
+                // with Bitrot on, only while its gate is open, so a ringing tail with the synth
+                // shut can't skew what the make-up aims at
+                if (sounding && (d.bitrotOn.current() < 1.0e-3f || d.bitSounding))
                 {
                     d.bitRefS += (ref - d.bitRefS) * a;
                     d.bitOutS += (out - d.bitOutS) * a;
                 }
                 const float g = d.bitrotOn.current();
+                d.bitRefPeak = std::max (d.bitRefS, d.bitRefPeak * std::exp (-(float) n / (3.0f * d.sr)));
+                const bool playing = d.bitSettle < kBitSettleSec || d.bitRefS > d.bitRefPeak * 0.25f;
                 if (sounding && g < 1.0e-3f && d.bitRefS > 1.0e-7f)
                     d.bitDryGain += (clampf (d.bitOutS / d.bitRefS, 0.01f, 100.0f) - d.bitDryGain) * a;
-                else if (sounding && g > 0.5f && ! d.bitHold && d.bitOutS > 1.0e-8f)
+                else if (sounding && d.bitSounding && playing && g > 0.5f && ! d.bitHold && d.bitOutS > 1.0e-8f)
                 {
                     const float lv = V (v, P::BitrotVol) / 0.4f;
                     const float target = kBitStep * kBitStep * lv * lv * d.bitDryGain * d.bitRefS;
                     const float want = clampf (std::sqrt (target / d.bitOutS), 0.25f, 4.0f);
-                    d.bitMake += (want - d.bitMake) * a;
+                    d.bitMake += (want - d.bitMake) * aMake;
                 }
             }
 

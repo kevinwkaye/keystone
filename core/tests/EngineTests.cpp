@@ -782,6 +782,66 @@ static void testBitrotLevel()
     CHECK (loud > quiet + 6.0 && quiet < off + 1.0, "Level is a gain stage: 20%% %+.1f dB, 80%% %+.1f dB", quiet - off, loud - off);
 }
 
+// Bitrot holds its level: once it has settled it no longer rides each note, sags under a
+// note left ringing or dips after a softer bar, all of which made it swell and fall through
+// a riff (0.5.3, found in a rehearsal take)
+static void testBitrotSteady()
+{
+    std::printf ("Bitrot steady level\n");
+    std::mt19937 rng (7);
+    std::normal_distribution<float> hiss (0.0f, 2.0e-4f);
+    auto riff = [] (double seconds, double amp)
+    {
+        std::vector<float> in;
+        const double notes[4] = { 82.4, 110.0, 98.0, 73.4 };
+        for (int k = 0; in.size() < (size_t) (seconds * kSr); ++k) { auto n = pluck (notes[k % 4], 0.25, amp, 0.6); in.insert (in.end(), n.begin(), n.end()); }
+        in.resize ((size_t) (seconds * kSr));
+        return in;
+    };
+    auto add = [] (std::vector<float>& to, const std::vector<float>& x) { to.insert (to.end(), x.begin(), x.end()); };
+    auto run = [&] (std::vector<float> in)
+    {
+        for (auto& x : in) x += hiss (rng);
+        Engine e; e.prepare (kSr, 480);
+        e.setParam (P::BitrotOn, 1);
+        e.setParam (P::BitrotClean, 0);   // the synth alone
+        std::vector<float> y (in.size());
+        for (size_t i = 0; i < in.size(); i += 480)
+        {
+            const int n = (int) std::min<size_t> (480, in.size() - i);
+            e.process (in.data() + i, y.data() + i, n);
+            e.idle();
+        }
+        return y;
+    };
+    auto db = [] (const std::vector<float>& y, double a, double b)
+    { return 20 * std::log10 (rms (y.data() + (size_t) (a * kSr), (size_t) ((b - a) * kSr)) + 1e-12); };
+    {
+        // a riff, one low note left to ring for four seconds, two seconds of hiss, the riff again
+        std::vector<float> in = riff (4.0, 0.3);
+        add (in, pluck (55.0, 4.0, 0.3, 1.5));
+        add (in, std::vector<float> ((size_t) (2.0 * kSr), 0.0f));
+        add (in, riff (4.0, 0.3));
+        auto y = run (in);
+        const double steady = db (y, 2.5, 4.0);
+        const double tail = db (y, 7.0, 7.8);
+        const double back = db (y, 10.1, 11.0);
+        CHECK (std::fabs (tail - steady) < 4.0, "a note left ringing: the synth holds (%+.1f dB at its tail, the old engine sank 17)", tail - steady);
+        CHECK (std::fabs (back - steady) < 3.0, "after the gap the riff comes back at the same level (%+.1f dB)", back - steady);
+    }
+    {
+        // a riff with one softer bar in it (12 dB down): the synth, like the pedal, stays put
+        std::vector<float> in = riff (6.0, 0.3);
+        add (in, riff (1.2, 0.075));
+        add (in, riff (5.0, 0.3));
+        auto y = run (in);
+        const double steady = db (y, 4.5, 6.0);
+        double lo = 1e9;
+        for (double t = 6.0; t < 10.0; t += 0.25) lo = std::min (lo, db (y, t, t + 0.25));
+        CHECK (steady - lo < 4.0, "a softer bar: the synth dips %.1f dB at most (mark under 4, the old engine dipped 10)", steady - lo);
+    }
+}
+
 static void testBitrotSynth()
 {
     std::printf ("Bitrot synth\n");
@@ -2458,6 +2518,7 @@ int main (int argc, char** argv)
         testTempo();
         testBitrotSynth();
         testBitrotLevel();
+        testBitrotSteady();
     testOffMeansOff();
     testValvePreamp();
     testGrainEffects();

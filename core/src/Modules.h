@@ -241,6 +241,7 @@ public:
         }
     }
     float lock() const { return eng.uiLock.load (std::memory_order_relaxed); }
+    bool sounding() const { return eng.gate(); }   // its gate is open: a note is playing
 
     // The pedal's Sweep: a resonant low-pass on the synth alone. Two state variable stages,
     // the second carrying the resonance, so it closes steeply and squeals at the cutoff
