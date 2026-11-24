@@ -2,7 +2,10 @@
 
 using namespace juce;
 
-AudioHost::AudioHost (ks::Engine& e, Keeper& k, PedalRack* pedals) : engine (e), keeper (k), rack (pedals) {}
+AudioHost::AudioHost (ks::Engine& e, Keeper& k, PedalRack* pedals) : engine (e), keeper (k), rack (pedals)
+{
+    engine.setHostRecords (true);   // takes record the output after Kaleidoscope's pedal joins it
+}
 
 AudioHost::~AudioHost() { stop(); }
 
@@ -270,6 +273,8 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
     engine.process (monoIn.data(), monoOut.data(), n);
     // Kaleidoscope: the pedal hears the clean bass and joins the output (Keystone is resting)
     if (rack != nullptr && rack->running()) rack->process (monoIn.data(), monoOut.data(), n, engine.tunerMuting(), engine.getParam (ks::P::Tempo));
+
+    engine.record (monoIn.data(), monoOut.data(), n);   // the take: dry bass and what goes to the amp
 
     // mono out on every output channel, so either output feeds the amp
     for (int c = 0; c < numOut; ++c)

@@ -117,6 +117,10 @@ public:
 
     // the rehearsal recorder hears the dry bass and the output of every block
     void setRecorder (Recorder* r) { recorder.store (r); }
+    // A host that adds to the output after process() (Kaleidoscope's pedals) records the
+    // finished block itself with record(), so the take has what really went to the amp (0.5.3)
+    void setHostRecords (bool on) { hostRecords.store (on); }
+    void record (const float* dry, const float* out, int n);
     float bloom() const { return job[3].value.load(); }
     void action (Action a);
     void setLightMode (bool light) { lightRequest.store (light); }
@@ -158,6 +162,7 @@ private:
     std::atomic<float> lastPedal { -1.0f }, cpuLoad { 0.0f };
     std::atomic<int> rigNow { 0 };
     std::atomic<Recorder*> recorder { nullptr };
+    std::atomic<bool> hostRecords { false };
     std::atomic<float> meltPos { 0.0f };
     std::atomic<bool> squeezeHeld { false }, runawayHeld { false }, brakeHeld { false };
     std::atomic<float> runawayNow { 0.0f };

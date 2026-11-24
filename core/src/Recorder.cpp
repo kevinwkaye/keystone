@@ -105,10 +105,20 @@ void Recorder::flushForTests()
 // ---------------------------------------------------------------------------------------
 // The writer thread
 // ---------------------------------------------------------------------------------------
+// What's loaded when a take starts: the song, and the Kaleidoscope pedal if one is up
+static void noteContext (const std::string& w, std::string& song, std::string& kal)
+{
+    auto starts = [&] (const char* p) { return w.rfind (p, 0) == 0; };
+    if (starts ("Song: ")) song = w;
+    else if (starts ("Kaleidoscope: no pedal") || starts ("Keystone: ") || starts ("Kuddle: ")) kal.clear();
+    else if (starts ("Kaleidoscope: ")) kal = w;
+}
+
 void Recorder::run()
 {
     std::vector<int32_t> buf;
     std::string context;   // the song loaded, for the start of a take
+    std::string kalContext;   // the Kaleidoscope pedal loaded, if any (0.5.3)
     while (! quit.load())
     {
         {
@@ -130,7 +140,7 @@ void Recorder::run()
         int64_t from = readFrame;
         if (! active.load())
         {
-            for (auto& m : marks) if (m.second.rfind ("Song: ", 0) == 0) context = m.second;
+            for (auto& m : marks) noteContext (m.second, context, kalContext);
             marks.clear();
             stopRequest.store (false);
             int64_t loud = -1;
@@ -143,6 +153,7 @@ void Recorder::run()
             if (! file) { readFrame = w; caughtUp.store (w); continue; }
             const std::lock_guard<std::mutex> l (lock);
             if (! context.empty()) takeMarks.emplace_back (0, context);
+            if (! kalContext.empty()) takeMarks.emplace_back (0, kalContext);
         }
 
         // write what's new
@@ -176,7 +187,7 @@ void Recorder::run()
         readFrame = w;
         {
             const std::lock_guard<std::mutex> l (lock);
-            for (auto& m : marks) takeMarks.emplace_back (std::max<int64_t> (0, m.first - takeStart), m.second);
+            for (auto& m : marks) { takeMarks.emplace_back (std::max<int64_t> (0, m.first - takeStart), m.second); noteContext (m.second, context, kalContext); }
             markCount.store ((int) takeMarks.size());
         }
         if (frames - lastHeader > (int64_t) (5 * rate)) { writeHeader(); lastHeader = frames; }

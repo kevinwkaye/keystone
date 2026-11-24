@@ -1744,6 +1744,49 @@ static void testNewDefaults()
     { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
+// Kaleidoscope (0.5.3): the take records what really goes to the amp, the pedal included,
+// and a take that starts with a pedal loaded says which pedal it was
+static void testRecorderKaleidoscope()
+{
+    std::printf ("The recorder with a Kaleidoscope pedal\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_rec_kal";
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
+    Engine e; e.prepare (kSr, 128);
+    e.setHostRecords (true);
+    Controller c (e, dir.string(), (dir / "caps").string());
+    c.load();
+    auto& r = c.recorder();
+    c.mark ("Kaleidoscope: Changeling");
+    // the host's block: Keystone resting (silent), the pedal adds its sound afterwards
+    auto in = pluck (110.0, 2.0, 0.6, 0.6);
+    std::vector<float> out (128);
+    for (size_t i = 0; i + 128 <= in.size(); i += 128)
+    {
+        e.process (in.data() + i, out.data(), 128);
+        for (int k = 0; k < 128; ++k) out[(size_t) k] = 0.5f * std::sin ((float) (i + (size_t) k) * 0.05f);   // the pedal
+        e.record (in.data() + i, out.data(), 128);
+    }
+    r.flushForTests();
+    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+    r.stopTake();
+    for (int k = 0; k < 40 && r.recording(); ++k) std::this_thread::sleep_for (std::chrono::milliseconds (25));
+    const auto takes = r.takes();
+    CHECK (takes.size() == 1, "a take (%d)", (int) takes.size());
+    if (takes.size() != 1) return;
+    std::ifstream f (dir / "Recordings" / (takes[0].name + ".wav"), std::ios::binary);
+    std::vector<char> d ((std::istreambuf_iterator<char> (f)), std::istreambuf_iterator<char>());
+    int peakOut = 0;
+    for (size_t i = 44 + 3; i + 2 < d.size(); i += 6)
+    {
+        int v = (uint8_t) d[i] | ((uint8_t) d[i + 1] << 8) | ((int8_t) d[i + 2] << 16);
+        peakOut = std::max (peakOut, std::abs (v));
+    }
+    CHECK (peakOut > (1 << 21), "the amp track has the pedal in it (peak %.2f)", peakOut / 8388608.0);
+    std::ifstream js (dir / "Recordings" / (takes[0].name + ".json"));
+    const std::string side ((std::istreambuf_iterator<char> (js)), std::istreambuf_iterator<char>());
+    CHECK (side.find ("Kaleidoscope: Changeling") != std::string::npos, "marked with the pedal loaded at the start");
+}
+
 static void testRecorder()
 {
     std::printf ("The rehearsal recorder\n");
@@ -2435,6 +2478,7 @@ int main (int argc, char** argv)
         testKaleidoscope();
         testNewDefaults();
         testRecorder();
+        testRecorderKaleidoscope();
         testFirmware();
         testBackup();
         testMyDefaults();
