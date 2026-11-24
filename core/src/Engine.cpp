@@ -25,6 +25,8 @@
 
 namespace ks
 {
+// Bitrot on at Level 40%: +3 dB over the sound going into it
+static constexpr float kBitStep = 1.41254f;
 struct Engine::Impl
 {
     float sr = 48000;
@@ -62,8 +64,16 @@ struct Engine::Impl
     Smoothed bloomS;
     std::vector<float> lowBuf, highBuf, cleanBuf, droneBuf, synthBuf, lowMul, synthG;
     Smoothed bitrotClean;
-    // Bitrot's synth, matched to the level you play at, so turning it on makes it fuzzier, not louder
+    // Bitrot's synth, matched to the sound reaching it (after the drive by default), then
+    // stepped up like a gain stage: at Level 40% switching it on is +3 dB (0.5.1)
     float bitPowIn = 0, bitPowSy = 0, bitMatch = 1, bitAvg = 0.0005f, bitTrim = 1;
+    float bitPostPow = 0;   // the sound after the preamp, for Bitrot placed there
+    // the step up is held at the preamp's output, so the valve can't squash it back: the
+    // preamp's gain is learnt while Bitrot is off, and a make-up gain after it lands the step
+    double bitRefAcc = 0, bitOutAcc = 0;
+    float bitRefS = 0, bitOutS = 0, bitDryGain = 1, bitMake = 1;
+    std::vector<float> bitG;
+    DelayLine bitLow;   // the bottom end, lined up with the drive for Bitrot's reference
     bool bitFresh = true;
     float bitPedal = 0; bool bitPedalFresh = true;   // Bitrot's pedal job, glided
     float wRev = 0, wCut = 1; bool watchFresh = true, bitHold = false;   // the watch on Bitrot
@@ -158,11 +168,12 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.wetLevel.setTime (0.03f, s); d.wetLevel.reset (1);
     d.fullBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.lowAlign.prepare (Drive::kLatency + Preamp::kLatency + 4);
+    d.bitLow.prepare (Drive::kLatency + 4);
     d.low.prepare (s);
     d.drone.prepare (s);
     d.drive.prepare (s, d.maxBlock);
     d.bitrot.prepare (s);
-    d.bitAvg = 1.0f - std::exp (-1.0f / (0.3f * (float) s)); d.bitPowIn = d.bitPowSy = 0; d.bitMatch = 1;
+    d.bitAvg = 1.0f - std::exp (-1.0f / (0.3f * (float) s)); d.bitPowIn = d.bitPowSy = 0; d.bitMatch = 1; d.bitPostPow = 0; d.bitRefS = d.bitOutS = 0; d.bitDryGain = 1; d.bitMake = 1;
     d.preamp.prepare (s);
     d.iron.prepare (s);
     d.filter.prepare (s);
@@ -213,6 +224,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.synthBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.lowMul.assign ((size_t) d.maxBlock, 1.0f);
     d.synthG.assign ((size_t) d.maxBlock, 0.0f);
+    d.bitG.assign ((size_t) d.maxBlock, 0.0f);
     d.bitrotClean.setTime (0.03f, s); d.bitrotClean.reset (0.5f);
     d.tunerLp1.lowPass (2000, 0.54f, s);
     d.tunerLp2.lowPass (2000, 1.31f, s);
@@ -520,7 +532,12 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.bitrotOn.set (Vb (v, P::BitrotOn) ? bitMix : 0.0f);
         // with the watch on and the pedal Bitrot's own, Bitrot is all you hear
         d.bitrotClean.set (Vi (v, P::BitrotPedal) > 0 && watchOn.load() ? 0.0f : V (v, P::BitrotClean));
-        d.bitTrim = 0.8f * V (v, P::BitrotVol) / 0.4f;   // Level: 40% sits level with your playing, the clean under it included
+        {
+            // Level is a gain stage after the drive: at 40% the clean you keep plus the synth
+            // come out +3 dB over the sound going in (2x the power), a standard step up
+            const float keep = Vi (v, P::BitrotPedal) > 0 && watchOn.load() ? 0.0f : V (v, P::BitrotClean);
+            d.bitTrim = std::sqrt (std::max (kBitStep * kBitStep - keep * keep, 0.25f)) * V (v, P::BitrotVol) / 0.4f;
+        }
         d.preOn.set (Vb (v, P::PreOn) ? 1.0f : 0.0f);
         d.filtOn.set (Vb (v, P::FiltOn) ? 1.0f : 0.0f);
         d.dimOn.set (Vb (v, P::DimOn) ? 1.0f : 0.0f);
@@ -576,26 +593,52 @@ void Engine::process (const float* in, float* out, int numSamples)
             std::fill (lm, lm + n, 1.0f);
             float* sg = d.synthG.data();
             std::fill (sg, sg + n, 0.0f);
+            float* bg = d.bitG.data();
+            std::fill (bg, bg + n, 0.0f);
+            d.bitRefAcc = d.bitOutAcc = 0;
             auto runBitrot = [&]()
             {
+                // the dry level at Bitrot's place, on or off, for the step up (after the preamp,
+                // that's measured in the loop below)
+                if (bitrotPlace != 2)
+                {
+                    const float ll = d.lowLevel.current();
+                    const int lag = bitrotFirst ? 0 : Drive::kLatency;
+                    for (int i = 0; i < n; ++i)
+                    {
+                        d.bitLow.push (d.lowBuf[(size_t) i]);
+                        const float r = hb[i] + d.bitLow.at (lag) * ll;
+                        d.bitRefAcc += (double) r * r;
+                    }
+                }
                 const bool active = Vb (v, P::BitrotOn) || d.bitrotOn.current() > 1.0e-4f;
                 if (! active) { for (int i = 0; i < n; ++i) d.bitrotOn.next(); d.bitFresh = true; return; }
                 float* sy = d.synthBuf.data();
                 for (int i = 0; i < n; ++i) sy[i] = d.cleanBuf[(size_t) i];   // the whole bass, sub included, so it tracks the fundamental
                 d.bitrot.process (sy, n);
+                // the level it matches: the sound at its own place in the chain, bottom end included,
+                // so after the drive it matches the drive, not the clean bass
+                const float ll = d.lowLevel.current();
+                const bool post = bitrotPlace == 2;
+                auto refPow = [&] (int i)
+                {
+                    if (post) return d.bitPostPow;
+                    const float lo = d.lowBuf[(size_t) i] * ll;
+                    return hb[i] * hb[i] + lo * lo;
+                };
                 if (d.bitFresh)
                 {
                     // just switched on: start from this block's levels, so it lands level at once
                     double pi = 0, ps = 0;
-                    for (int i = 0; i < n; ++i) { pi += (double) d.cleanBuf[(size_t) i] * d.cleanBuf[(size_t) i]; ps += (double) sy[i] * sy[i]; }
+                    for (int i = 0; i < n; ++i) { pi += (double) refPow (i); ps += (double) sy[i] * sy[i]; }
                     d.bitPowIn = (float) (pi / n); d.bitPowSy = (float) (ps / n);
                     if (d.bitPowIn > 1.0e-6f && d.bitPowSy > 1.0e-8f) d.bitMatch = clampf (std::sqrt (d.bitPowIn / d.bitPowSy), 0.05f, 4.0f);
                     d.bitFresh = false;
                 }
                 for (int i = 0; i < n; ++i)
                 {
-                    const float c = d.cleanBuf[(size_t) i], q = sy[i];
-                    d.bitPowIn += (c * c - d.bitPowIn) * d.bitAvg;
+                    const float q = sy[i];
+                    d.bitPowIn += (refPow (i) - d.bitPowIn) * d.bitAvg;
                     d.bitPowSy += (q * q - d.bitPowSy) * d.bitAvg;
                     // only learn while a note sounds, so the gap between notes can't pull the synth up
                     if (d.bitPowIn > 1.0e-6f && d.bitPowSy > 1.0e-8f)
@@ -612,6 +655,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                     const float g = d.bitrotOn.next();
                     const float keep = 1.0f - g * (1.0f - d.bitrotClean.next());
                     lm[i] = keep;
+                    bg[i] = g;
                     // after the preamp, the synth joins the full sound later, untouched by the valve
                     if (bitrotPlace == 2) { sg[i] = g; continue; }
                     hb[i] = hb[i] * keep + sy[i] * g;
@@ -625,10 +669,31 @@ void Engine::process (const float* in, float* out, int numSamples)
             const bool filtHigh = Vi (v, P::FiltRange) == 1;
             for (int i = 0; i < n; ++i)
             {
+                d.lowAlign.push (d.lowBuf[(size_t) i]);
+                // bottom end dry, lined up with the full sound
+                const float lowA = d.lowAlign.at (Drive::kLatency + Preamp::kLatency);
+                const float llNow = d.lowLevel.current();
                 float h = hb[i];
                 const float pg = d.preOn.next();
                 h = d.preamp.process (h, pg);   // always the same latency, on or off
+                {
+                    // what Bitrot after the preamp matches: this sound, bottom end included
+                    const float r = h + lowA * llNow;
+                    d.bitPostPow += (r * r - d.bitPostPow) * d.bitAvg * 8.0f;
+                }
+                if (bitrotPlace == 2)
+                {
+                    const float r = h + lowA * llNow;
+                    d.bitRefAcc += (double) r * r;
+                }
                 if (sg[i] > 0.0f) h = h * lm[i] + d.synthBuf[(size_t) i] * sg[i];
+                {
+                    const float r = h + lowA * llNow * lm[i];
+                    d.bitOutAcc += (double) r * r;
+                }
+                // Bitrot's make-up, after the preamp and before everything else
+                const float mk = 1.0f + bg[i] * (d.bitMake - 1.0f);
+                h *= mk;
                 const float fg = filtHigh ? d.filtOn.next() : 0.0f;
                 if (fg > 1.0e-4f) h = h + (d.filter.process (h) - h) * fg;
                 // the pedal wah on the full sound, so the bottom end stays solid under it
@@ -651,12 +716,11 @@ void Engine::process (const float* in, float* out, int numSamples)
                 if (d.reverb.active() || droneSend != 0.0f) rv = d.reverb.process (h + gr + dl + droneSend);
 
                 // ---- sum, mono out ----
-                d.lowAlign.push (d.lowBuf[(size_t) i]);
                 // bottom end dry, bottom end wet (Dimension), full sound
-                const float lowA = d.lowAlign.at (Drive::kLatency + Preamp::kLatency);
                 float bottom = lowA * d.lowLevel.next() * vg;
                 const float wl = d.wetLevel.next();
                 if (dimLow && dg > 1.0e-4f) bottom += (d.dim.process (lowA) - lowA) * dg * wl;
+                bottom *= mk;
                 float core = bottom * lm[i] + h;
                 if (! filtHigh)
                 {
@@ -674,6 +738,30 @@ void Engine::process (const float* in, float* out, int numSamples)
                 o = d.limiter.process (o, limitOn);
                 y[i] = o;
             }
+            // ---- Bitrot's step up ----
+            // Off: learn how the preamp changes the level. On: set the make-up so the sound
+            // after the preamp sits Level's step over what it would be with Bitrot off.
+            {
+                const float a = 1.0f - std::exp (-(float) n / (0.3f * d.sr));
+                const float ref = (float) (d.bitRefAcc / n), out = (float) (d.bitOutAcc / n);
+                const bool sounding = ref > 1.0e-6f;   // only while a note sounds
+                if (sounding)
+                {
+                    d.bitRefS += (ref - d.bitRefS) * a;
+                    d.bitOutS += (out - d.bitOutS) * a;
+                }
+                const float g = d.bitrotOn.current();
+                if (sounding && g < 1.0e-3f && d.bitRefS > 1.0e-7f)
+                    d.bitDryGain += (clampf (d.bitOutS / d.bitRefS, 0.01f, 100.0f) - d.bitDryGain) * a;
+                else if (sounding && g > 0.5f && ! d.bitHold && d.bitOutS > 1.0e-8f)
+                {
+                    const float lv = V (v, P::BitrotVol) / 0.4f;
+                    const float target = kBitStep * kBitStep * lv * lv * d.bitDryGain * d.bitRefS;
+                    const float want = clampf (std::sqrt (target / d.bitOutS), 0.25f, 4.0f);
+                    d.bitMake += (want - d.bitMake) * a;
+                }
+            }
+
             // asleep once Kuddle has the bass and nothing is left ringing
             float pk = 0;
             for (int i = 0; i < n; ++i) pk = std::max (pk, std::fabs (y[i]));

@@ -6,15 +6,15 @@
 
 | Case | 64 samples | 128 samples |
 |---|---|---|
-| Song default, modelled drive | 3.9% | 3.9% |
-| Everything on, Bloom at 80% | 12.1% | 12.7% |
-| Everything on, light effects | 9.2% | 9.7% |
-| Everything on, tape delay and Haze grains | 14.1% | 13.2% |
-| Everything on, Cloud reverb | 12.3% | 11.2% |
-| Everything on, Impulse reverb (2 s) | 12.3% | 12.5% |
-| Everything on, Galaxy delay and Arp grains | 14.2% | 13.1% |
-| Groove: wah, auto filter and Dimension | 4.5% | 4.5% |
-| Kuddle, Voodoo (Keystone asleep) | 2.5% | 2.5% |
-| Kuddle with the room on | 2.6% | 2.7% |
+| Song default, modelled drive | 5.2% | 4.7% |
+| Everything on, Bloom at 80% | 17.3% | 15.8% |
+| Everything on, light effects | 12.8% | 12.5% |
+| Everything on, tape delay and Haze grains | 16.4% | 17.2% |
+| Everything on, Cloud reverb | 18.3% | 15.6% |
+| Everything on, Impulse reverb (2 s) | 15.8% | 14.3% |
+| Everything on, Galaxy delay and Arp grains | 17.9% | 17.1% |
+| Groove: wah, auto filter and Dimension | 5.2% | 5.2% |
+| Kuddle, Voodoo (Keystone asleep) | 2.6% | 2.5% |
+| Kuddle with the room on | 2.7% | 2.6% |
 
 CPU is the share of one core for one Keystone at 48 kHz, measured on the build machine.

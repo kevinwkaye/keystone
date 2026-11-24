@@ -748,22 +748,38 @@ static double toneAt (const std::vector<float>& x, size_t a, size_t n, double f)
     return 2 * std::sqrt (re * re + im * im) / (double) n;
 }
 
-// Bitrot sits before the preamp and comes in at your level: fuzzier, not louder (0.4.9)
+// Bitrot is a gain stage: switching it on steps the level up by a standard +3 dB over the
+// sound reaching it (after the drive by default), like stamping on a fuzz pedal (0.5.1).
+// Before 0.5.1 it matched the clean bass, so after the drive it came in quieter.
 static void testBitrotLevel()
 {
     std::printf ("Bitrot level\n");
-    auto in = bassLine (4.0, 0.3);
-    auto level = [&] (bool on)
+    // play a while with it off (the preamp learns your level), stamp on it, then measure
+    auto in = bassLine (16.0, 0.3);
+    auto level = [&] (bool on, int place, float vol)
     {
         Engine e; e.prepare (kSr, 64);
-        e.setParam (P::BitrotOn, on ? 1.0f : 0.0f);
-        auto y = render (e, in);
-        return 20 * std::log10 (rms (y.data() + (size_t) kSr, y.size() - (size_t) kSr) + 1e-12);
+        e.setParam (P::BitrotPlace, (float) place);
+        e.setParam (P::BitrotVol, vol);
+        std::vector<float> y (in.size());
+        for (size_t i = 0; i < in.size(); i += 64)
+        {
+            if (on && i == (size_t) (10 * kSr)) e.setParam (P::BitrotOn, 1);
+            e.process (in.data() + i, y.data() + i, 64);
+            if ((i / 64) % 16 == 0) e.idle();
+        }
+        const size_t a = (size_t) (12 * kSr);
+        return 20 * std::log10 (rms (y.data() + a, y.size() - a) + 1e-12);
     };
-    const double off = level (false), on = level (true);
-    // the synth on a plain test line reads a little under, real playing a little over (+2.8 dB
-    // on Kevin's own recording); before 0.4.9 it was +15 dB
-    CHECK (std::fabs (on - off) < 4.5, "Bitrot on: %+.1f dB against off (mark within 4.5)", on - off);
+    const char* where[3] = { "before the drive", "after the drive", "after the preamp" };
+    const double off = level (false, 1, 0.4f);
+    for (int place = 0; place < 3; ++place)
+    {
+        const double on = level (true, place, 0.4f);
+        CHECK (on - off > 1.5 && on - off < 4.5, "Bitrot %s at Level 40%%: %+.1f dB against off (mark +1.5 to +4.5, aim +3)", where[place], on - off);
+    }
+    const double quiet = level (true, 1, 0.2f), loud = level (true, 1, 0.8f);
+    CHECK (loud > quiet + 6.0 && quiet < off + 1.0, "Level is a gain stage: 20%% %+.1f dB, 80%% %+.1f dB", quiet - off, loud - off);
 }
 
 static void testBitrotSynth()
