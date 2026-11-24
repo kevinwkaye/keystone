@@ -16,8 +16,12 @@ if shutil.which("node") and _js.exists():
                           "console.log(JSON.stringify(window.KS_PEDAL_LAYOUTS))", str(_js)], capture_output=True, text=True)
     if out.returncode == 0:
         LAYOUTS = json.loads(out.stdout)
-else:
+if not LAYOUTS:
     print("note: node not found, the page layouts aren't checked")
+    if __import__("os").environ.get("CI"):
+        raise SystemExit("FAIL the build machine needs node to check the page layouts")
+else:
+    print(f"checking {len(LAYOUTS)} page layouts")
 
 
 def layout_names(L):
