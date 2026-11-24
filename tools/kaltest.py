@@ -5,8 +5,33 @@ Run after building, with pedals in the Pedals folder beside Keystone (or in
 Documents/Keystone/Pedals):  python tools/kaltest.py path/to/Keystone(.exe)
 Fails if a pedal won't load, shows no controls, or Keystone stops answering.
 """
-import json, socket, subprocess, sys, time
+import json, shutil, socket, subprocess, sys, time
 from pathlib import Path
+
+# the phone's page layouts, so every control they place can be checked against the pedal
+LAYOUTS = {}
+_js = Path(__file__).resolve().parent.parent / "android/app/src/main/assets/pedal-layouts.js"
+if shutil.which("node") and _js.exists():
+    out = subprocess.run(["node", "-e", "global.window={};eval(require('fs').readFileSync(process.argv[1],'utf8'));"
+                          "console.log(JSON.stringify(window.KS_PEDAL_LAYOUTS))", str(_js)], capture_output=True, text=True)
+    if out.returncode == 0:
+        LAYOUTS = json.loads(out.stdout)
+else:
+    print("note: node not found, the page layouts aren't checked")
+
+
+def layout_names(L):
+    names = list(L.get("top", [])) + list(L.get("steps", [])) + list(L.get("hide", []))
+    for row in L.get("rows", []):
+        for c in row:
+            if c.get("seg"):
+                names.append(c["seg"])
+            names += [k.split("|")[0] for k in c.get("knobs", [])]
+    for f in L.get("feet", []):
+        names += [f[k] for k in ("lit", "press", "text") if f.get(k)]
+    for sec in L.get("sections", []):
+        names += sec["params"]
+    return names
 
 exe = sys.argv[1]
 proc = subprocess.Popen([exe, "--background"])
@@ -71,6 +96,15 @@ try:
         if not params:
             fail(f"{pid}: no controls")
             continue
+        have = {p["name"] for p in params}
+        missing = sorted({n for n in layout_names(LAYOUTS.get(pid, {})) if n not in have})
+        if missing:
+            fail(f"{pid}: its page places controls it doesn't have: {missing}")
+        if pid in LAYOUTS:
+            placed = set(layout_names(LAYOUTS[pid]))
+            loose = [p["name"] for p in params if p["name"] not in placed]
+            if loose:
+                print(f"  {pid}: in Everything else: {loose}")
         slider = next((p for p in params if p["kind"] == "slider"), params[0])
         link.send({"t": "kalSet", "i": slider["i"], "v": 0.25})
         link.send({"t": "ping", "ts": 1})

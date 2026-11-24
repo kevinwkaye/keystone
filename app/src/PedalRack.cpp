@@ -86,6 +86,7 @@ std::unique_ptr<PedalRack::Slot> PedalRack::makeSlot (const std::string& id, std
             p.setBusesLayout (mono);
         }
     }
+    p.setPlayHead (&clock);   // the song's tempo, for the pedal's sync
     s->inChannels = p.getTotalNumInputChannels();
     s->outChannels = p.getTotalNumOutputChannels();
     if (s->outChannels < 1) { error = "That pedal has no output"; return {}; }
@@ -305,7 +306,7 @@ void PedalRack::prepare (double sampleRate, int maxBlockSize)
     if (pending != nullptr) prepareSlot (*pending);
 }
 
-void PedalRack::process (const float* in, float* out, int n, bool mute)
+void PedalRack::process (const float* in, float* out, int n, bool mute, double bpm)
 {
     std::unique_lock<std::mutex> l (swapLock, std::try_to_lock);
     if (! l.owns_lock() || active == nullptr) { gainNow.store (0.0f); return; }
@@ -333,7 +334,11 @@ void PedalRack::process (const float* in, float* out, int n, bool mute)
             else FloatVectorOperations::clear (s.buf.getWritePointer (c), len);
         }
         AudioBuffer<float> view (s.buf.getArrayOfWritePointers(), chans, len);
+        clock.bpm = jlimit (30.0, 300.0, bpm);
+        clock.sr = sr;
         p.processBlock (view, s.midi);
+        clock.ppq += (double) len / sr * clock.bpm / 60.0;
+        clock.samples += len;
         s.midi.clear();
         const float* L = s.buf.getReadPointer (0);
         const float* R = s.buf.getReadPointer (s.outChannels > 1 ? 1 : 0);

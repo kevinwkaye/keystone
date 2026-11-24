@@ -3,7 +3,7 @@ name: Build Keystone
 on:
   push:
     # main builds and releases; next only builds and tests (work in progress)
-    branches: [main, next]
+    branches: [main, next, pedal-faces]
     # Kuddle's plugin has its own build (kuddle.yml); its engine is part of Keystone now
     paths:
       - "**"
@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: "0.5.1"
+  VERSION: "0.5.2"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.

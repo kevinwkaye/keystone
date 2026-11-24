@@ -19,7 +19,7 @@ var KS = (function () {
     take: '', takeInfo: null, pickFrom: null, pack: null, making: false,
     upd: { latest: '', assets: [], checkedAt: 0, checking: false, busy: null, err: null, msg: '' },
     // Kaleidoscope: one plugin pedal at a time
-    kal: { on: false, loaded: '', pick: 0, installed: [], gigLock: false }, kalParams: [], kalId: '', pedalTable: [], kalSel: null
+    kal: { on: false, loaded: '', pick: 0, installed: [], gigLock: false }, kalParams: [], kalId: '', pedalTable: [], kalSel: null, kalOpen: {}
   };
 
   // ---------------------------------------------------------------- transport
@@ -1293,7 +1293,7 @@ var KS = (function () {
       '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to Keystone">' + PEBBLE +
       '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">Kaleidoscope</span><span class="swap">TAP FOR KEYSTONE</span></span></button><span class="tops">' + pill() + '</span></div>' +
       (lm ? '<section class="card" style="flex-direction:row;align-items:center;gap:14px">' + kalFlip(lm.name.charAt(0), lm.colour) +
-        '<span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span class="label">Loaded now</span><span style="font-size:22px;font-weight:700">' + esc(lm.name) + '</span><span class="small">' + esc(lm.from) + '</span></span>' +
+        '<span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span class="label">Loaded now</span><span style="font-size:22px;font-weight:700">' + esc(lm.name) + '</span><span class="small">' + esc(lm.from) + '</span>' + (S.kalId === loaded ? kalDots(loaded) : '') + '</span>' +
         '<button type="button" class="wide" style="height:44px;padding:0 16px" data-go="tone">Controls</button></section>'
         : '<section class="card"><span style="font-size:17px;font-weight:700">No pedal loaded</span><span class="small">Pick one and load it. On the floor: tap A and B to look through them, D to load, hold A and B to go back to Keystone.</span></section>') +
       '<h2 class="label">Pedals</h2>' +
@@ -1303,35 +1303,132 @@ var KS = (function () {
       (loaded ? '<button type="button" class="wide" data-act="kalUnload" style="color:#F0997B">Put ' + esc(lm.name) + ' away</button>' : '') +
       gigLockRow() + nav('play') + '</section>';
   }
+  // A pedal's page: its face first (laid out like the plugin's own panel), the four
+  // footswitches lit while their jobs are on, then the rest folded into the plugin's groups.
+  function kalLayout(id) { return (window.KS_PEDAL_LAYOUTS && window.KS_PEDAL_LAYOUTS[id]) || {}; }
+  function kalByName() {
+    var m = {};
+    S.kalParams.forEach(function (p) { if (!(p.name in m)) m[p.name] = p; });
+    return m;
+  }
+  function kalLabel(L, name) { return (L.rename && L.rename[name]) || name; }
+  function kalChoice(L, p, c) { var r = L.choices && L.choices[p.name]; return (r && r[c]) || c; }
+  function kalSteps(p) { return p.choices ? p.choices.length : 0; }
+  // what lights each footswitch: on, off, or no light for a tap job
+  function kalFeet(id, by) {
+    var L = kalLayout(id), m = pedalMeta(id);
+    return [0, 1, 2, 3].map(function (k) {
+      var f = (L.feet && L.feet[k]) || {}, w = m.sw[k] || {};
+      var lp = f.lit && by[f.lit], tp = f.text && by[f.text], pp = f.press && by[f.press];
+      return { k: k, f: f, w: w, lit: lp ? (lp.v > 0.5) !== !!f.inv : null, text: tp ? tp.text : '', press: pp, litP: lp };
+    });
+  }
+  function kalDots(id) {
+    var by = kalByName(), col = pedalMeta(id).colour;
+    return '<span class="kdots" aria-label="Footswitches">' + kalFeet(id, by).map(function (t) {
+      return '<span class="kdot" style="' + (t.lit ? 'background:' + col + ';color:#111111' : t.lit === false ? '' : 'opacity:.45') + '">' + 'ABCD'.charAt(t.k) + '</span>';
+    }).join('') + '</span>';
+  }
+  function kalDialSvg(v, col) {
+    var A0 = Math.PI * 0.75, SPAN = Math.PI * 1.5, r = 26, c = 36;
+    function pt(a, rr) { return [(c + rr * Math.cos(a)).toFixed(1), (c + rr * Math.sin(a)).toFixed(1)]; }
+    function arc(a0, a1) { return 'M ' + pt(a0, r).join(' ') + ' A ' + r + ' ' + r + ' 0 ' + (a1 - a0 > Math.PI ? 1 : 0) + ' 1 ' + pt(a1, r).join(' '); }
+    var a = A0 + SPAN * Math.max(0, Math.min(1, v)), tip = pt(a, 17);
+    return '<svg width="72" height="72" viewBox="0 0 72 72" aria-hidden="true"><circle cx="36" cy="36" r="30" fill="#232327"/>' +
+      '<path d="' + arc(A0, A0 + SPAN) + '" fill="none" stroke="#3A3A40" stroke-width="5" stroke-linecap="round"/>' +
+      (v > 0.005 ? '<path d="' + arc(A0, a) + '" fill="none" stroke="' + col + '" stroke-width="5" stroke-linecap="round"/>' : '') +
+      '<line x1="36" y1="36" x2="' + tip[0] + '" y2="' + tip[1] + '" stroke="#F2EDE4" stroke-width="3" stroke-linecap="round"/></svg>';
+  }
+  function kalDial(L, p, label, col) {
+    return '<div class="kdial" data-kdial="' + p.i + '" role="slider" tabindex="0" aria-label="' + esc(kalLabel(L, p.name)) + '" aria-valuetext="' + esc(p.text) + '">' +
+      '<span class="ksvg">' + kalDialSvg(p.v, col) + '</span><span class="kn">' + esc(label) + '</span><span class="kv" data-kaltext="' + p.i + '">' + esc(p.text) + '</span></div>';
+  }
+  function kalSeg(L, p, col, cols, vertical) {
+    var n = kalSteps(p), cur = Math.round(p.v * (n - 1));
+    return '<div class="seg kseg" style="' + (vertical ? 'grid-template-columns:1fr' : 'grid-template-columns:repeat(' + cols + ',minmax(0,1fr))') + '">' + p.choices.map(function (c, k) {
+      return '<button type="button" class="' + (k === cur ? 'on' : '') + '" style="' + (k === cur ? 'background:' + col + ';color:#111111' : '') + '" data-kalset="' + p.i + '" data-v="' + (n > 1 ? k / (n - 1) : 0) + '">' + esc(kalChoice(L, p, c)) + '</button>';
+    }).join('') + '</div>';
+  }
+  function kalControl(L, p, col) {
+    var name = esc(kalLabel(L, p.name));
+    if (p.kind === 'toggle')
+      return '<label class="switch" style="background:#262626">' + name + '<input type="checkbox" data-kaltoggle="' + p.i + '"' + (p.v > 0.5 ? ' checked' : '') + ' style="accent-color:' + col + '"></label>';
+    if (p.kind === 'choice') {
+      var n = p.choices.length;
+      return '<div class="small">' + name + '</div>' + kalSeg(L, p, col, n <= 4 ? n : 3, false);
+    }
+    return '<label class="slider"><span class="ends"><span>' + name + '</span><span data-kaltext="' + p.i + '">' + esc(p.text) + '</span></span>' +
+      '<input type="range" min="0" max="1000" value="' + Math.round(p.v * 1000) + '" data-kalrange="' + p.i + '" aria-label="' + name + '" style="accent-color:' + col + '"></label>';
+  }
   function kalToneScreen() {
     var id = S.kal.loaded;
     if (!id) return kalPedalsScreen();
-    var m = pedalMeta(id), col = m.colour;
-    var keys = ['A', 'B', 'C', 'D'];
-    var sheet = '<section class="card"><h2 class="label">Footswitches: tap and hold</h2><div class="kfoot">' + m.sw.map(function (w, k) {
-      return '<span class="flip" style="width:28px;height:32px;font-size:17px;background:' + col + ';color:#111111">' + keys[k] + '</span><span>' + esc(w.tap) + '</span><span class="muted">' + esc(w.hold || '') + '</span>';
-    }).join('') + '</div>' + (m.combos ? '<span class="small">' + esc(m.combos) + ' Hold C and D for Keep.</span>' : '<span class="small">Hold C and D for Keep.</span>') +
-      '<span class="small">The expression pedal does whatever this pedal gives it. Back to the list on the phone.</span></section>';
-    var body = '';
-    if (!S.kalParams.length || S.kalId !== id) body = '<section class="card"><span class="small">Getting ' + esc(m.name) + '\'s controls…</span></section>';
-    else {
-      var rows = S.kalParams.map(function (p) {
-        if (p.kind === 'toggle')
-          return '<label class="switch" style="background:#262626">' + esc(p.name) + '<input type="checkbox" data-kaltoggle="' + p.i + '"' + (p.v > 0.5 ? ' checked' : '') + '></label>';
-        if (p.kind === 'choice') {
-          var n = p.choices.length, cur = Math.round(p.v * (n - 1)), cols = n <= 4 ? n : 3;
-          return '<div class="small">' + esc(p.name) + '</div><div class="seg kseg" style="grid-template-columns:repeat(' + cols + ',minmax(0,1fr))">' + p.choices.map(function (c, k) {
-            return '<button type="button" class="' + (k === cur ? 'on' : '') + '" data-kalset="' + p.i + '" data-v="' + (n > 1 ? k / (n - 1) : 0) + '">' + esc(c) + '</button>';
-          }).join('') + '</div>';
-        }
-        return '<label class="slider"><span class="ends"><span>' + esc(p.name) + '</span><span data-kaltext="' + p.i + '">' + esc(p.text) + '</span></span>' +
-          '<input type="range" min="0" max="1000" value="' + Math.round(p.v * 1000) + '" data-kalrange="' + p.i + '" aria-label="' + esc(p.name) + '" style="accent-color:' + col + '"></label>';
-      });
-      body = '<section class="card"><h2 class="label">Controls</h2>' + rows.join('') + '</section>';
-    }
-    return '<section class="screen" style="gap:14px">' +
-      '<div class="top"><button type="button" class="back" data-go="play">' + ICON.back + 'Pedals</button><span class="title" style="color:' + col + '">' + esc(m.name) + '</span><span></span></div>' +
-      sheet + body +
+    var m = pedalMeta(id), col = m.colour, L = kalLayout(id);
+    var head = '<div class="top"><button type="button" class="back" data-go="play">' + ICON.back + 'Pedals</button><span class="title" style="color:' + col + '">' + esc(m.name) + '</span><span></span></div>';
+    if (!S.kalParams.length || S.kalId !== id)
+      return '<section class="screen" style="gap:14px">' + head + '<section class="card"><span class="small">Getting ' + esc(m.name) + '\'s controls…</span></section>' + nav('tone') + '</section>';
+    var by = kalByName(), used = {};
+    (L.hide || []).forEach(function (n) { used[n] = true; });
+    function take(n) { var p = by[n.split('|')[0]]; if (p) used[p.name] = true; return p; }
+
+    // the face
+    var face = '';
+    (L.top || []).forEach(function (n) {
+      var p = take(n); if (!p || !p.choices) return;
+      var c = p.choices.length;
+      face += '<div class="kgroup"><span class="klabel">' + esc(kalLabel(L, p.name).toUpperCase()) + '</span>' + kalSeg(L, p, col, c > 4 ? 4 : c, false) + '</div>';
+    });
+    (L.rows || []).forEach(function (row) {
+      face += '<div class="kcols" style="grid-template-columns:repeat(' + row.length + ',minmax(0,1fr))">' + row.map(function (c) {
+        var out = '<div class="kcol"><span class="klabel" style="text-align:center">' + esc(c.title || '') + '</span>';
+        var sp = c.seg && take(c.seg);
+        if (sp && sp.choices) out += kalSeg(L, sp, col, 1, true);
+        (c.knobs || []).forEach(function (k) {
+          var p = take(k); if (!p) return;
+          out += kalDial(L, p, k.indexOf('|') > 0 ? k.split('|')[1] : kalLabel(L, p.name), col);
+        });
+        return out + '</div>';
+      }).join('') + '</div>';
+    });
+    (L.steps || []).forEach(function (n) {
+      var p = take(n); if (!p) return;
+      if (!p.choices) { face += kalControl(L, p, col); return; }
+      var c = p.choices.length;
+      face += '<div class="kgroup"><span class="klabel">' + esc(kalLabel(L, p.name).toUpperCase()) + '</span>' + kalSeg(L, p, col, c <= 4 ? c : c <= 6 ? 3 : 5, false) + '</div>';
+    });
+    if (!face) face = '<span class="small">This pedal has no face yet: its controls are below.</span>';
+
+    // the footswitches, lit while their jobs are on; the phone can tap them too
+    var feet = kalFeet(id, by).map(function (t) {
+      var can = !!(t.press || t.litP);
+      var state = t.lit === true ? 'ON' : t.lit === false ? 'OFF' : (t.text || '');
+      return '<button type="button" class="kfoot' + (t.lit ? ' lit' : '') + '"' + (can ? ' data-kfoot="' + t.k + '"' : ' disabled') +
+        ' style="' + (t.lit ? 'background:' + col + ';color:#111111' : '') + '" aria-pressed="' + (t.lit ? 'true' : 'false') + '">' +
+        '<span class="kk">' + 'ABCD'.charAt(t.k) + '</span><span class="kl">' + esc(t.w.label || '') + '</span>' +
+        '<span class="ks">' + esc(state || (can ? '' : 'On the floor')) + '</span>' +
+        '<span class="kh">' + esc(t.w.tap || '') + (t.w.hold ? ' · hold: ' + esc(t.w.hold) : '') + '</span></button>';
+    }).join('');
+
+    // going deeper: the plugin's groups, folded
+    var secs = (L.sections || []).map(function (sec, si) {
+      var ps = sec.params.map(function (n) { var p = by[n]; return p && used[p.name] !== true && used[p.name] !== 'sec' ? p : null; }).filter(Boolean);
+      ps.forEach(function (p) { used[p.name] = 'sec'; });
+      return { name: sec.name, sum: sec.sum, ps: ps, key: id + si };
+    }).filter(function (x) { return x.ps.length; });
+    (L.feet || []).forEach(function (f) { ['lit', 'press', 'text'].forEach(function (k) { if (f[k] && !used[f[k]]) used[f[k]] = 'feet'; }); });   // on the tiles already
+    var rest = S.kalParams.filter(function (p) { return !used[p.name]; });
+    if (rest.length) secs.push({ name: 'Everything else', sum: rest.length + ' more', ps: rest, key: id + 'rest' });
+    var deep = secs.map(function (x) {
+      var open = !!S.kalOpen[x.key];
+      return '<div class="kacc"><button type="button" class="kacch" data-kacc="' + esc(x.key) + '" aria-expanded="' + open + '"><span class="kat"><span class="kan">' + esc(x.name) + '</span><span class="small">' + esc(x.sum) + '</span></span><span class="kchev">' + (open ? '−' : '+') + '</span></button>' +
+        (open ? '<div class="kaccb">' + x.ps.map(function (p) { return kalControl(L, p, col); }).join('') + '</div>' : '') + '</div>';
+    }).join('');
+
+    return '<section class="screen" style="gap:14px">' + head +
+      '<section class="card kface"><span class="kstrip" style="background:' + col + '"></span><span class="klabel">' + esc(m.from.toUpperCase()) + '</span>' + face + '</section>' +
+      '<h2 class="label">Footswitches · tap here or stomp</h2><div class="kfeet">' + feet + '</div>' +
+      (m.combos ? '<span class="small">' + esc(m.combos) + ' Hold C and D for Keep.</span>' : '') +
+      (deep ? '<h2 class="label">Going deeper</h2>' + deep : '') +
       '<button type="button" class="wide" data-act="kalUnload" style="color:#F0997B">Put ' + esc(m.name) + ' away</button>' +
       nav('tone') + '</section>';
   }
@@ -1533,6 +1630,7 @@ var KS = (function () {
     if (d.savekind) { S.save = { step: 'name', kind: d.savekind }; return saveSheet(); }
     if (d.savepick) { S.save = { step: 'confirm', target: +d.savepick }; return saveSheet(); }
     if (d.kalpick) { S.kalSel = d.kalpick; return render(true); }
+    if (d.kacc) { S.kalOpen[d.kacc] = !S.kalOpen[d.kacc]; return render(true); }
     if (d.kalset != null) { kalSet(+d.kalset, +d.v); return render(true); }
     if (d.kaltoggle != null) { kalSet(+d.kaltoggle, t.checked ? 1 : 0); return render(true); }
     var i2 = d.i != null ? +d.i : -1;
@@ -1660,6 +1758,54 @@ var KS = (function () {
     if (e.key === 'Enter' && e.target.id === 'manualIp') { var mb = document.querySelector('[data-act="manual"]'); if (mb) mb.click(); }
     if (e.key === 'Enter' && e.target.id === 'noteText') { var n = document.querySelector('[data-act="note"]'); if (n) n.click(); }
   });
+
+  // Kaleidoscope: drag a knob up or down to turn it, like the plugin's own dials, and press a
+  // footswitch tile to work it (held while your finger is down, for its hold job)
+  var kd = null, kfHeld = null;
+  function kalFootDown(k) {
+    var id = S.kal.loaded; if (!id) return;
+    var t = kalFeet(id, kalByName())[k]; if (!t) return;
+    if (t.press) { send({ t: 'kalSet', i: t.press.i, v: 1 }); kfHeld = t.press; if (t.press.kind !== 'slider' || t.litP === t.press) t.press.v = 1; }
+    else if (t.litP) { var nv = t.litP.v > 0.5 ? 0 : 1; t.litP.v = nv; send({ t: 'kalSet', i: t.litP.i, v: nv }); }
+    render(true);
+  }
+  function kalFootUp() {
+    if (!kfHeld) return;
+    send({ t: 'kalSet', i: kfHeld.i, v: 0 });
+    kfHeld.v = 0; kfHeld = null;
+    setTimeout(function () { render(true); }, 60);
+  }
+  document.addEventListener('pointerdown', function (e) {
+    var d = e.target.closest && e.target.closest('[data-kdial]');
+    if (d) {
+      var p = S.kalParams[+d.dataset.kdial]; if (!p) return;
+      kd = { el: d, p: p, y: e.clientY, v: p.v };
+      S.dragging = true; S.kalDrag = p.i;
+      if (d.setPointerCapture) d.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
+    var f = e.target.closest && e.target.closest('[data-kfoot]');
+    if (f) { e.preventDefault(); kalFootDown(+f.dataset.kfoot); }
+  });
+  document.addEventListener('pointermove', function (e) {
+    if (!kd) return;
+    var p = kd.p, v = Math.max(0, Math.min(1, kd.v + (kd.y - e.clientY) / 220));
+    var n = p.choices ? p.choices.length : 0;
+    if (n > 1) v = Math.round(v * (n - 1)) / (n - 1);
+    if (Math.abs(v - p.v) < 0.0005) return;
+    p.v = v;
+    var col = pedalMeta(S.kal.loaded).colour;
+    var svg = kd.el.querySelector('.ksvg'); if (svg) svg.innerHTML = kalDialSvg(v, col);
+    if (n > 1) { var lab = kd.el.querySelector('.kv'); if (lab) lab.textContent = p.choices[Math.round(v * (n - 1))]; }
+    kalSet(p.i, v);
+  });
+  function kalPointerUp() {
+    if (kd) { kd = null; S.dragging = false; S.kalDrag = null; queueRender(true); }
+    kalFootUp();
+  }
+  document.addEventListener('pointerup', kalPointerUp);
+  document.addEventListener('pointercancel', kalPointerUp);
 
   // The pedal bar on Play: drag it to do the pedal's job when there's no pedal
   function pedalAt(e) {

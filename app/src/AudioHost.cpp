@@ -269,7 +269,7 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
 
     engine.process (monoIn.data(), monoOut.data(), n);
     // Kaleidoscope: the pedal hears the clean bass and joins the output (Keystone is resting)
-    if (rack != nullptr && rack->running()) rack->process (monoIn.data(), monoOut.data(), n, engine.tunerMuting());
+    if (rack != nullptr && rack->running()) rack->process (monoIn.data(), monoOut.data(), n, engine.tunerMuting(), engine.getParam (ks::P::Tempo));
 
     // mono out on every output channel, so either output feeds the amp
     for (int c = 0; c < numOut; ++c)

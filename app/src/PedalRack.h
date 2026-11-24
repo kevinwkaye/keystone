@@ -44,7 +44,8 @@ public:
     // ---- audio thread ----
     void prepare (double sampleRate, int maxBlock);   // while the device is stopped
     // adds the pedal into out (mono), fed from in (the clean bass)
-    void process (const float* in, float* out, int n, bool mute);
+    // bpm: the song's tempo, which the pedal sees as the host's (its "sync" follows the song)
+    void process (const float* in, float* out, int n, bool mute, double bpm = 120.0);
     bool running() const { return hasPedal.load(); }
 
 private:
@@ -58,6 +59,26 @@ private:
         std::vector<juce::AudioProcessorParameter*> shown;   // the controls the phone sees
         std::vector<float> last;                              // for spotting changes
     };
+
+    // The song's tempo as the pedal's host transport: always rolling, 4/4
+    struct SongClock : juce::AudioPlayHead
+    {
+        double bpm = 120.0, ppq = 0.0, sr = 48000.0;
+        int64_t samples = 0;
+        juce::Optional<PositionInfo> getPosition() const override
+        {
+            PositionInfo p;
+            p.setBpm (bpm);
+            p.setTimeSignature (juce::AudioPlayHead::TimeSignature { 4, 4 });
+            p.setPpqPosition (ppq);
+            p.setPpqPositionOfLastBarStart (std::floor (ppq / 4.0) * 4.0);
+            p.setTimeInSamples (samples);
+            p.setTimeInSeconds ((double) samples / sr);
+            p.setIsPlaying (true);
+            return p;
+        }
+    };
+    SongClock clock;
 
     void timerCallback() override;
     std::unique_ptr<Slot> makeSlot (const std::string& id, std::string& error);

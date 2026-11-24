@@ -1,6 +1,6 @@
 #pragma once
 // Kaleidoscope: the pedals Keystone can load, one at a time, for messing about.
-// Each is the same plugin you use in Ableton, built for this machine and kept in the
+// Each is one of your own pedal plugins, built for this machine and kept in the
 // Pedals folder beside Keystone. This table gives each one its name on screen, what it
 // was modelled on, its colour, and what its footswitches do (from each plugin's own
 // foot control plan). A pedal that isn't in the table still loads, with plain labels.

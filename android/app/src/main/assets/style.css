@@ -271,3 +271,31 @@ nav.nav button.rigbtn.on { background: var(--flip); }
 .kfoot { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr); gap: 8px 10px; align-items: center; font-size: 15px; }
 .kseg button { font-size: 14px; }
 .wide:disabled { color: var(--dim); }
+
+/* Kaleidoscope pedal pages: the face, the feet, going deeper */
+.kface { position: relative; overflow: hidden; padding-top: 20px; gap: 14px; }
+.kstrip { position: absolute; left: 0; right: 0; top: 0; height: 6px; }
+.klabel { font-size: 12px; letter-spacing: 0.12em; color: var(--muted); }
+.kgroup { display: flex; flex-direction: column; gap: 6px; }
+.kcols { display: grid; gap: 6px; }
+.kcol { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: 0; }
+.kcol .kseg { gap: 4px; }
+.kcol .kseg button { min-height: 40px; }
+.kdial { display: flex; flex-direction: column; align-items: center; gap: 2px; touch-action: none; user-select: none; -webkit-user-select: none; cursor: ns-resize; }
+.kdial .kn { font-size: 14px; font-weight: 700; text-align: center; }
+.kdial .kv { font-size: 13px; color: var(--muted); text-align: center; min-height: 16px; }
+.kfeet { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.kfoot { min-height: 104px; border: none; border-radius: 10px; background: var(--card); color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 2px; padding: 8px 4px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.kfoot .kk { font-size: 22px; font-weight: 700; }
+.kfoot .kl { font-size: 12px; letter-spacing: 0.08em; font-weight: 700; text-align: center; }
+.kfoot .ks { font-size: 12px; font-weight: 700; min-height: 15px; }
+.kfoot .kh { font-size: 10px; opacity: 0.8; text-align: center; line-height: 1.25; }
+.kfoot:disabled { opacity: 0.6; }
+.kacc { border-radius: 10px; background: var(--card); overflow: hidden; }
+.kacch { width: 100%; min-height: 60px; padding: 10px 16px; border: none; background: transparent; color: inherit; display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; }
+.kacch .kat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kacch .kan { font-size: 17px; font-weight: 700; }
+.kchev { font-size: 22px; color: var(--muted); }
+.kaccb { display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 16px; }
+.kdots { display: flex; gap: 4px; margin-top: 4px; }
+.kdot { width: 20px; height: 20px; border-radius: 4px; background: #262626; color: var(--muted); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
