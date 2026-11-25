@@ -77,6 +77,7 @@ struct Controller::State
     std::string lastBackupDay;
     // an update arriving from the phone
     struct Firmware { std::unique_ptr<std::ofstream> file; std::string path, version, sha; int64_t size = 0, got = 0; int seq = 0; } fw;
+    struct Incoming { std::unique_ptr<std::ofstream> file; std::string part, final, name, kind; int64_t size = 0, got = 0; int seq = 0; } in;
     std::vector<Song> songs;
     int current = 0;
     FootswitchLogic logic;
@@ -1894,6 +1895,96 @@ void Controller::startWifi()
 
 std::string Controller::updatesDir() const { return fromPath (toPath (dataDir) / "Updates"); }
 
+std::string Controller::visualsDir() const { return fromPath (toPath (capturesDir).parent_path() / "Visuals"); }
+
+// Send files, a piece at a time: begin, chunk, chunk, ..., end (0.5.9). Same steps as Update
+// firmware, but filed by type and fine while you play: it only writes to the card.
+std::string Controller::fileMessage (const std::string& line)
+{
+    const auto m = json::parse (line, nullptr, false);
+    auto& f = s->in;
+    const auto op = m.value ("op", std::string());
+    auto answer = [&] (bool ok, const std::string& why = {}) {
+        json a { { "t", "fileAck" }, { "op", op }, { "seq", m.value ("seq", -1) }, { "ok", ok } };
+        if (! why.empty()) a["why"] = why;
+        if (ok && op == "begin") a["kind"] = f.kind;
+        return dumps (a);
+    };
+    auto fail = [&] (const std::string& why) {
+        if (f.file) { f.file.reset(); std::error_code ec; fs::remove (toPath (f.part), ec); }
+        if (onLog) onLog ("Send files: " + (f.name.empty() ? std::string() : f.name + ": ") + why);
+        f = {};
+        return answer (false, why);
+    };
+    if (op == "begin")
+    {
+        if (f.file) { f.file.reset(); std::error_code ec; fs::remove (toPath (f.part), ec); f = {}; }   // a send that stopped half way
+        const auto name = m.value ("name", std::string());
+        // a plain file name only: nothing that could reach outside the folder
+        if (name.empty() || name.size() > 120 || name.find_first_of ("/\\:*?\"<>|") != std::string::npos
+            || name[0] == '.' || name.find ("..") != std::string::npos)
+            return fail ("That file name won't do: rename it and send it again");
+        std::string ext = fromPath (toPath (name).extension());
+        std::transform (ext.begin(), ext.end(), ext.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+        std::string dir;
+        int64_t most = 0;
+        if (ext == ".nam") { f.kind = "capture"; dir = capturesDir; most = 50ll << 20; }
+        else if (ext == ".wav") { f.kind = "space"; dir = spacesDir(); most = 200ll << 20; }
+        else if (ext == ".mp4" || ext == ".mkv" || ext == ".mov" || ext == ".webm") { f.kind = "video"; dir = visualsDir(); most = 4ll << 30; }
+        else return fail ("Keystone takes captures (.nam), spaces (.wav) and videos (.mp4, .mkv, .mov, .webm)");
+        const int64_t size = m.value ("size", (int64_t) 0);
+        if (size <= 0 || size > most) return fail ("That file is too big for a " + f.kind);
+        std::error_code ec;
+        fs::create_directories (toPath (dir), ec);
+        const auto space = fs::space (toPath (dir), ec);
+        if (! ec && (int64_t) space.available < size + (512ll << 20)) return fail ("Not enough room on Keystone for that");
+        f.name = name;
+        f.final = fromPath (toPath (dir) / toPath (name));
+        f.part = fromPath (toPath (dir) / toPath ("." + name + ".part"));
+        f.size = size;
+        f.file = std::make_unique<std::ofstream> (toPath (f.part), std::ios::binary | std::ios::trunc);
+        if (! *f.file) return fail ("Couldn't save it on Keystone");
+        if (onLog) onLog ("Send files: receiving " + name + " (" + f.kind + ", " + std::to_string (size) + " bytes)");
+        return answer (true);
+    }
+    if (op == "chunk")
+    {
+        if (! f.file) return fail ("The send started again, try once more");
+        if (m.value ("seq", -1) != f.seq) return fail ("A piece went missing, try once more");
+        const auto data = fromBase64 (m.value ("data", std::string()));
+        f.got += (int64_t) data.size();
+        if (f.got > f.size) return fail ("More arrived than expected, try once more");
+        f.file->write ((const char*) data.data(), (std::streamsize) data.size());
+        if (! *f.file) return fail ("Couldn't save it on Keystone");
+        ++f.seq;
+        return answer (true);
+    }
+    if (op == "end")
+    {
+        if (! f.file) return fail ("Nothing has arrived");
+        f.file->flush();
+        f.file.reset();
+        if (f.got != f.size) return fail ("It didn't arrive whole, try once more");
+        std::error_code ec;
+        fs::rename (toPath (f.part), toPath (f.final), ec);   // replaces one of the same name
+        if (ec) return fail ("Couldn't save it on Keystone");
+        if (onLog) onLog ("Send files: " + f.name + " saved");
+        const auto kind = f.kind;
+        queueToast (kind == "capture" ? "CAPTURE RECEIVED" : kind == "space" ? "SPACE RECEIVED" : "VIDEO RECEIVED");
+        queueState();   // the capture and space lists include it now
+        f = {};
+        auto a = answer (true);
+        return a;
+    }
+    if (op == "cancel")
+    {
+        if (f.file) { f.file.reset(); std::error_code ec; fs::remove (toPath (f.part), ec); }
+        f = {};
+        return answer (true);
+    }
+    return answer (false, "Unknown step");
+}
+
 // Update firmware, a piece at a time: begin, chunk, chunk, ..., end
 std::string Controller::firmwareMessage (const std::string& line)
 {
@@ -2097,6 +2188,7 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         else engine.setJob ((PedalJob) engine.meters().pedalTarget, m.value ("v", 0.0f));
     }
     else if (t == "fw") reply (firmwareMessage (line));
+    else if (t == "file") reply (fileMessage (line));
     else if (t == "default") reply (defaultMessage (line));
     else if (t == "takeInfo" || t == "listenList" || t == "listenGet" || t == "listenUse") reply (listenMessage (line));
     else if (t == "listen")

@@ -1965,6 +1965,43 @@ static void testRecorder()
     { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
+// Send files from the phone (0.5.9): filed by type, pieces in order, bad names refused
+static void testSendFiles()
+{
+    std::printf ("Send files from the phone\n");
+    const auto dir = std::filesystem::temp_directory_path() / "keystone_files";
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
+    Engine e; e.prepare (kSr, 128);
+    Controller c (e, dir.string(), (dir / "Captures").string());
+    c.load();
+    auto msg = [&] (const std::string& m) { std::string got; c.handleMessage (m, [&] (const std::string& x) { if (x.find ("fileAck") != std::string::npos) got = x; }); return got; };
+    CHECK (msg (R"({"t":"file","op":"begin","name":"..\\evil.nam","size":10})").find ("\"ok\":false") != std::string::npos, "a name that reaches outside the folder is refused");
+    CHECK (msg (R"({"t":"file","op":"begin","name":"notes.txt","size":10})").find ("takes captures") != std::string::npos, "only captures, spaces and videos");
+    // a capture in two pieces
+    CHECK (msg (R"({"t":"file","op":"begin","name":"EQD Blumes.nam","size":10})").find ("\"kind\":\"capture\"") != std::string::npos, "a .nam is a capture");
+    msg (R"({"t":"file","op":"chunk","seq":0,"data":"aGVsbG8g"})");
+    CHECK (msg (R"({"t":"file","op":"chunk","seq":2,"data":"cm9vbQ=="})").find ("missing") != std::string::npos, "a missing piece stops it");
+    CHECK (! std::filesystem::exists (dir / "Captures" / ".EQD Blumes.nam.part"), "a stopped send leaves nothing behind");
+    msg (R"({"t":"file","op":"begin","name":"EQD Blumes.nam","size":10})");
+    msg (R"({"t":"file","op":"chunk","seq":0,"data":"aGVsbG8g"})");
+    msg (R"({"t":"file","op":"chunk","seq":1,"data":"cm9vbQ=="})");
+    const auto end = msg (R"({"t":"file","op":"end"})");
+    CHECK (end.find ("\"ok\":true") != std::string::npos && std::filesystem::file_size (dir / "Captures" / "EQD Blumes.nam") == 10, "a whole capture lands in Captures");
+    // a video goes to Visuals, a space to Spaces
+    msg (R"({"t":"file","op":"begin","name":"successpit loop.mp4","size":3})");
+    msg (R"({"t":"file","op":"chunk","seq":0,"data":"YWJj"})");
+    msg (R"({"t":"file","op":"end"})");
+    msg (R"({"t":"file","op":"begin","name":"Big plate.WAV","size":3})");
+    msg (R"({"t":"file","op":"chunk","seq":0,"data":"YWJj"})");
+    msg (R"({"t":"file","op":"end"})");
+    CHECK (std::filesystem::exists (dir / "Visuals" / "successpit loop.mp4") && std::filesystem::exists (dir / "Spaces" / "Big plate.WAV"), "videos go to Visuals and spaces to Spaces");
+    // short by a byte: not kept
+    msg (R"({"t":"file","op":"begin","name":"short.nam","size":4})");
+    msg (R"({"t":"file","op":"chunk","seq":0,"data":"YWJj"})");
+    CHECK (msg (R"({"t":"file","op":"end"})").find ("didn't arrive whole") != std::string::npos && ! std::filesystem::exists (dir / "Captures" / "short.nam"), "a file that didn't arrive whole isn't kept");
+    { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
+}
+
 static void testFirmware()
 {
     std::printf ("Update firmware from the phone\n");
@@ -2549,6 +2586,7 @@ int main (int argc, char** argv)
         testRecorder();
         testRecorderKaleidoscope();
         testFirmware();
+        testSendFiles();
         testBackup();
         testMyDefaults();
         testRunaway();

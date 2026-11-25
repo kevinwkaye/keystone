@@ -586,6 +586,48 @@ var KS = (function () {
       '<span class="small">Tries each size for 15 seconds, smallest first, and keeps the smallest with no dropouts. Takes about a minute. The sound cuts for a moment between tries, so do it at soundcheck, playing your busiest song.</span></section>';
   }
 
+  // Send files to Keystone (0.5.9): captures, spaces and videos from this phone
+  function sizeText(b) {
+    if (b < 0) return '';
+    if (b < 1048576) return Math.max(1, Math.round(b / 1024)) + ' KB';
+    return (b < 10485760 ? (b / 1048576).toFixed(1) : Math.round(b / 1048576)) + ' MB';
+  }
+  function fileKind(n) {
+    var e = (n.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+    return e === '.nam' ? ['Capture', 'Captures'] : e === '.wav' ? ['Space', 'Spaces'] : /^\.(mp4|mkv|mov|webm)$/.test(e) ? ['Video', 'Visuals'] : ['File', ''];
+  }
+  function filesCard() {
+    if (!window.KeystoneNative || !KeystoneNative.filesPick) return '';
+    var f = S.files || { files: [], busy: false };
+    var rows = f.files.map(function (x) {
+      var k = fileKind(x.name), mb = x.size >= 1048576;
+      var sub = x.state === 'sent' ? k[0] + ', ' + sizeText(x.size) + (k[1] ? ', in ' + k[1] : '')
+        : x.state === 'sending' ? k[0] + ', ' + (mb ? Math.round(x.size * x.pct / 100 / 1048576) + ' of ' + sizeText(x.size) : sizeText(x.size)) + (k[1] ? ', in ' + k[1] : '')
+        : x.state === 'failed' ? x.why : x.state === 'stopped' ? k[0] + ', stopped' : k[0] + ', waiting';
+      var tag = x.state === 'sent' ? '<span style="color:#5DCAA5">SENT</span>' : x.state === 'sending' ? '<span style="color:#F0C27B">' + x.pct + '%</span>'
+        : x.state === 'failed' ? '<span style="color:#E5534B">NOT SENT</span>' : x.state === 'stopped' ? '<span style="color:#8A847A">STOPPED</span>' : '<span style="color:#8A847A">NEXT</span>';
+      return '<div class="urow" style="flex-direction:column;align-items:stretch;gap:6px"><div style="display:flex;align-items:center;gap:10px"><span style="display:flex;flex-direction:column;flex:1;min-width:0"><span style="font-size:16px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(x.name) + '</span>' +
+        '<span class="small" style="font-size:13px' + (x.state === 'failed' ? ';color:#F0997B' : '') + '">' + esc(sub) + '</span></span><span style="font-size:13px;font-weight:700;letter-spacing:.06em">' + tag + '</span></div>' +
+        (x.state === 'sending' ? '<div class="bar" style="height:6px"><div style="width:' + x.pct + '%;background:#F0C27B;height:6px"></div></div>' : '') + '</div>';
+    }).join('');
+    var done = f.files.length && !f.busy;
+    return '<section class="card" style="gap:8px"><h2 class="label">Send files to Keystone</h2>' +
+      '<span class="small">Pick files on this phone and Hev files them in the right place on the ' + hostName(false) + ': captures (.nam) for Drive, spaces (.wav) for the reverb, videos for the projector.</span>' +
+      '<div style="display:flex;gap:8px"><button type="button" class="wide" data-act="filesPick"' + (connected() ? '' : ' disabled') + ' style="flex:1">' + (f.busy ? 'Add more' : 'Choose files') + '</button>' +
+      (f.busy ? '<button type="button" class="back" data-act="filesCancel" style="flex:none">Stop</button>' : done ? '<button type="button" class="back" data-act="filesClear" style="flex:none">Clear</button>' : '') + '</div>' +
+      (connected() ? '' : '<span class="small" style="color:#F0997B">Join Keystone Wi-Fi first.</span>') +
+      rows +
+      (f.files.some(function (x) { return fileKind(x.name)[0] === 'Video'; }) ? '<span class="small">A big video takes a minute or two over Keystone\'s Wi-Fi. Carry on playing: sending never touches the sound.</span>' : '') +
+      '</section>';
+  }
+  function onFiles(m) {
+    var was = S.files;
+    S.files = m;
+    if (S.screen === 'health') queueRender(true);
+    // the capture and space lists include anything new
+    if (was && was.busy && !m.busy) send({ t: 'hello', client: 'android', v: 1 });
+  }
+
   function updateCard() {
     var u = S.upd, h = S.health, rigV = h ? h.version : '', phoneV = phoneVersion();
     if (!window.KeystoneNative || !KeystoneNative.updateCheck) return '';
@@ -698,7 +740,7 @@ var KS = (function () {
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
       '<section class="card"><h2 class="label">Kaleidoscope</h2>' + gigLockRow() + '<span class="small">Fourteen pedal plugins to mess about with, one at a time. Tap the name on Play to get there. Gig lock keeps it shut and never costs the band rig anything.</span></section>' +
       wifiCard() +
-      updateCard() + watchCards() +
+      filesCard() + updateCard() + watchCards() +
       '<button type="button" class="wide" data-go="recorder">Recorder' + (rec().on ? ': recording ' + clock(rec().s) : on('rec.on') ? ': ready' : ': off') + '</button>' +
       '<div class="small">If something goes wrong on stage, a warning strip appears across the top of Play. Tap it to come here.</div>' +
       nav('health') + '</section>';
@@ -1109,7 +1151,7 @@ var KS = (function () {
     'Shimmer: the tail climbs an octave or a fifth.',
     'Magneto: a multi-head tape echo washing into the room.',
     'Nonlinear: a shaped burst, gated, reversed, swooshing or ramped.',
-    'Impulse: plays your own .wav spaces from Documents\\Keystone\\Spaces.'];
+    'Impulse: plays your own .wav spaces. Send them from Rig, Send files.'];
   function describe(id) {
     if (id === 'reverb.type') return REVERB_TYPES[Math.round(val(id))] || '';
     if (id === 'delay.type') return DELAY_TYPES[Math.round(val(id))] || '';
@@ -1193,7 +1235,7 @@ var KS = (function () {
       var srcId = voice ? 'drive.source' : 'drive.edge.source';   // each voice picks its own source
       var src = Math.round(val(srcId));
       var capName = S.capture ? S.capture : (S.namAvailable ? 'No capture loaded' : 'Captures not supported');
-      var capSub = S.capture ? 'NAM, loaded from your captures' : 'Put .nam files in Documents\\Keystone\\Captures';
+      var capSub = S.capture ? 'NAM, loaded from your captures' : 'Send .nam files from Rig, Send files';
       // source section: the capture row sits above Capture / Model
       var srcHtml = '<section class="card"><h2 class="label">Source</h2><button type="button" class="source" data-act="captures"><span><span class="t">' + esc(capName) + '</span><span class="s">' + esc(capSub) + '</span></span><span style="font-size:14px;color:#5DCAA5">Change</span></button>' +
         (S.showCaptures ? '<div class="group">' + (S.captures.length ? S.captures.map(function (f) {
@@ -1211,7 +1253,7 @@ var KS = (function () {
     if (mod === 'reverb' && Math.round(val('reverb.type')) === 11) {
       var spName = S.space ? S.space : (S.spaces.length ? 'No space loaded' : 'No spaces yet');
       var spCard = '<section class="card"><h2 class="label">Impulse file</h2><button type="button" class="source" data-act="spaces"><span><span class="t">' + esc(spName) + '</span>' +
-        '<span class="s">' + esc(S.space ? '.wav from your Spaces folder' : 'Put .wav files in Documents\\Keystone\\Spaces') + '</span></span><span style="font-size:14px;color:#5DCAA5">Change</span></button>' +
+        '<span class="s">' + esc(S.space ? '.wav from your Spaces folder' : 'Send .wav files from Rig, Send files') + '</span></span><span style="font-size:14px;color:#5DCAA5">Change</span></button>' +
         (S.showSpaces ? '<div class="group">' + (S.spaces.length ? S.spaces.map(function (f) {
           return '<button type="button" class="row" data-space="' + esc(f) + '" style="min-height:48px;background:#262626"><span class="t" style="font-size:16px">' + esc(f.replace(/\.wav$/i, '')) + '</span><span class="r" style="color:#5DCAA5">' + (f === S.spaceFile ? 'LOADED' : '') + '</span></button>';
         }).join('') : '<span class="small">No spaces on Keystone yet.</span>') + '</div>' : '') + '</section>';
@@ -1359,7 +1401,7 @@ var KS = (function () {
       '<h2 class="label">Pedals</h2>' +
       (ids.length ? '<div class="kgrid">' + grid + '</div>' + loadBtn +
         '<span class="small" style="text-align:center">The old pedal fades out, then the new one fades in.</span>'
-        : '<section class="card"><span class="small">No pedals found. Updating Keystone puts them in its Pedals folder, or drop a .vst3 into Documents\\Keystone\\Pedals.</span></section>') +
+        : '<section class="card"><span class="small">No pedals found. Updating Keystone puts them in its Pedals folder.</span></section>') +
       (loaded ? '<button type="button" class="wide" data-act="kalUnload" style="color:#F0997B">Put ' + esc(lm.name) + ' away</button>' : '') +
       gigLockRow() + nav('play') + '</section>';
   }
@@ -1707,6 +1749,9 @@ var KS = (function () {
         send({ t: 'setlist', op: S.save.kind === 'part' ? 'saveNewPart' : 'saveNewSong', i: S.current, name: nm.trim() }); saveClose(); break;
       case 'keep': send({ t: 'keep' }); break;
       case 'updateCheck': updateCheck(true); render(true); break;
+      case 'filesPick': if (window.KeystoneNative && KeystoneNative.filesPick) KeystoneNative.filesPick(); break;
+      case 'filesCancel': if (window.KeystoneNative && KeystoneNative.filesCancel) KeystoneNative.filesCancel(); break;
+      case 'filesClear': if (window.KeystoneNative && KeystoneNative.filesClear) KeystoneNative.filesClear(); break;
       case 'updateFirmware':
         var fa = asset(rigDevice() === 'pi' ? /linux-arm64\.tar\.gz$/ : /-Setup\.exe$/);
         if (fa && connected()) { S.upd.msg = ''; S.upd.err = null; S.upd.busy = { what: 'firmware', stage: 'Downloading', pct: 0 }; KeystoneNative.updateFirmware(fa.url, fa.name, fa.size, fa.digest || '', S.upd.latest); render(true); }
@@ -1947,5 +1992,5 @@ var KS = (function () {
   loadOffline();
   setInterval(function () { if (connected()) strip(); }, 1000);
   render();
-  return { onMessage: onMessage, onLink: onLink, back: back, state: S, refresh: function () { render(true); }, onUpdate: onUpdate };
+  return { onMessage: onMessage, onLink: onLink, back: back, state: S, refresh: function () { render(true); }, onUpdate: onUpdate, onFiles: onFiles };
 })();

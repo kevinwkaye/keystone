@@ -127,6 +127,10 @@ public:
     std::string songLabel (int i) const;   // "Circus, Verse" for a part
     std::string takesJson() const;           // the recorder's takes, for the phone
     std::string firmwareMessage (const std::string& line);
+    // Send files (0.5.9): captures, spaces and videos from the phone, a piece at a time,
+    // filed by type into Captures, Spaces and Visuals. Allowed while you play.
+    std::string fileMessage (const std::string& line);
+    std::string visualsDir() const;   // Visuals, next to Captures: the projector's videos
     std::string defaultMessage (const std::string& line);
     float myDefault (int param) const;
     std::map<std::string, float> myDefaultsFor (int rig) const;

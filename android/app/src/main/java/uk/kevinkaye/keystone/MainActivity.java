@@ -36,6 +36,8 @@ public class MainActivity extends Activity {
     private volatile boolean linked;
     private RoomRecorder room;
     private Updater updater;
+    private FileSender files;
+    private static final int PICK_FILES = 4711;
 
     @SuppressLint({ "SetJavaScriptEnabled", "AddJavascriptInterface" })
     // No network pinning: the phone is often on home Wi-Fi and hosting the hotspot at once,
@@ -79,11 +81,19 @@ public class MainActivity extends Activity {
                 json -> ui.post(() -> { if (pageReady) web.evaluateJavascript("KS.onUpdate(" + json + ")", null); }),
                 line -> { if (!linked) return false; link.send(line); return true; });
 
+        files = new FileSender(this,
+                json -> ui.post(() -> { if (pageReady) web.evaluateJavascript("KS.onFiles && KS.onFiles(" + json + ")", null); }),
+                line -> { if (!linked) return false; link.send(line); return true; });
+
         link = new Link(this, new Link.Listener() {
             @Override
             public void onLine(String line) {
                 if (line.contains("\"t\":\"fwAck\"")) {
                     try { updater.onAck(new JSONObject(line)); } catch (Exception ignored) { }
+                    return;
+                }
+                if (line.contains("\"t\":\"fileAck\"")) {
+                    try { files.onAck(new JSONObject(line)); } catch (Exception ignored) { }
                     return;
                 }
                 if (line.contains("\"t\":\"roomAck\"")) {
@@ -170,6 +180,17 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    @Override
+    protected void onActivityResult(int request, int result, android.content.Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != PICK_FILES || result != RESULT_OK || data == null) return;
+        List<android.net.Uri> got = new ArrayList<>();
+        if (data.getClipData() != null)
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) got.add(data.getClipData().getItemAt(i).getUri());
+        else if (data.getData() != null) got.add(data.getData());
+        if (!got.isEmpty()) files.add(got);
+    }
+
     final class Bridge {
         @JavascriptInterface
         public void send(String line) { link.send(line); }
@@ -232,6 +253,25 @@ public class MainActivity extends Activity {
         }
 
         // Update firmware and the phone app
+        // Send files to Keystone: the phone's own file picker, several at once
+        @JavascriptInterface
+        public void filesPick() {
+            ui.post(() -> {
+                android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
+                i.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+                i.setType("*/*");
+                i.putExtra(android.content.Intent.EXTRA_MIME_TYPES, new String[] { "application/octet-stream", "audio/*", "video/*" });
+                i.putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true);
+                try { startActivityForResult(i, PICK_FILES); } catch (Exception ignored) { }
+            });
+        }
+
+        @JavascriptInterface
+        public void filesCancel() { files.cancel(); }
+
+        @JavascriptInterface
+        public void filesClear() { files.clear(); }
+
         @JavascriptInterface
         public void updateCheck() { updater.check(); }
 
