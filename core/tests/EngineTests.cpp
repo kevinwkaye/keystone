@@ -1031,7 +1031,13 @@ static void testClicks()
 static void testSteadyDrive()
 {
     std::printf ("Steady drive\n");
-    double worst[2] {};
+    // The same note twice, with and without the level match. In 10 ms blocks the level of one
+    // over the other is the match's gain alone: the waveform, its harmonics and the preamp's
+    // wow are the same in both and cancel. A glide moves it a little each block; a step jumps.
+    // (0.5.5: the old check compared the single worst window of second differences with the
+    // median, which the wow and each window's peak placement moved by up to 30%, so the Pi
+    // build failed it on unrelated changes.)
+    std::vector<float> out[2];
     for (int fixedTrim = 0; fixedTrim < 2; ++fixedTrim)
     {
         Engine e;
@@ -1039,19 +1045,18 @@ static void testSteadyDrive()
         e.setParam (P::DriveSource, 1);
         e.setParam (P::DimOn, 0);                        // its chorus moves the level on purpose
         e.setParam (P::DriveMatch, fixedTrim ? 0 : 1);   // reference: no level matching at all
-        const double f = 220, amp = 0.05;
-        auto in = sine (f, 3.0, amp);
-        auto out = render (e, in);
-        std::vector<double> sc;
-        for (size_t a = (size_t) (0.15 * kSr); a + 2400 < (size_t) (1.6 * kSr); a += 2400)   // while the level match is still settling
-            sc.push_back (clickScore (out, a, a + 2400, f, amp));
-        auto sorted = sc;
-        std::sort (sorted.begin(), sorted.end());
-        worst[fixedTrim] = sorted.back() / sorted[sorted.size() / 2];
+        out[fixedTrim] = render (e, sine (220, 3.0, 0.05));
     }
-    // mark 1.55 since 0.4.9: Growl's cab roll-off made the unmatched reference smoother on the
-    // Windows build (1.43 to 1.22) while the matched one also improved (1.54 to 1.49)
-    CHECK (worst[0] < std::max (1.55, worst[1] * 1.15), "level matching adds no steps: worst window %.2fx the median, %.2fx without matching", worst[0], worst[1]);
+    double worst = 0, prev = 0, first = 0, last = 0;
+    bool started = false;
+    for (size_t a = (size_t) (0.15 * kSr); a + 480 < (size_t) (1.6 * kSr); a += 480)   // while the level match is still settling
+    {
+        const double g = 20 * std::log10 (rms (out[0].data() + a, 480) / rms (out[1].data() + a, 480));
+        if (! started) { first = g; started = true; }
+        else worst = std::max (worst, std::fabs (g - prev));
+        prev = last = g;
+    }
+    CHECK (worst < 0.1, "level matching adds no steps: worst move %.3f dB in 10 ms (mark 0.1) while it glides %.2f dB", worst, last - first);
 }
 
 // ---------------------------------------------------------------------------------------
