@@ -30,6 +30,14 @@ struct Health
     int dropouts = 0, dropoutsRecent = 0;
     bool light = false;
 
+    // the machine itself (0.5.8): temperature, fan and power on the Pi, storage and memory anywhere
+    float tempC = -1;
+    int fanRpm = -1;
+    bool hasPower = false, underVoltNow = false, underVoltEver = false, throttledNow = false, throttledEver = false;
+    juce::int64 freeMb = -1;
+    int memUsedMb = -1, memTotalMb = -1;
+    int reconnects = 0;          // times the interface dropped and came back since start
+
     int phones = 0;
     juce::String phoneAddresses, laptopAddresses;
     juce::String watchVersion, watchAddress;   // empty: no watch connected
@@ -57,6 +65,11 @@ struct Health
         o->setProperty ("exp", obj ({ { "pos", expPos }, { "ago", expAgoSec < 0 ? -1 : (int) expAgoSec }, { "cal", expCalibrated }, { "rev", expReversed } }));
         o->setProperty ("out", obj ({ { "db", juce::roundToInt (outDb) }, { "lim", limDb } }));
         o->setProperty ("laptop", obj ({ { "cpu", juce::roundToInt (cpu * 100) }, { "dropouts", dropouts }, { "recent", dropoutsRecent }, { "light", light } }));
+        o->setProperty ("sys", obj ({ { "temp", std::round (tempC * 10.0f) / 10.0f }, { "fan", fanRpm },
+                                      { "power", hasPower }, { "uv", underVoltNow }, { "uvEver", underVoltEver },
+                                      { "thr", throttledNow }, { "thrEver", throttledEver },
+                                      { "free", (juce::int64) freeMb }, { "memUsed", memUsedMb }, { "memTotal", memTotalMb },
+                                      { "reconnects", reconnects } }));
         o->setProperty ("link", obj ({ { "phones", phones }, { "laptop", laptopAddresses } }));
         o->setProperty ("watch", obj ({ { "on", watchVersion.isNotEmpty() }, { "v", watchVersion }, { "ip", watchAddress } }));
         return juce::JSON::toString (juce::var (o), true);

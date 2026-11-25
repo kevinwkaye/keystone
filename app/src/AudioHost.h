@@ -34,6 +34,7 @@ public:
     juce::String deviceName() const;
     bool onAudioInterface() const { return onInterface.load(); }
     void restart() { needsReopen.store (true); }
+    int reconnects() const { return reconnectCount.load(); }   // the interface dropped and came back
     void showDriverPanel();   // the ASIO driver's own settings window (message thread)
     // Auto buffer: called when Keystone steps the buffer up after dropouts (0 = 3 ms ... 3 = 10 ms)
     std::function<void (int)> onBufferStepLearnt;
@@ -68,6 +69,8 @@ private:
     std::atomic<int> currentBuffer { 0 };
     std::atomic<double> currentRate { 0 }, latency { 0 };
     std::atomic<bool> isRunning { false }, needsReopen { false }, onInterface { true };
+    std::atomic<int> reconnectCount { 0 };
+    bool wasOpen = false;   // a device was open at the last check, so losing it is a reconnect
     // input channel choice (Auto picks the louder input, with hysteresis)
     float chanLevel[2] { 0, 0 };
     int chosen = 1, louderFor = 0;

@@ -231,6 +231,7 @@ void AudioHost::audioDeviceError (const String& message)
         const ScopedLock l (statusLock);
         lastError = message;
     }
+    reconnectCount.fetch_add (1);
     needsReopen.store (true);
 }
 
@@ -408,10 +409,13 @@ void AudioHost::timerCallback()
     }
     if (needsReopen.exchange (false) || deviceManager.getCurrentAudioDevice() == nullptr)
     {
+        if (deviceManager.getCurrentAudioDevice() == nullptr && wasOpen) reconnectCount.fetch_add (1);
+        wasOpen = false;
         if (tryOpen()) Logger::writeToLog ("Audio: device open again");
         return;
     }
     auto* dev = deviceManager.getCurrentAudioDevice();
+    wasOpen = dev != nullptr;
     // watchdog: the device says it's running but no audio has come through for 6 s (two
     // checks in a row): the driver has hung, so open it again
     {
@@ -422,6 +426,7 @@ void AudioHost::timerCallback()
         {
             Logger::writeToLog ("WATCHDOG: no audio for 6 s although the device says it's running, opening it again");
             stalledTicks = 0;
+            reconnectCount.fetch_add (1);
             if (tryOpen()) Logger::writeToLog ("Audio: device open again");
             return;
         }
@@ -432,6 +437,7 @@ void AudioHost::timerCallback()
     {
         Logger::writeToLog ("Audio: the interface's input went silent (the stream stopped), opening it again");
         silentInputBlocks.store (0);
+        reconnectCount.fetch_add (1);
         if (tryOpen()) Logger::writeToLog ("Audio: device open again");
         return;
     }

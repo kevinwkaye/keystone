@@ -19,6 +19,7 @@
 #if KEYSTONE_TRAY
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "StatusWindow.h"
+#include "SystemHealth.h"
 #endif
 #include <cstdlib>
 #include <deque>
@@ -586,6 +587,13 @@ public:
         while (! dropHistory.empty() && now - dropHistory.front().first > 60) dropHistory.pop_front();
         h.dropoutsRecent = dropHistory.empty() ? 0 : h.dropouts - dropHistory.front().second;
         h.light = m.light;
+        // the machine itself, read every 5 s (vcgencmd is a separate program on the Pi)
+        if (now - sysReadAt >= 5.0 || sysReadAt < 0) { sys = SystemHealth::read (home); sysReadAt = now; }
+        h.tempC = sys.tempC; h.fanRpm = sys.fanRpm;
+        h.hasPower = sys.hasPower; h.underVoltNow = sys.underVoltNow; h.underVoltEver = sys.underVoltEver;
+        h.throttledNow = sys.throttledNow; h.throttledEver = sys.throttledEver;
+        h.freeMb = sys.freeMb; h.memUsedMb = sys.memUsedMb; h.memTotalMb = sys.memTotalMb;
+        h.reconnects = audio ? audio->reconnects() : 0;
         h.phones = link.clientCount();
         h.phoneAddresses = link.clientAddresses().joinIntoString (", ");
         h.laptopAddresses = link.addresses();
@@ -696,6 +704,8 @@ private:
     int meterTick = 0, settingsTick = 0, heartbeatTick = 0, healthTick = 95;
     double startedAt = Time::getMillisecondCounterHiRes() * 0.001;
     double lastFsTime = -1;
+    SystemHealth sys;
+    double sysReadAt = -1;
     String lastFsName;
     std::atomic<double> lastExpTime { -1.0 };
     std::deque<std::pair<double, int>> dropHistory;

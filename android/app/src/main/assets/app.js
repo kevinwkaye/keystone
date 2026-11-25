@@ -639,6 +639,20 @@ var KS = (function () {
       rows.push({ n: 'Expression', d: h.exp.ago < 0 ? 'Not moved yet' : 'At ' + Math.round(h.exp.pos * 100) + '%, moved ' + ago(h.exp.ago) + (h.exp.cal ? '' : ', not calibrated') + (h.exp.rev ? ', reversed' : ''), ok: h.exp.ago >= 0, st: h.exp.ago < 0 ? 'IDLE' : 'OK' });
       rows.push({ n: 'Output', d: h.out.db + ' dB peak' + (h.out.lim > 0.5 ? ', limiter working ' + h.out.lim.toFixed(1) + ' dB' : ', limiter idle'), ok: true });
       rows.push({ n: hostName(true), d: 'CPU ' + h.laptop.cpu + '%, ' + (h.laptop.dropouts ? h.laptop.dropouts + ' dropouts, ' + h.laptop.recent + ' in the last minute' : 'no dropouts') + (h.laptop.light ? ', effects light' : '') + ', up ' + Math.round(h.uptime / 60) + ' min', ok: h.laptop.cpu <= 80 && h.laptop.recent === 0 });
+      // the machine itself (0.5.8): temperature and power on the Pi, the interface, storage, memory
+      var sy = h.sys;
+      if (sy) {
+        if (sy.temp >= 0) rows.push({ n: 'Temperature', d: Math.round(sy.temp) + '\u00B0C' + (sy.fan >= 0 ? (sy.fan > 0 ? ', fan ' + sy.fan.toLocaleString('en-GB') + ' rpm' : ', fan resting') : '') + (sy.temp >= 80 ? ', slowing down to cool' : sy.temp >= 75 ? ', running hot' : ''),
+          ok: sy.temp < 75, bad: sy.temp >= 80, st: sy.temp >= 80 ? 'HOT' : sy.temp >= 75 ? 'WARM' : 'OK' });
+        if (sy.power) rows.push({ n: 'Power', d: sy.uv ? 'Voltage dipping now: use the official 27 W supply' : sy.uvEver ? 'Dipped since start, steady now' : sy.thr ? 'Slowed for heat' : sy.thrEver ? 'Slowed earlier, fine now' : 'Steady since start',
+          ok: !sy.uv && !sy.uvEver && !sy.thr && !sy.thrEver, bad: sy.uv || sy.thr, st: sy.uv ? 'LOW' : sy.uvEver ? 'DIPPED' : sy.thr ? 'SLOWED' : sy.thrEver ? 'CHECK' : 'OK' });
+        rows.push({ n: 'Interface', d: sy.reconnects ? 'Dropped and came back ' + sy.reconnects + (sy.reconnects === 1 ? ' time' : ' times') + ' since start: check the USB cable' : 'Never dropped since start',
+          ok: !sy.reconnects, st: sy.reconnects ? 'CHECK' : 'OK' });
+        if (sy.free >= 0) rows.push({ n: 'Storage', d: (sy.free >= 10240 ? Math.round(sy.free / 1024) + ' GB' : (sy.free / 1024).toFixed(1) + ' GB') + ' free' + (sy.free < 5120 ? ': the recorder is clearing your oldest takes' : ''),
+          ok: sy.free >= 5120, st: sy.free >= 5120 ? 'OK' : 'LOW' });
+        if (sy.memTotal > 0) rows.push({ n: 'Memory', d: sy.memUsed.toLocaleString('en-GB') + ' MB of ' + (sy.memTotal >= 1024 ? Math.round(sy.memTotal / 1024) + ' GB' : sy.memTotal + ' MB') + ' in use',
+          ok: sy.memUsed / sy.memTotal < 0.85, st: sy.memUsed / sy.memTotal < 0.85 ? 'OK' : 'HIGH' });
+      }
       rows.push({ n: 'Phone link', d: (S.linkDetail || '') + (S.rtt != null ? ', ' + S.rtt + ' ms round trip' : ''), ok: true });
     }
     var inDb = h ? h['in'].db : null;
@@ -649,7 +663,7 @@ var KS = (function () {
       '<section class="card" style="gap:10px"><h2 class="label">Bass in</h2><div class="bar" style="height:14px"><div style="width:' + (frac * 100) + '%;background:' + inCol + '"></div></div>' +
       '<div style="display:flex;justify-content:space-between;font-size:14px"><span>' + esc(inputText()) + '</span><span class="muted">' + (h ? 'Input ' + h['in'].ch : '') + '</span></div></section>' +
       '<section class="card" style="padding:6px 16px;gap:0">' + rows.map(function (r) {
-        var col = r.ok ? g : o;
+        var col = r.bad ? '#E5534B' : r.ok ? g : o;
         return '<div style="display:flex;align-items:center;gap:12px;min-height:54px;border-bottom:1px solid #262626"><span style="width:10px;height:10px;border-radius:50%;background:' + col + ';flex:none"></span>' +
           '<span style="display:flex;flex-direction:column;flex:1;min-width:0"><span style="font-size:17px;font-weight:500">' + esc(r.n) + '</span><span class="small" style="font-size:13px">' + esc(r.d) + '</span></span>' +
           '<span style="font-size:13px;font-weight:700;color:' + col + '">' + (r.st || (r.ok ? 'OK' : 'CHECK')) + '</span></div>';
