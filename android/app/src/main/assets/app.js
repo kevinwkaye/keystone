@@ -5,6 +5,8 @@
 'use strict';
 
 var KS = (function () {
+  // what Keystone runs on, from its health report: the Pi says device pi (0.5.6)
+  function hostName(cap) { var n = S.health && S.health.device === 'pi' ? 'Pi' : 'laptop'; return cap ? n.charAt(0).toUpperCase() + n.slice(1) : n; }
   var S = {
     link: 'searching', linkDetail: '',
     schema: null, params: {}, modules: [], values: {},
@@ -400,7 +402,7 @@ var KS = (function () {
       '<section class="card" style="gap:2px"><h2 class="label">Listening pack: pick a stretch</h2>' +
         '<span class="small" style="padding-bottom:6px">Thirty seconds of your bass from here, played through every song and part, so you can hear which sound suits it.</span>' +
         (i ? pick : '<span class="small">Loading the take</span>') + btn +
-        '<span class="small">Takes about a minute on the laptop. It won\'t run while you\'re playing.</span></section>' +
+        '<span class="small">Takes about a minute on the ' + hostName() + '. It won\'t run while you\'re playing.</span></section>' +
       nav('health') + '</section>';
   }
   function listenScreen() {
@@ -546,7 +548,7 @@ var KS = (function () {
     var head = '<span class="small" style="letter-spacing:.15em;font-weight:700">BUFFER</span>';
     var tried = function () {
       var out = [];
-      [3, 4, 6, 10].forEach(function (x, i) { var r = bf.tried[i]; if (r > 0) out.push(x + ' ms: ' + r + ' dropout' + (r === 1 ? '' : 's') + ', too small'); });
+      (bf.steps || [3, 4, 6, 10]).forEach(function (x, i) { var r = bf.tried[i]; if (r > 0) out.push(x + ' ms: ' + r + ' dropout' + (r === 1 ? '' : 's') + ', too small'); });
       return out.join('. ');
     };
     if (bf && bf.on) {
@@ -562,7 +564,7 @@ var KS = (function () {
       return '<section class="card" style="gap:10px">' + head +
         '<div style="font-size:19px;font-weight:700">Set to ' + bf.done + ' ms</div>' +
         '<span class="small">' + (bf.lat ? bf.lat + ' ms round trip' : '') + (quicker > 0 ? ', ' + quicker + ' ms quicker than before' : quicker < 0 ? ', ' + (-quicker) + ' ms more than before, so it plays clean' : '') + '. ' +
-        (t2 ? esc(t2) + '. ' : '') + bf.done + ' ms ran clean for 15 seconds' + (bf.cpu ? ' with the laptop at ' + bf.cpu + '%' : '') + '. Keystone remembers this for this laptop.</span></section>';
+        (t2 ? esc(t2) + '. ' : '') + bf.done + ' ms ran clean for 15 seconds' + (bf.cpu ? ' with the ' + hostName() + ' at ' + bf.cpu + '%' : '') + '. Keystone remembers this for this ' + hostName() + '.</span></section>';
     }
     var drops = h && h.laptop ? h.laptop.dropouts : null;
     return '<section class="card" style="gap:10px">' + head +
@@ -636,7 +638,7 @@ var KS = (function () {
       rows.push({ n: 'Footswitches', d: h.fs.text + (h.fs.ago >= 0 ? ', last press ' + ago(h.fs.ago) + ' (' + h.fs.last + ')' : ''), ok: h.fs.ok });
       rows.push({ n: 'Expression', d: h.exp.ago < 0 ? 'Not moved yet' : 'At ' + Math.round(h.exp.pos * 100) + '%, moved ' + ago(h.exp.ago) + (h.exp.cal ? '' : ', not calibrated') + (h.exp.rev ? ', reversed' : ''), ok: h.exp.ago >= 0, st: h.exp.ago < 0 ? 'IDLE' : 'OK' });
       rows.push({ n: 'Output', d: h.out.db + ' dB peak' + (h.out.lim > 0.5 ? ', limiter working ' + h.out.lim.toFixed(1) + ' dB' : ', limiter idle'), ok: true });
-      rows.push({ n: 'Laptop', d: 'CPU ' + h.laptop.cpu + '%, ' + (h.laptop.dropouts ? h.laptop.dropouts + ' dropouts, ' + h.laptop.recent + ' in the last minute' : 'no dropouts') + (h.laptop.light ? ', effects light' : '') + ', up ' + Math.round(h.uptime / 60) + ' min', ok: h.laptop.cpu <= 80 && h.laptop.recent === 0 });
+      rows.push({ n: hostName(true), d: 'CPU ' + h.laptop.cpu + '%, ' + (h.laptop.dropouts ? h.laptop.dropouts + ' dropouts, ' + h.laptop.recent + ' in the last minute' : 'no dropouts') + (h.laptop.light ? ', effects light' : '') + ', up ' + Math.round(h.uptime / 60) + ' min', ok: h.laptop.cpu <= 80 && h.laptop.recent === 0 });
       rows.push({ n: 'Phone link', d: (S.linkDetail || '') + (S.rtt != null ? ', ' + S.rtt + ' ms round trip' : ''), ok: true });
     }
     var inDb = h ? h['in'].db : null;

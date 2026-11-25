@@ -147,8 +147,16 @@ bool AudioHost::tryOpen()
         {
             const int want = (int) std::lround (targetBufferMs() * 0.001 * dev->getCurrentSampleRate());
             int pick = 0;
-            for (int b : dev->getAvailableBufferSizes())
-                if (b >= std::max (64, want) && (pick == 0 || b < pick)) pick = b;
+           #if JUCE_LINUX
+            // whole USB packets only (48 samples at 48 kHz), so the buffer never slips against them
+            const int packet = (int) std::lround (dev->getCurrentSampleRate() / 1000.0);
+            if (std::fabs (dev->getCurrentSampleRate() / 1000.0 - packet) < 1.0e-6)
+                for (int b : dev->getAvailableBufferSizes())
+                    if (b % packet == 0 && b >= std::max (packet, want) && (pick == 0 || b < pick)) pick = b;
+           #endif
+            if (pick == 0)
+                for (int b : dev->getAvailableBufferSizes())
+                    if (b >= std::max (64, want) && (pick == 0 || b < pick)) pick = b;
             if (pick == 0) for (int b : dev->getAvailableBufferSizes()) pick = std::max (pick, b);
             if (pick > 0 && pick != best)
             {
@@ -293,7 +301,14 @@ juce::String AudioHost::settingNow() const
     return String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep)) + "/" + String (engine.getParam (ks::P::OutMode));
 }
 
+// Buffer sizes the setting and the finder step through. On Linux (the Pi) every size is a whole
+// number of the UM2's 1 ms USB packets: 3 ms came out as 160 samples, which slips against the
+// 48-sample packets and chops the sound regularly without ALSA ever reporting a dropout (0.5.6).
+#if JUCE_LINUX
+static const int kFindMs[4] = { 2, 4, 6, 10 };
+#else
 static const int kFindMs[4] = { 3, 4, 6, 10 };
+#endif
 static constexpr int kFindTicks = 6;   // one tick (3 s) to settle, then 15 s counted
 
 void AudioHost::findBestBuffer()
@@ -305,7 +320,7 @@ void AudioHost::findBestBuffer()
     findCpu = 0; foundMs = 0; findDoneAt = 0;
     finding = true;
     findStep = 0;
-    Logger::writeToLog ("Audio: finding the best buffer, starting at 3 ms");
+    Logger::writeToLog ("Audio: finding the best buffer, starting at " + String (kFindMs[0]) + " ms");
     findStartStep();
 }
 
@@ -340,8 +355,10 @@ juce::String AudioHost::finderJson() const
 {
     DynamicObject::Ptr o = new DynamicObject();
     Array<var> tried;
-    for (int i = 0; i < 4; ++i) tried.add (findResult[i]);
+    Array<var> steps;
+    for (int i = 0; i < 4; ++i) { tried.add (findResult[i]); steps.add (kFindMs[i]); }
     o->setProperty ("tried", tried);
+    o->setProperty ("steps", steps);   // the sizes this device steps through (2 ms first on the Pi)
     o->setProperty ("was", findWasMs);
     if (finding)
     {
@@ -475,12 +492,11 @@ void AudioHost::showDriverPanel()
 
 int AudioHost::targetBufferMs() const
 {
-    static const double stepMs[4] = { 3.0, 4.0, 6.0, 10.0 };
-    if (finding) return (int) stepMs[findStep];
+    if (finding) return kFindMs[findStep];
     const int choice = (int) std::lround (engine.getParam (ks::P::OutBuffer));
-    if (choice >= 1 && choice <= 4) return (int) stepMs[choice - 1];
+    if (choice >= 1 && choice <= 4) return kFindMs[choice - 1];
     const int step = std::clamp ((int) std::lround (engine.getParam (ks::P::OutBufferStep)), 0, 3);
-    return (int) stepMs[step];
+    return kFindMs[step];
 }
 
 bool AudioHost::interfacePresent()
