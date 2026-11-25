@@ -6,6 +6,9 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#if defined(__SSE__) || defined(_M_X64) || defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
 
 namespace ks
 {
@@ -23,6 +26,23 @@ inline float onePoleCoef (float seconds, float sr)
 {
     return seconds <= 0.0f ? 0.0f : std::exp (-1.0f / (seconds * sr));
 }
+
+// Flush denormals in hardware for the life of the object, then put the old mode back.
+// Tails that fade towards silence otherwise pass through denormal numbers, which can make
+// a block of fading reverb cost twice a block of playing (sound bench, 0.5.5). x64 sets
+// FTZ and DAZ in MXCSR, ARM64 (the Pi) sets FZ in FPCR. Other targets rely on undenorm().
+struct ScopedFlushDenormals
+{
+#if defined(__SSE__) || defined(_M_X64) || defined(_M_IX86)
+    unsigned int old = _mm_getcsr();
+    ScopedFlushDenormals() { _mm_setcsr (old | 0x8040u); }
+    ~ScopedFlushDenormals() { _mm_setcsr (old); }
+#elif defined(__aarch64__)
+    uint64_t old = 0;
+    ScopedFlushDenormals() { asm volatile ("mrs %0, fpcr" : "=r" (old)); asm volatile ("msr fpcr, %0" :: "r" (old | (1ull << 24))); }
+    ~ScopedFlushDenormals() { asm volatile ("msr fpcr, %0" :: "r" (old)); }
+#endif
+};
 
 // Flush denormals the portable way.
 inline float undenorm (float v) { return std::fabs (v) < 1.0e-20f ? 0.0f : v; }

@@ -381,6 +381,7 @@ void Engine::record (const float* dry, const float* out, int n)
 void Engine::process (const float* in, float* out, int numSamples)
 {
     auto& d = *impl;
+    const ScopedFlushDenormals noDenormals;
     int done = 0;
     while (done < numSamples)
     {

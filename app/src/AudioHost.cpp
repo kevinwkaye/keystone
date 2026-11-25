@@ -230,6 +230,7 @@ void AudioHost::audioDeviceIOCallbackWithContext (const float* const* in, int nu
                                                   const AudioIODeviceCallbackContext&)
 {
     const double startMs = Time::getMillisecondCounterHiRes();
+    const ScopedNoDenormals noDenormals;   // Kaleidoscope's pedals and anything else on this thread
     callbacks.fetch_add (1, std::memory_order_relaxed);
     if ((size_t) n > monoIn.size())
     {

@@ -2278,6 +2278,8 @@ static void bench (const char* capture)
     }
 }
 
+#include "SoundBench.h"
+
 // Writes the phone app's built-in defaults (parameter list and a fresh state), so its
 // menus work before it has found Keystone. CI checks the committed copy is current.
 static int writeDefaults (const char* path)
@@ -2501,6 +2503,7 @@ int main (int argc, char** argv)
     std::setvbuf (stdout, nullptr, _IONBF, 0);   // unbuffered (Windows has no line buffering), so a crash shows where it was
     if (argc > 2 && std::string (argv[1]) == "--soak") return soak (std::atof (argv[2]));
     if (argc > 2 && std::string (argv[1]) == "--defaults") return writeDefaults (argv[2]);
+    if (argc > 1 && std::string (argv[1]) == "--sound") { soundbench::run(); std::printf ("\n%d passed, %d failed\n%s", passes, failures, report.c_str()); return failures == 0 ? 0 : 1; }
     if (argc > 3 && std::string (argv[1]) == "--render") return renderFile (argv[2], argv[3], argc > 4 ? argv[4] : "");
     const char* capture = argc > 1 ? argv[1] : nullptr;
     const bool benchOnly = argc > 2 && std::string (argv[2]) == "--bench";
@@ -2546,6 +2549,7 @@ int main (int argc, char** argv)
         testRunaway();
         testBrake();
         testCapture (capture);
+        soundbench::run();
     }
     bench (capture);
     std::printf ("\n%d passed, %d failed\n", passes, failures);
