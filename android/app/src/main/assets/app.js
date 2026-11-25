@@ -241,20 +241,32 @@ var KS = (function () {
     grip: '<svg width="14" height="20" viewBox="0 0 14 20" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="#8A847A"/><circle cx="10" cy="4" r="2" fill="#8A847A"/><circle cx="4" cy="10" r="2" fill="#8A847A"/><circle cx="10" cy="10" r="2" fill="#8A847A"/><circle cx="4" cy="16" r="2" fill="#8A847A"/><circle cx="10" cy="16" r="2" fill="#8A847A"/></svg>',
     dots: '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="4" cy="10" r="2" fill="#F2EDE4"/><circle cx="10" cy="10" r="2" fill="#F2EDE4"/><circle cx="16" cy="10" r="2" fill="#F2EDE4"/></svg>'
   };
-  var PEBBLE = '<svg class="pebble" id="pebble" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Pebble">' +
+  var PEBBLE = '<svg class="pebble" id="pebble" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Heavy for his Size">' +
     '<path transform="translate(7 9)" d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#2329A8"/>' +
     '<path d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#4B57FF"/>' +
     '<g class="eye"><circle cx="78" cy="80" r="18" fill="#FFFFFF"/><circle cx="80" cy="82" r="9" fill="#0B0B12"/></g>' +
     '<g class="eye"><circle cx="122" cy="80" r="18" fill="#FFFFFF"/><circle cx="124" cy="82" r="9" fill="#0B0B12"/></g>' +
     '<path d="M88 116 Q 100 126, 112 116" fill="none" stroke="#0B0B12" stroke-width="6" stroke-linecap="round"/></svg>';
 
-  var PEBBLE_K = '<svg class="pebble" id="pebble" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Pebble in shades and a pork pie hat">' +
+  var PEBBLE_K = '<svg class="pebble" id="pebble" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Heavy for his Size in shades and a pork pie hat">' +
     '<path transform="translate(7 9)" d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#B8661E"/>' +
     '<path d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#F28C28"/>' +
     '<rect x="56" y="72" width="40" height="22" rx="8" fill="#141110"/><rect x="104" y="72" width="40" height="22" rx="8" fill="#141110"/><rect x="94" y="78" width="12" height="5" fill="#141110"/>' +
     '<path d="M88 120 Q 100 130, 112 120" fill="none" stroke="#141110" stroke-width="6" stroke-linecap="round"/>' +
     '<g transform="rotate(-9 100 52)"><ellipse cx="100" cy="52" rx="52" ry="9" fill="#4A2E1B"/><path d="M70 52 L74 24 Q100 17 126 24 L130 52Z" fill="#6B4429"/>' +
     '<path d="M71.5 40 Q100 35 128.5 40 L129.5 50 Q100 46 70.5 50Z" fill="#F6EBDD"/><path d="M118 40 Q132 14 146 10 Q136 26 124 42Z" fill="#F28C28"/></g></svg>';
+  // Heavy for his Size, Hev for short, in his four moods (the "Heavy for his Size" canvas, 0.5.9)
+  function hev(mood, size, label) {
+    var body = '<path transform="translate(7 9)" d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#2329A8"/>' +
+      '<path d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#4B57FF"/>';
+    var eye = function (x, px, py) { return '<circle cx="' + x + '" cy="80" r="18" fill="#fff"/><circle cx="' + px + '" cy="' + py + '" r="9" fill="#0B0B12"/>'; };
+    var line = function (d) { return '<path d="' + d + '" fill="none" stroke="#0B0B12" stroke-width="6" stroke-linecap="round"/>'; };
+    var face = mood === 'worried' ? eye(78, 78, 84) + eye(122, 122, 84) + line('M60 62 L92 52') + line('M108 52 L140 62') + line('M86 126 Q 100 112, 114 126') + '<path d="M150 96 Q 160 112, 150 118 Q 140 112, 150 96 Z" fill="#9FD3FF"/>'
+      : mood === 'unsure' ? eye(78, 86, 86) + eye(122, 130, 86) + line('M60 58 L94 62') + line('M88 120 L 112 118')
+      : mood === 'asleep' ? line('M62 84 Q 78 94, 94 84') + line('M106 84 Q 122 94, 138 84') + '<circle cx="100" cy="120" r="7" fill="#0B0B12"/><text x="148" y="58" font-size="26" font-weight="700" fill="#F2EDE4">z</text><text x="164" y="38" font-size="18" font-weight="700" fill="#B9B2A6">z</text>'
+      : eye(78, 80, 82) + eye(122, 124, 82) + line('M84 114 Q 100 132, 116 114');
+    return '<svg class="hev" width="' + size + '" height="' + size + '" viewBox="0 0 200 200" role="img" aria-label="' + esc(label || 'Heavy for his Size') + '">' + body + face + '</svg>';
+  }
   // which parameter switches a module on and off (Kuddle's are named their own way)
   var KON = { 'k.mute': 'kuddle.muteOn', 'k.wah': 'kuddle.wahOn', 'k.opto': 'kuddle.optoOn', 'k.tape': 'kuddle.tapeOn', 'k.tone': 'kuddle.toneOn', 'k.room': 'kuddle.roomOn' };
   function onp(mod) { return KON[mod] || (S.params[mod + '.on'] ? mod + '.on' : ''); }
@@ -306,10 +318,10 @@ var KS = (function () {
       '<section class="card"><span style="font-size:17px;font-weight:700">' + (on('rec.on') ? 'Waiting for you to play' : 'Recorder off') + '</span>' +
         '<span class="small">' + (on('rec.on') ? 'A take starts by itself on your first note, with the two seconds before it. A minute of quiet ends it.' : 'Switch on Record when I play below.') + '</span></section>';
     var settings = '<section class="card" style="gap:4px">' +
-      '<label class="row" style="padding:0"><span><span class="t">Record when I play</span><span class="s">Your bass dry and through the rig, on the laptop</span></span>' +
+      '<label class="row" style="padding:0"><span><span class="t">Record when I play</span><span class="s">Your bass dry and through the rig, kept on Keystone</span></span>' +
         '<button type="button" class="pill' + (on('rec.on') ? ' lit' : '') + '" data-onoff="rec.on">' + (on('rec.on') ? 'ON' : 'OFF') + '</button></label>' +
       '<label class="row" style="padding:0"><span><span class="t">Room track</span><span class="s">' +
-        (!native() ? 'Needs the Keystone phone app' : roomOn && !micOk() ? 'Tap to allow the mic' : 'This phone\'s mic, sent to the laptop after the take') + '</span></span>' +
+        (!native() ? 'Needs the Keystone phone app' : roomOn && !micOk() ? 'Tap to allow the mic' : 'This phone\'s mic, sent to Keystone after the take') + '</span></span>' +
         '<button type="button" class="pill' + (roomOn && micOk() ? ' lit' : '') + '" data-act="roomToggle">' + (roomOn && micOk() ? 'ON' : 'OFF') + '</button></label>' +
       (rs && rs.waiting ? '<span class="small" style="padding-bottom:8px">' + esc(rs.status || 'Room track waiting to send') + (rs.pct >= 0 ? ', ' + rs.pct + '%' : '') + (rs.waiting > 1 ? ' (' + rs.waiting + ' waiting)' : '') + '</span>' : '') +
       '</section>';
@@ -319,8 +331,8 @@ var KS = (function () {
         return '<button type="button" class="row" data-take="' + esc(tk.name) + '"><span><span class="t">' + esc(tt.t) + '</span><span class="s">' + esc(tt.s) + '</span></span><span class="r muted">' + clock(tk.seconds) + ' ›</span></button>';
       }).join('');
     return '<section class="screen" style="gap:14px">' + header('Recorder', { id: 'play', label: 'Play' }, recPill()) + live + settings +
-      '<section class="group"><h2 class="label">Takes on the laptop' + (S.takesFree ? ', ' + fmtBytes(S.takesFree) + ' free' : '') + '</h2>' + list + '</section>' +
-      '<div class="small">Takes are in Documents\\Keystone\\Recordings on the laptop: a WAV with your dry bass on the left and the rig on the right, the room track beside it, and the song changes and Keeps marked. When the laptop runs low on space the oldest takes go first.</div>' +
+      '<section class="group"><h2 class="label">Takes on Keystone' + (S.takesFree ? ', ' + fmtBytes(S.takesFree) + ' free' : '') + '</h2>' + list + '</section>' +
+      '<div class="small">Takes are kept in Keystone\'s Recordings folder: a WAV with your dry bass on the left and the rig on the right, the room track beside it, and the song changes and Keeps marked. When Keystone runs low on space the oldest takes go first.</div>' +
       nav('health') + '</section>';
   }
 
@@ -522,7 +534,7 @@ var KS = (function () {
     return out + '<section class="card" style="gap:10px"><h2 class="label">Watch</h2>' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:48px"><span style="font-size:17px">Update the watch with Update firmware</span>' +
       '<button type="button" class="pill' + (auto ? ' lit' : '') + '" data-act="watchAuto">' + (auto ? 'ON' : 'OFF') + '</button></div>' +
-      '<span class="small" style="color:#8A847A">' + (auto ? 'On: one tap on Update firmware does the laptop, then the watch.' : 'Off: update the watch with its own button.') + '</span>' +
+      '<span class="small" style="color:#8A847A">' + (auto ? 'On: one tap on Update firmware does Keystone, then the watch.' : 'Off: update the watch with its own button.') + '</span>' +
       (watchPaired() ? '<button type="button" class="back" data-act="watchUnpair" style="min-height:44px;font-size:14px;align-self:flex-start">Pair the watch again</button>' : '') + '</section>';
   }
   function pairWatchScreen() {
@@ -612,7 +624,9 @@ var KS = (function () {
     else if (h['in'].db > -1) out.push('Bass input clipping: turn the input gain down');
     if (!h.fs.ok) out.push('Footswitches not connected');
     if (h.laptop.recent > 0) out.push(h.laptop.recent + ' dropouts in the last minute');
-    if (h.laptop.cpu > 80) out.push('Laptop CPU at ' + h.laptop.cpu + '%');
+    if (h.laptop.cpu > 80) out.push(hostName(true) + ' CPU at ' + h.laptop.cpu + '%');
+    if (h.sys && h.sys.uv) out.push('Power dipping: use the official 27 W supply');
+    if (h.sys && h.sys.temp >= 80) out.push(hostName(true) + ' running hot (' + Math.round(h.sys.temp) + '\u00B0C): give it some air');
     if (S.meter && S.meter.lat > 16) out.push('Round trip ' + S.meter.lat + ' ms: too slow to play through. ' + (Math.round(val('output.mode')) === 2 ? 'Tap ASIO panel on Health and set the buffer to 128' : 'Set the audio buffer lower'));
     if (S.healthAt && Date.now() - S.healthAt > 5000) out.push('Keystone has gone quiet: no news for ' + Math.round((Date.now() - S.healthAt) / 1000) + ' s');
     return out;
@@ -628,6 +642,16 @@ var KS = (function () {
     else { var top = document.querySelector('.screen .top'); if (top) top.insertAdjacentHTML('afterend', html); }
   }
   function ago(sec) { return sec < 0 ? 'never' : sec < 60 ? sec + ' s ago' : Math.round(sec / 60) + ' min ago'; }
+  // Hev reads the Health list: happy when it's all green, unsure at amber, worried at red
+  function hevCard(rows, c) {
+    var bad = rows.filter(function (r) { return r.bad; }), amber = rows.filter(function (r) { return !r.ok && !r.bad; });
+    var mood = !c ? 'asleep' : bad.length ? 'worried' : amber.length ? 'unsure' : 'happy';
+    var say = !c ? 'Looking for Keystone.' : bad.length ? bad[0].n + ' needs you now.' : amber.length ? 'Have a look at ' + amber[0].n.toLowerCase() + '.' : 'All good. Play on.';
+    var more = !c ? 'He wakes up the moment the phone finds it.' : bad.length || amber.length ? 'It\'s the ' + (bad.length ? 'red' : 'amber') + ' row below.' : 'Everything below is green.';
+    return '<section class="card" style="flex-direction:row;align-items:center;gap:16px">' + hev(mood, 88, 'Heavy for his Size, ' + mood) +
+      '<span style="display:flex;flex-direction:column;gap:4px;min-width:0"><span class="label" style="font-size:12px">Heavy for his Size says</span>' +
+      '<span style="font-size:22px;font-weight:700;line-height:1.15">' + esc(say) + '</span><span class="small">' + esc(more) + '</span></span></section>';
+  }
   function healthScreen() {
     var h = S.health, c = connected(), g = '#5DCAA5', o = '#F0997B', w = warnings();
     var head = !c ? '<span class="small" style="color:#F0997B">Not connected</span>' : w.length ? '<span class="small" style="color:#F0997B">' + w.length + (w.length > 1 ? ' problems' : ' problem') + '</span>' : '<span class="small" style="color:#5DCAA5">All good</span>';
@@ -660,6 +684,7 @@ var KS = (function () {
     var inCol = inDb == null || inDb < -50 ? '#8A847A' : inDb > -1 ? o : g;
     return '<section class="screen" style="gap:14px">' + header('Rig', { id: 'play', label: 'Play' }, head) +
       (S.demo ? '<section class="card" style="gap:8px;border:2px solid #F0C27B"><span style="font-size:17px;font-weight:700">Demo</span><span class="small">A pretend Keystone in this phone. Switches, songs, banks, modes, the tuner and meters all work; recording, updates and captures need the real rig. It hands over to the real Keystone the moment it\'s found.</span><button type="button" class="wide" data-act="demoOff">Leave the demo</button></section>' : '') +
+      hevCard(rows, c) +
       '<section class="card" style="gap:10px"><h2 class="label">Bass in</h2><div class="bar" style="height:14px"><div style="width:' + (frac * 100) + '%;background:' + inCol + '"></div></div>' +
       '<div style="display:flex;justify-content:space-between;font-size:14px"><span>' + esc(inputText()) + '</span><span class="muted">' + (h ? 'Input ' + h['in'].ch : '') + '</span></div></section>' +
       '<section class="card" style="padding:6px 16px;gap:0">' + rows.map(function (r) {
@@ -818,13 +843,13 @@ var KS = (function () {
         '<span class="head">' + (!K && S.footMode === 1 && t.k !== 'D' ? '' : flip(t.k)) + '<span class="nm">' + t.name + '</span></span>' +
         '<span class="st" style="color:' + col + '">' + t.st + '</span>' + tog + '</div>';
     }).join('');
-    var offline = S.link !== 'connected' ? '<div class="card"><span style="font-size:17px;font-weight:700">Looking for Keystone</span>' +
-      '<span class="small">Turn on this phone\'s hotspot and switch on the laptop. Keystone joins the hotspot by itself and this screen connects within a few seconds. No internet or mobile data needed.</span>' +
+    var offline = S.link !== 'connected' ? '<div class="card"><span style="display:flex;align-items:center;gap:14px">' + hev('asleep', 64, 'Heavy for his Size, asleep') + '<span style="font-size:17px;font-weight:700">Looking for Keystone</span></span>' +
+      '<span class="small">Switch Keystone on and join its Keystone Wi-Fi from this phone\'s Wi-Fi settings. Hev wakes up and this screen connects within a few seconds. No internet or mobile data needed.</span>' +
       (S.linkDetail ? '<span class="small" style="color:#F2EDE4">' + esc(S.linkDetail) + '</span>' : '') +
-      '<div class="note"><input id="manualIp" inputmode="decimal" placeholder="Laptop address, e.g. 10.42.0.17" aria-label="Laptop address" value="' + esc(S.manualIp || '') + '">' +
+      '<div class="note"><input id="manualIp" inputmode="decimal" placeholder="Keystone\'s address, e.g. 10.42.0.1" aria-label="Keystone\'s address" value="' + esc(S.manualIp || '') + '">' +
       '<button type="button" data-act="manual">Connect</button></div>' +
       (window.KSDemo ? '<button type="button" class="wide go" data-act="demoOn">Try the demo instead</button><span class="small">Plays with a pretend Keystone in this phone: every screen works, nothing is sent anywhere.</span>' : '') +
-      '<span class="small">Type the laptop\'s address, not the phone\'s. Your hotspot settings list the laptop under Connected devices, and Keystone writes its address in Documents\\Keystone\\keystone.log.</span></div>' : '';
+      '<span class="small">Type Keystone\'s address, not the phone\'s. On Keystone\'s own Wi-Fi it\'s 10.42.0.1.</span></div>' : '';
     var note = Date.now() < S.noteUntil ? '<div class="note"><input id="noteText" maxlength="200" placeholder="Add a note to that Keep (optional)" aria-label="Note for the last Keep"><button type="button" data-act="note">Save</button></div>' : '';
     return '<section class="screen">' +
       '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to ' + rigNext().name + '">' + (K ? PEBBLE_K : PEBBLE) +
@@ -885,9 +910,28 @@ var KS = (function () {
       msg: !valid ? 'Play a string' : inTune ? 'In tune' : Math.abs(cents) < 10 ? 'Nearly there. Green when within 2 cents.' : cents < 0 ? 'Flat: tune up' : 'Sharp: tune down'
     };
   }
+  // Hev's eyes tune, as Pebble's LED eyes do on the pedal: left red when flat, right red when
+  // sharp, both green in tune (0.5.9)
+  function hevEyes(t) {
+    var valid = t && t.valid, c = valid ? t.cents : 0;
+    if (!valid) return ['#FFFFFF', '#FFFFFF'];
+    if (Math.abs(c) <= 2) return ['#5DCAA5', '#5DCAA5'];
+    return c < 0 ? ['#E5534B', '#FFFFFF'] : ['#FFFFFF', '#E5534B'];
+  }
+  function tunerHev(t) {
+    var e = hevEyes(t);
+    return '<svg width="56" height="56" viewBox="0 0 200 200" role="img" aria-label="Heavy for his Size, his eyes show flat and sharp">' +
+      '<path transform="translate(7 9)" d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#2329A8"/>' +
+      '<path d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#4B57FF"/>' +
+      '<circle id="hevL" cx="78" cy="80" r="18" fill="' + e[0] + '"/><circle cx="80" cy="82" r="9" fill="#0B0B12"/>' +
+      '<circle id="hevR" cx="122" cy="80" r="18" fill="' + e[1] + '"/><circle cx="124" cy="82" r="9" fill="#0B0B12"/>' +
+      '<path d="M84 114 Q 100 132, 116 114" fill="none" stroke="#0B0B12" stroke-width="6" stroke-linecap="round"/></svg>';
+  }
   function updateTuner() {
     var v = tunerView(), q = function (id) { return document.getElementById(id); };
     if (!q('tnote')) return;
+    var e = hevEyes(S.meter.tuner);
+    if (q('hevL')) { q('hevL').setAttribute('fill', e[0]); q('hevR').setAttribute('fill', e[1]); }
     if (q('tnote').textContent !== v.note) { q('tnote').textContent = v.note; q('toct').textContent = v.oct; }
     q('tneedle').setAttribute('x2', v.p.x.toFixed(1)); q('tneedle').setAttribute('y2', v.p.y.toFixed(1)); q('tneedle').setAttribute('stroke', v.col);
     q('tcents').textContent = v.cents; q('tcents').style.color = v.col;
@@ -904,7 +948,7 @@ var KS = (function () {
     var msg = !valid ? 'Play a string' : inTune ? 'In tune' : Math.abs(cents) < 10 ? 'Nearly there. Green when within 2 cents.' : cents < 0 ? 'Flat: tune up' : 'Sharp: tune down';
     var muted = on('tuner.mute');
     return '<section class="screen" style="gap:20px">' +
-      '<div class="top"><span class="title">Tuner</span><div class="pill"><span class="dot" style="background:' + (muted ? '#F0997B' : '#5DCAA5') + '"></span>' + (muted ? 'Output muted' : 'Output live') + '</div></div>' +
+      '<div class="top"><span class="brand">' + tunerHev(t) + '<span class="title">Tuner</span></span><div class="pill"><span class="dot" style="background:' + (muted ? '#F0997B' : '#5DCAA5') + '"></span>' + (muted ? 'Output muted' : 'Output live') + '</div></div>' +
       '<div class="tnote"><span class="flip big" id="tnote">' + esc(valid ? t.note.replace('#', '\u266F') : '-') + '</span><span class="flip oct" id="toct">' + esc(valid ? t.oct : ' ') + '</span></div>' +
       '<div class="card" style="align-items:center;gap:4px;padding:16px"><svg width="310" height="150" viewBox="0 -14 310 164" role="img" aria-label="Tuning needle">' +
       '<path d="M35 140 A 120 120 0 0 1 275 140" fill="none" stroke="#3A3A40" stroke-width="2"/>' +
@@ -1154,7 +1198,7 @@ var KS = (function () {
       var srcHtml = '<section class="card"><h2 class="label">Source</h2><button type="button" class="source" data-act="captures"><span><span class="t">' + esc(capName) + '</span><span class="s">' + esc(capSub) + '</span></span><span style="font-size:14px;color:#5DCAA5">Change</span></button>' +
         (S.showCaptures ? '<div class="group">' + (S.captures.length ? S.captures.map(function (f) {
           return '<button type="button" class="row" data-capture="' + esc(f) + '" style="min-height:48px;background:#262626"><span class="t" style="font-size:16px">' + esc(f.replace(/\.nam$/i, '')) + '</span><span class="r" style="color:#5DCAA5">' + (f === S.captureFile ? 'LOADED' : '') + '</span></button>';
-        }).join('') : '<span class="small">No .nam files found in Documents\\Keystone\\Captures on the laptop.</span>') + '</div>' : '') +
+        }).join('') : '<span class="small">No captures on Keystone yet.</span>') + '</div>' : '') +
         '<div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))"><button type="button" class="' + (src === 0 ? 'on' : '') + '" data-set="' + srcId + '" data-v="0">Capture</button><button type="button" class="' + (src === 1 ? 'on' : '') + '" data-set="' + srcId + '" data-v="1">Model</button></div>' +
         '<span class="small">' + (voice ? 'Drive' : 'Edge') + ' plays through ' + (src === 0 ? 'the capture.' : 'the model.') + (src === 0 && !voice ? ' A capture saved at high gain stays heavy, even on Edge.' : '') + '</span></section>';
       var rest = list.filter(function (p) { return p.id !== 'drive.source' && p.id !== 'drive.edge.source'; });
@@ -1170,7 +1214,7 @@ var KS = (function () {
         '<span class="s">' + esc(S.space ? '.wav from your Spaces folder' : 'Put .wav files in Documents\\Keystone\\Spaces') + '</span></span><span style="font-size:14px;color:#5DCAA5">Change</span></button>' +
         (S.showSpaces ? '<div class="group">' + (S.spaces.length ? S.spaces.map(function (f) {
           return '<button type="button" class="row" data-space="' + esc(f) + '" style="min-height:48px;background:#262626"><span class="t" style="font-size:16px">' + esc(f.replace(/\.wav$/i, '')) + '</span><span class="r" style="color:#5DCAA5">' + (f === S.spaceFile ? 'LOADED' : '') + '</span></button>';
-        }).join('') : '<span class="small">No .wav files found in Documents\\Keystone\\Spaces on the laptop.</span>') + '</div>' : '') + '</section>';
+        }).join('') : '<span class="small">No spaces on Keystone yet.</span>') + '</div>' : '') + '</section>';
       var rvHtml = renderParams(list);
       var rvCut = rvHtml.indexOf('</section>') + '</section>'.length;
       pre = rvHtml.slice(0, rvCut) + spCard;
