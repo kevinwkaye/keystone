@@ -19,8 +19,8 @@
 #if KEYSTONE_TRAY
 #include <juce_gui_extra/juce_gui_extra.h>
 #include "StatusWindow.h"
-#include "SystemHealth.h"
 #endif
+#include "SystemHealth.h"
 #include <cstdlib>
 #include <deque>
 #include <string>

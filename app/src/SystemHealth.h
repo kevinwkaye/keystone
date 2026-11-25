@@ -6,6 +6,9 @@
 #include <juce_core/juce_core.h>
 
 #if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
  #include <windows.h>
 #endif
 
