@@ -23,10 +23,29 @@ if [ "$ON" != "true" ]; then
 fi
 [ ${#PASS} -ge 8 ] || { say "Off: the password is too short"; exit 1; }
 
-# already running with these settings: leave it be (Keystone writes the file each time it starts)
+# Local only (0.5.7): the network hands out addresses with no internet route and no DNS, so
+# phones treat it as a local network and keep mobile data for everything else. Without this
+# Android routed all its traffic into Keystone's Wi-Fi, which goes nowhere.
+LOCAL=/etc/NetworkManager/dnsmasq-shared.d/keystone-local.conf
+WANT_LOCAL='# Keystone Wi-Fi: no default route, no DNS, so phones keep mobile data for the internet
+dhcp-option=3
+dhcp-option=6'
+LOCAL_CHANGED=0
+if [ "$(cat "$LOCAL" 2>/dev/null)" != "$WANT_LOCAL" ]; then
+    mkdir -p "$(dirname "$LOCAL")"
+    printf '%s\n' "$WANT_LOCAL" > "$LOCAL"
+    LOCAL_CHANGED=1
+fi
+
+# already running with these settings: leave it be (Keystone writes the file each time it starts),
+# unless the local-only setting just went in, which needs the network brought up again
 if nmcli -t -f GENERAL.STATE con show "$CON" 2>/dev/null | grep -q activated \
    && [ "$(nmcli -s -g 802-11-wireless.ssid con show "$CON")" = "$SSID" ] \
    && [ "$(nmcli -s -g 802-11-wireless-security.psk con show "$CON")" = "$PASS" ]; then
+    if [ "$LOCAL_CHANGED" = 1 ]; then
+        nmcli con down "$CON" >/dev/null 2>&1
+        nmcli con up "$CON" >/dev/null 2>&1
+    fi
     say "On: $SSID"
     exit 0
 fi
