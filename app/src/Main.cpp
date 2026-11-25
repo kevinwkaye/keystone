@@ -384,7 +384,18 @@ public:
         // exactly as if Ableton were sending it the MIDI
         if (rack && rack->takesPedals())
         {
-            rack->pushMidi (m);
+            // Through a host the pedals only answer on their own footswitch channel (16 out
+            // of the box) while the Chocolate always sends on 1. Keystone already knows which
+            // switch this is, so it hands it over on the channel the pedal listens on. A pedal
+            // that reads the footswitch device itself ignores this copy, so nothing happens twice.
+            int fwdCh = ch;
+            for (int sw = 0; sw < 4; ++sw)
+                if (cc == pedals.fsCC[(size_t) sw]) { fwdCh = pedals.fsChannel[(size_t) sw]; break; }
+            if (cc == pedals.expCC && cc < 128) fwdCh = pedals.expChannel;
+            fwdCh = jlimit (1, 16, fwdCh);
+            if (m.isController()) rack->pushMidi (MidiMessage::controllerEvent (fwdCh, cc, val));
+            else if (m.isNoteOn()) rack->pushMidi (MidiMessage::noteOn (fwdCh, cc - 128, (uint8) val));
+            else rack->pushMidi (MidiMessage::noteOff (fwdCh, cc - 128));
             if (cc == pedals.expCC && cc < 128) lastExpRaw.store (val);   // calibration still sees it
             return;
         }
