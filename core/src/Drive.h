@@ -368,7 +368,7 @@ private:
         }
         // keep the oversampler's history fresh when the voice is silent, so a switch
         // doesn't play stale samples
-        void idleModel (float x) { float a, b; os.up (x * gain, a, b); os.down (clip (a), clip (b)); }
+        void idleModel (float x) { float a, b; os.up (x * gain, a, b); a = clip (a); b = clip (b); os.down (a, b); }   // in order (0.5.5)
     };
 
     float sr = 48000;

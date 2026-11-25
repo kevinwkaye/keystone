@@ -110,7 +110,7 @@ public:
         miller2.lowPass (8500.0f, 0.6f, os);
         dry.prepare (Oversampler2x::kLatency + 4);
         calibrate();
-        cHp.highPass (140.0f, 0.707f, sr);
+        cHp.highPass (140.0f, 0.707f, 2.0f * sr);   // the Cut voice runs at twice the rate (0.5.5)
         cLp.lowPass (7000.0f, 0.707f, sr);
         tapePre.highShelf (2500.0f, 6.0f, sr, 0.7f);
         tapeDe.highShelf (2500.0f, -6.0f, sr, 0.7f);
@@ -128,7 +128,7 @@ public:
         for (auto* b : { &couple1, &couple2, &miller1, &miller2, &cHp, &cPeak, &cLp, &detail, &ultraLo1, &ultraLo2, &ultraHi,
                          &tapePre, &tapeDe, &bump, &tapeLp, &growlPk, &growlDe, &cab, &cab2, &midFill })
             b->reset();
-        tri1.reset(); tri2.reset(); ovs.reset(); dry.reset(); cSat.reset(); tapeSat.reset(); stack.reset(); line.reset();
+        tri1.reset(); tri2.reset(); ovs.reset(); ovsCut.reset(); dry.reset(); cSat.reset(); tapeSat.reset(); stack.reset(); line.reset();
         blendS.reset (0.3f); stageS.reset (4.0f);
         env = 0; wowPh = flutPh = 0;
     }
@@ -140,7 +140,7 @@ public:
         if (! init || ulo != lulo) { ultraLo1.lowShelf (45.0f, ulo ? 3.0f : 0.0f, sr); ultraLo2.peak (500.0f, 0.8f, ulo ? -6.0f : 0.0f, sr); lulo = ulo; }
         if (! init || uhi != luhi) { ultraHi.highShelf (5500.0f, uhi ? 6.0f : 0.0f, sr, 0.8f); luhi = uhi; }
         const float mf = V (v, P::PreMidFreq), mp = V (v, P::PreMid), det = V (v, P::PreDetail);
-        if (! init || mf != lmf || mp != lmp) { cPeak.peak (mf, 1.1f, 10.0f * mp, sr); lmf = mf; lmp = mp; }
+        if (! init || mf != lmf || mp != lmp) { cPeak.peak (mf, 1.1f, 10.0f * mp, 2.0f * sr); lmf = mf; lmp = mp; }
         if (! init || det != ldet) { detail.peak (3000.0f, 0.7f, det, sr); ldet = det; }
         {   // growl: the valve breaks up in the low mids, and the top is rolled off like a cab
             const float gg = V (v, P::PreGain);
@@ -220,11 +220,21 @@ private:
         valve = cab2.process (cab.process (growlDe.process (valve)));
         valve = midFill.process (stack.process (valve)) * stackMakeup;
         valve = ultraHi.process (ultraLo2.process (ultraLo1.process (valve)));
-        const float in = xd * sg;   // the Cut voice works on the same, lined-up signal
+        (void) xd;
 
         // ---- Cut: the modern voice, tight and clear, in parallel ----
-        float c = cPeak.process (cHp.process (in));
-        c = cSat.process (c * cDrive) / cDrive * 1.25f;
+        // At twice the rate like the valve (0.5.5): at the base rate its grit folded back as
+        // aliasing about 46 dB down on high notes, where the valve's sits past 80. Its own
+        // oversampler has the same latency, so it stays lined up with the valve.
+        float c0, c1;
+        ovsCut.up (x * sg, c0, c1);
+        auto cut = [this] (float u)
+        {
+            u = cPeak.process (cHp.process (u));
+            return cSat.process (u * cDrive) / cDrive * 1.25f;
+        };
+        const float d0 = cut (c0), d1 = cut (c1);   // in order: the filters and ADAA keep state
+        float c = ovsCut.down (d0, d1);
         c = cLp.process (c);
 
         const float bl = blendS.next();
@@ -290,7 +300,7 @@ private:
 
     static constexpr int kCal = 11;
     float calTable[kCal] {}, makeup = 1, bias1 = 0.04f, bias2 = 0.03f;
-    Oversampler2x ovs;
+    Oversampler2x ovs, ovsCut;
     DelayLine dry;
     float sr = 48000, gain = 0, drive1 = 1, drive2 = 1, sag = 0, cDrive = 1, tape = 0, wow = 0, level = 1;
     float env = 0, envA = 0.01f, envR = 0.001f, stackMakeup = 1, wowPh = 0, flutPh = 0;

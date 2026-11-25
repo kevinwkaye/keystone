@@ -152,9 +152,11 @@ public:
         line.prepare ((int) (0.03f * sr));
         bbd.setLowPass (7000.0f, sr);
         mixS.setTime (0.03f, sr);
+        powAvg = onePoleCoef (0.3f, sr);
+        makeupGlide = 1.0f - onePoleCoef (0.5f, sr);
         reset();
     }
-    void reset() { line.reset(); bbd.reset(); phase = 0; mixS.reset (0); }
+    void reset() { line.reset(); bbd.reset(); phase = 0; mixS.reset (0); inPow = outPow = 0; makeup = 1; }
 
     void setMode (int mode)   // 0..3 = modes 1..4
     {
@@ -176,13 +178,22 @@ public:
         const float b = line.hermite (baseB * 0.001f * sr + depth * tb);
         const float wet = bbd.lp (0.5f * (a + b));
         const float m = mixS.next();
-        return x * (1.0f - 0.35f * m) + wet * 0.85f * m;
+        const float y = x * (1.0f - 0.35f * m) + wet * 0.85f * m;
+        // On the bottom end the 6.5 to 9.5 ms delays sit half a cycle out from notes around
+        // 60 Hz, so the wet partly cancels the dry: about 2 dB quieter at half mix. A slow
+        // power match (0.5.5) brings it back to the level you played, up to 6 dB
+        inPow = x * x + (inPow - x * x) * powAvg;
+        outPow = y * y + (outPow - y * y) * powAvg;
+        const float want = inPow > 1.0e-7f && outPow > 1.0e-9f ? clampf (std::sqrt (inPow / outPow), 1.0f, 2.0f) : makeup;
+        makeup += (want - makeup) * makeupGlide;
+        return y * (1.0f + (makeup - 1.0f) * std::min (1.0f, m * 4.0f));
     }
 
 private:
     static float tri (float p) { p -= std::floor (p); return p < 0.5f ? 4.0f * p - 1.0f : 3.0f - 4.0f * p; }
     float sr = 48000, phase = 0, rate = 0.45f, depth = 20;
     const float baseA = 6.5f, baseB = 9.5f;
+    float inPow = 0, outPow = 0, makeup = 1, powAvg = 0.9999f, makeupGlide = 0.0001f;
     DelayLine line;
     OnePole bbd;
     Smoothed mixS;
@@ -299,8 +310,7 @@ public:
         glideA = glideB = std::log (600.0f);
         glide = onePoleCoef (0.012f, sr);
         mixS.setTime (0.02f, sr);
-        envAtt = onePoleCoef (0.002f, sr);
-        envRel = onePoleCoef (0.6f, sr);
+        envAvg = onePoleCoef (0.15f, sr);   // average power over about a note
         makeupGlide = 1.0f - onePoleCoef (0.25f, sr);
         reset();
     }
@@ -350,11 +360,14 @@ public:
         float l, b;
         svf.process (x, l, b);
         float wet = bandPass ? b * (1.0f + 1.5f * res) : l;
-        // a band-pass drops the fundamental, so bring the wet back to the level you played
-        const float ax = std::fabs (x), aw = std::fabs (wet);
-        inEnv = ax > inEnv ? ax + (inEnv - ax) * envAtt : ax + (inEnv - ax) * envRel;
-        wetEnv = aw > wetEnv ? aw + (wetEnv - aw) * envAtt : aw + (wetEnv - aw) * envRel;
-        const float want = inEnv > 1.0e-3f && wetEnv > 1.0e-6f ? clampf (1.0f * inEnv / wetEnv, 1.0f, 4.0f) : 1.0f;
+        // a band-pass drops the fundamental, so bring the wet back to the level you played.
+        // Matched on power, not peaks (0.5.5): a resonant band-pass is far peakier than the
+        // bass going in, so matching peaks left it about 8 dB quieter than you played. Up to
+        // 20 dB of make-up: a band-pass from 200 Hz takes most of a low E away
+        const float px = x * x, pw = wet * wet;
+        inEnv = px + (inEnv - px) * envAvg;
+        wetEnv = pw + (wetEnv - pw) * envAvg;
+        const float want = inEnv > 1.0e-6f && wetEnv > 1.0e-12f ? clampf (std::sqrt (inEnv / wetEnv), 1.0f, 10.0f) : 1.0f;
         makeup += (want - makeup) * makeupGlide;
         wet *= makeup;
         wet = std::tanh (wet * 1.5f) / 1.5f;   // resonant peaks rounded off, not spiking the amp
@@ -371,7 +384,7 @@ private:
     float env = 0, relCoef = 0, glide = 0, glideA = 0, glideB = 0;
     bool manual = false, bandPass = false, down = false;
     float sens = 0.5f, lo = 300, hi = 2200, res = 0.5f, pos = 0.5f;
-    float inEnv = 0, wetEnv = 0, makeup = 2.5f, envAtt = 0.99f, envRel = 0.9999f, makeupGlide = 0.0001f;
+    float inEnv = 0, wetEnv = 0, makeup = 2.5f, envAvg = 0.9999f, makeupGlide = 0.0001f;
     unsigned counter = 0;
     Smoothed mixS;
 };
@@ -394,9 +407,12 @@ public:
         const float want = a > ceiling ? ceiling / a : 1.0f;
         gain = want < gain ? want + (gain - want) * att : want + (gain - want) * rel;
         float y = on ? x * gain : x;
-        // soft ceiling: transparent below 0.85, never past 0.98
+        // soft ceiling: transparent below 0.9, never past 0.98. The knee sits above where
+        // the limiter settles (0.891), so held notes never ride the curve and only the
+        // fastest transients touch it (0.5.5: at 0.85 a held, limited note was clipped
+        // gently every cycle, folding aliasing back about 70 dB down)
         const float ay = std::fabs (y);
-        if (ay > 0.85f) y = std::copysign (0.85f + 0.13f * std::tanh ((ay - 0.85f) / 0.13f), y);
+        if (ay > 0.9f) y = std::copysign (0.9f + 0.08f * std::tanh ((ay - 0.9f) / 0.08f), y);
         return y;
     }
     float reductionDb() const { return -gainToDb (gain); }

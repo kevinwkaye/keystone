@@ -44,7 +44,9 @@ static std::vector<double> powerSpectrum (const std::vector<float>& y, int n)
     return p;
 }
 
-// dB of everything that isn't a harmonic of f0 (or DC, or under 20 Hz) below the total.
+// dB of everything that isn't a harmonic of f0 below the total. Below half the note is left
+// out: valves and coupling filters settle slowly after the tone starts, and that sub-bass
+// drift isn't aliasing (every test tone here is 110 Hz or higher).
 // Blackman-Harris spreads each line over about 4 bins, so 6 either side is the line.
 static double nonHarmonicDb (const std::vector<float>& y, double f0)
 {
@@ -52,7 +54,7 @@ static double nonHarmonicDb (const std::vector<float>& y, double f0)
     auto p = powerSpectrum (y, n);
     const double binHz = kSr / n;
     double total = 0, harm = 0;
-    const int lowest = (int) (20 / binHz);
+    const int lowest = (int) (std::max (20.0, 0.5 * f0) / binHz);
     for (int k = lowest; k < n / 2; ++k)
     {
         total += p[(size_t) k];
@@ -124,16 +126,19 @@ static void aliasing()
         };
     };
     const std::vector<C> cases = {
-        // marks: a few dB past what 0.5.5 measured. Boutique target is under -80 everywhere;
-        // the preamp (-69) and limiter (-70) are the ones still short of it
-        { "Clean path (reference)", only ({}), 2100, 0.3, -75 },
+        // marks: about 3 dB past what 0.5.5 measured. What's left in the valve isn't aliasing:
+        // its sag moves each harmonic a little, which spreads it just past the bins counted
+        // as the harmonic. The Cut voice runs at 2x and the limiter's knee sits above where
+        // it settles (both 0.5.5)
+        { "Clean path (reference)", only ({}), 2100, 0.3, -110 },
         { "Drive, model, 2.1 kHz hard", only ({ P::DriveOn }), 2100, 0.7, -80 },
         { "Drive, model, 330 Hz hard", only ({ P::DriveOn }), 330, 0.7, -78 },
-        { "Valve preamp, 2.1 kHz hard", only ({ P::PreOn }), 2100, 0.7, -65 },
-        { "Valve preamp, 330 Hz hard", only ({ P::PreOn }), 330, 0.7, -65 },
-        { "Drive into preamp, 1.1 kHz", only ({ P::DriveOn, P::PreOn }), 1100, 0.7, -65 },
+        { "Valve preamp, 2.1 kHz hard", only ({ P::PreOn }), 2100, 0.7, -74 },
+        { "Valve preamp, 330 Hz hard", only ({ P::PreOn }), 330, 0.7, -70 },
+        { "Drive into preamp, 1.1 kHz", only ({ P::DriveOn, P::PreOn }), 1100, 0.7, -69 },
+        { "Preamp flipped to Cut, 2.1 kHz", [only] (Engine& e) { only ({ P::PreOn }) (e); e.setParam (P::PreBlend, 1); }, 2100, 0.7, -70 },
         { "Output iron at full, 110 Hz", [] (Engine& e) { neutral (e); e.setParam (P::OutLimit, 0); e.setParam (P::OutIron, 1); }, 110, 0.8, -80 },
-        { "Limiter working hard, 2.1 kHz", [] (Engine& e) { neutral (e); e.setParam (P::OutIron, 0); e.setParam (P::OutLevel, 12); }, 2100, 0.6, -66 },
+        { "Limiter working hard, 2.1 kHz", [] (Engine& e) { neutral (e); e.setParam (P::OutIron, 0); e.setParam (P::OutLevel, 12); }, 2100, 0.6, -74 },
     };
     for (const auto& c : cases)
     {
@@ -169,13 +174,12 @@ static void levelJumps()
         return 20 * std::log10 (rms (out.data() + from, out.size() - from) + 1e-12);
     };
     struct C { const char* name; P p; float on; double mark; };
-    // Bitrot's +3 dB step is by design (0.5.1). Target is within 1.5 dB for everything;
-    // Dimension (-2.1), the envelope filter (-7.7) and the wah (-3.9) are held where 0.5.5
-    // measured them until they're tuned
+    // Bitrot's +3 dB step is by design (0.5.1). Dimension, the envelope filter and the wah
+    // match their power to what you played (0.5.5; they measured -2.1, -7.7 and -3.9 dB)
     for (const auto& c : { C { "Drive", P::DriveOn, 1, 1.5 }, C { "Valve preamp", P::PreOn, 1, 2.0 },
-                           C { "Dimension", P::DimOn, 1, 2.6 }, C { "Low compressor", P::CompOn, 1, 1.5 },
-                           C { "Envelope filter", P::FiltOn, 1, 8.2 }, C { "Wah", P::WahOn, 1, 4.4 },
-                           C { "Grains", P::GrOn, 1, 2.0 }, C { "Delay", P::DlOn, 1, 2.0 }, C { "Reverb", P::RvOn, 1, 2.0 } })
+                           C { "Dimension", P::DimOn, 1, 1.0 }, C { "Low compressor", P::CompOn, 1, 2.0 },
+                           C { "Envelope filter", P::FiltOn, 1, 2.0 }, C { "Wah", P::WahOn, 1, 2.5 },
+                           C { "Grains", P::GrOn, 1, 1.0 }, C { "Delay", P::DlOn, 1, 1.0 }, C { "Reverb", P::RvOn, 1, 1.0 } })
     {
         const double off = level ([&] (Engine& e) { e.setParam (c.p, 0); });
         const double on = level ([&] (Engine& e) { e.setParam (c.p, c.on); });
