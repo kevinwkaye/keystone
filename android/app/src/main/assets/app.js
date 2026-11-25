@@ -439,7 +439,7 @@ var KS = (function () {
       '<div class="wifirow"><span class="lab">Network</span><b>' + esc(w.ssid) + '</b></div>' +
       '<div class="wifirow"><span class="lab">Password</span><b class="pw">' + esc(w.pass) + '</b></div>' +
       (window.KeystoneNative && KeystoneNative.wifiAdd ? '<button type="button" class="wide go" data-act="wifiAdd">Save it on this phone</button>' : '') +
-      '<span class="small">Save it once and the phone joins by itself whenever the rig is on, with no hotspot. If Android asks, keep the connection even though it has no internet: the phone uses mobile data for everything else.</span></section>';
+      '<span class="small">Save it once and the phone joins by itself whenever the rig is on, with no hotspot. Android may say it has no internet: just ignore that, and don\'t tap Keep or Stay connected, or Android sends everything through Keystone and mobile data stops working. You stay connected either way.</span></section>';
   }
 
   // ---- Update firmware (the laptop or the Pi) and the phone app, from GitHub
