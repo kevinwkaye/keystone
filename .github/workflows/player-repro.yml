@@ -22,8 +22,8 @@ jobs:
           sudo mkdir -p /mnt/pi/tmp/player && sudo cp keystone/pi/player/*.deb /mnt/pi/tmp/player/
           sudo mount --bind /dev /mnt/pi/dev; sudo mount -t proc proc /mnt/pi/proc; sudo mount -t sysfs sys /mnt/pi/sys
           echo "== installed already"; sudo chroot /mnt/pi dpkg-query -W libc6 libgl1 libdrm2 libstdc++6 mesa-libgallium libgbm1 libegl1 2>&1 || true
-          echo "== simulate"; sudo chroot /mnt/pi env DEBIAN_FRONTEND=noninteractive apt-get install -s --no-download --no-install-recommends /tmp/player/*.deb > sim.txt 2>&1 || true
-          tail -60 sim.txt
+          echo "== simulate"; sudo chroot /mnt/pi bash -c "DEBIAN_FRONTEND=noninteractive apt-get install -s --no-download --no-install-recommends /tmp/player/*.deb" > sim.txt 2>&1 || true
+          grep -vE "^(Inst|Conf) " sim.txt | tail -40; echo "-- Inst lines:"; grep -E "^Inst" sim.txt | head -200
           echo "== would fetch"; grep -E "^Inst" sim.txt | wc -l
-          echo "== real try"; sudo chroot /mnt/pi env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-download --no-install-recommends /tmp/player/*.deb 2>&1 | grep -iE "^E:|unable|missing|Err|Get:" | head -40 || true
-          echo "== print-uris of what it wants"; sudo chroot /mnt/pi apt-get install -y --print-uris --no-install-recommends /tmp/player/*.deb 2>&1 | grep "^'" | head -60 || true
+          echo "== real try"; sudo chroot /mnt/pi bash -c "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-download --no-install-recommends /tmp/player/*.deb" 2>&1 | grep -iE "^E:|unable|missing|Err|Get:" | head -40 || true
+          echo "== print-uris of what it wants"; sudo chroot /mnt/pi bash -c "apt-get install -y --print-uris --no-install-recommends /tmp/player/*.deb" 2>&1 | grep "^'" | head -60 || true
