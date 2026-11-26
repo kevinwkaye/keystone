@@ -9,6 +9,7 @@
 #include "Health.h"
 #include "Keeper.h"
 #include "LinkServer.h"
+#include "WatchApk.h"
 #include "PedalControl.h"
 
 #include "keystone/Controller.h"
@@ -303,7 +304,17 @@ public:
         {
             try
             {
-                if (line.contains ("\"watchHello\"")) link.markWatch (client, JSON::parse (line).getProperty ("v", var()).toString());
+                if (line.contains ("\"watchHello\""))
+                {
+                    const auto wv = JSON::parse (line).getProperty ("v", var()).toString();
+                    link.markWatch (client, wv);
+                    // 0.6.6: an older watch fetches the watch app from Keystone and installs it itself
+                    if (watchApk.shouldOffer (ks::Controller::kVersion, wv))
+                    {
+                        Logger::writeToLog ("Watch update: offering " + String (ks::Controller::kVersion) + " to the watch on " + wv);
+                        link.send (client, watchApk.offerJson (ks::Controller::kVersion));
+                    }
+                }
                 controller->handleMessage (line.toStdString(), [this, client] (const std::string& r) { link.send (client, String::fromUTF8 (r.c_str())); });
                 flush();
             }
@@ -311,6 +322,7 @@ public:
         };
         link.onConnect = [] (int client) { Logger::writeToLog ("Link: phone " + String (client) + " ready"); };
         link.onDisconnect = [] (int client) { Logger::writeToLog ("Link: phone " + String (client) + " left"); };
+        watchApk.log = [] (const String& s) { Logger::writeToLog (s); };
         link.start();
 
 #if KEYSTONE_TRAY
@@ -337,6 +349,7 @@ public:
         stopWifi();
         watchdog.stopThread (2000);
         link.stop();
+        watchApk.stop();
         if (audio) audio->stop();
         if (rack) rack->shutdown();   // keeps the pedal's settings for next time
         if (housekeeping) housekeeping->stopThread (2000);
@@ -659,6 +672,7 @@ public:
         h.laptopAddresses = link.addresses();
         h.watchVersion = link.watchVersion();
         h.watchAddress = link.watchAddress();
+        h.watchUpdate = watchApk.shouldOffer (ks::Controller::kVersion, h.watchVersion);
         return h;
     }
 
@@ -809,6 +823,8 @@ private:
     std::unique_ptr<DirectMidiInput> midi;
     std::unique_ptr<Housekeeping> housekeeping;
     LinkServer link;
+    // the watch app in Keystone's own package, for the watch to update itself (0.6.6)
+    WatchApk watchApk { File::getSpecialLocation (File::currentExecutableFile).getSiblingFile ("Watch").getChildFile ("Keystone-Watch.apk") };
 #if KEYSTONE_TRAY
     std::unique_ptr<Tray> tray;
 #endif

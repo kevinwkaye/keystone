@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: "0.6.5"
+  VERSION: "0.6.6"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.
@@ -257,13 +257,24 @@ jobs:
 
   # The ready-made Pi image: Raspberry Pi OS Lite with Keystone already in it
   pi-image:
-    needs: linux-arm64
+    needs: [linux-arm64, android]
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: linux-arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: watch-apk
+          path: watch-apk
+      # the watch app rides in the package, so the watch can update itself from the Pi (0.6.6)
+      - name: Watch app into the package
+        run: |
+          mkdir -p withwatch && tar -xzf "Keystone-$VERSION-linux-arm64.tar.gz" -C withwatch
+          mkdir -p withwatch/keystone/Watch && cp watch-apk/watch-release.apk withwatch/keystone/Watch/Keystone-Watch.apk
+          test "$(stat -c %s withwatch/keystone/Watch/Keystone-Watch.apk)" -gt 100000
+          tar -C withwatch -czf "Keystone-$VERSION-linux-arm64.tar.gz" keystone
       - name: Build the image
         run: |
           sudo apt-get install -y parted xz-utils >/dev/null
@@ -301,6 +312,12 @@ jobs:
 
       - name: Build the APK
         run: gradle -p android assembleRelease --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watch-apk
+          path: android/watch/build/outputs/apk/release/watch-release.apk
+          retention-days: 3
 
       - name: Add to the release
         if: github.ref == 'refs/heads/main'

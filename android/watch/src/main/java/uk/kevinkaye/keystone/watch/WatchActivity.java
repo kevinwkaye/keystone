@@ -4,18 +4,25 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.view.MotionEvent;
 import android.view.WindowManager;
 
 /** The watch face for Keystone: ready, live, tuner. Tap the screen for the tuner. */
 public final class WatchActivity extends Activity {
     private WatchView view;
+    private float downX, downY;
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         view = new WatchView(this);
+        view.setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) { downX = e.getX(); downY = e.getY(); }
+            return false;
+        });
         view.setOnClickListener(v -> {
+            if (view.tap(downX, downY)) return;   // the update screens (0.6.6)
             WristService s = WristService.running;
             if (s != null && WristService.STATE.connected) s.toggleTuner();
         });

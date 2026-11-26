@@ -44,6 +44,7 @@ struct Health
     int phones = 0;
     juce::String phoneAddresses, laptopAddresses;
     juce::String watchVersion, watchAddress;   // empty: no watch connected
+    bool watchUpdate = false;                  // Keystone has offered the watch a newer app (0.6.6)
 
     juce::String toJson() const
     {
@@ -76,7 +77,7 @@ struct Health
         if (projJson.isNotEmpty()) o->setProperty ("proj", juce::JSON::parse (projJson));
         if (svcOn) o->setProperty ("svc", obj ({ { "ok", svcOk }, { "fitted", svcFitted }, { "text", svcText } }));
         o->setProperty ("link", obj ({ { "phones", phones }, { "laptop", laptopAddresses } }));
-        o->setProperty ("watch", obj ({ { "on", watchVersion.isNotEmpty() }, { "v", watchVersion }, { "ip", watchAddress } }));
+        o->setProperty ("watch", obj ({ { "on", watchVersion.isNotEmpty() }, { "v", watchVersion }, { "ip", watchAddress }, { "upd", watchUpdate } }));
         return juce::JSON::toString (juce::var (o), true);
     }
 };

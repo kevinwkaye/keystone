@@ -502,7 +502,9 @@ var KS = (function () {
     if (w && w.on) { S.watchIp = w.ip; S.watchV = w.v; }   // only ever what the watch itself says
     return { v: S.watchV || '', ip: S.watchIp || '' };
   }
-  function watchNew() { var u = S.upd, wi = watchInfo(); return !!(u.latest && wi.v && newer(u.latest, wi.v) && asset(WATCH_APK)); }
+  // 0.6.6 and later fetch their own update from Keystone, so the phone leaves them to it
+  function watchSelf() { var wi = watchInfo(); return !!(wi.v && !newer('0.6.6', wi.v)); }
+  function watchNew() { var u = S.upd, wi = watchInfo(); return !!(u.latest && wi.v && newer(u.latest, wi.v) && asset(WATCH_APK) && !watchSelf()); }
   function watchAuto() { try { return localStorage.getItem('ks.watchAuto') !== '0'; } catch (e) { return true; } }
   function watchPaired() { try { return KeystoneNative.watchPaired(); } catch (e) { return false; } }
   function watchSetPaired(on) { try { KeystoneNative.watchSetPaired(on); } catch (e) { } }
@@ -531,6 +533,11 @@ var KS = (function () {
     }
     if (S.watchDone && !S.upd.busy) out += '<section class="card" style="gap:8px;border:2px solid #5DCAA5"><span style="font-size:17px;font-weight:700;color:#5DCAA5">Watch app installed from ' + esc(S.watchDone) + '</span><span class="small">The watch app opens again by itself and reconnects. The Watch row above shows the version the watch reports once it\'s back.</span></section>';
     if (!wi.v) return out;
+    var hw = S.health && S.health.watch;
+    if (hw && hw.on && hw.upd) out += '<section class="card" style="gap:8px;border:2px solid #4B57FF"><span style="font-size:17px;font-weight:700">Watch ' + esc(wi.v) + ' \u00b7 update waiting on the watch</span>' +
+      '<span class="small" style="font-size:15px">Open Keystone on the watch and tap the blue UPDATE READY, then Install.</span></section>';
+    if (watchSelf()) return out + '<section class="card" style="gap:8px"><h2 class="label">Watch</h2><span class="small" style="font-size:15px">The watch updates itself from Keystone after Update firmware. No wireless debugging needed.</span>' +
+      '<details><summary class="small" style="min-height:44px;display:flex;align-items:center">Other ways to update</summary><button type="button" class="back" data-act="updateWatch" style="min-height:44px;font-size:14px;margin-top:6px">Update over wireless debugging</button></details></section>';
     var auto = watchAuto();
     return out + '<section class="card" style="gap:10px"><h2 class="label">Watch</h2>' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:48px"><span style="font-size:17px">Update the watch with Update firmware</span>' +

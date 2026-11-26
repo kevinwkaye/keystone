@@ -72,7 +72,15 @@ public final class WristService extends Service implements SensorEventListener {
         volatile float cents;
         volatile int drops;              // since the app opened
         volatile String net = "";        // which Wi-Fi, pinned or not, and Keystone's address
+        // updating itself from Keystone (0.6.6)
+        volatile String updV = "";       // the version Keystone offers, empty when none
+        volatile long updSize;
+        volatile int updPort = 47802, updStage, updPct;
+        volatile String updErr = "";
+        volatile boolean updScreen, updLater;
+        volatile long updatedUntil;      // the UPDATED screen after Android restarts the app
     }
+    static final int UPD_NONE = 0, UPD_OFFERED = 1, UPD_DOWNLOADING = 2, UPD_INSTALLING = 3, UPD_FAILED = 4;
     static final String VERSION = BuildConfig.VERSION_NAME;   // from CMakeLists.txt, via build.gradle
     static final State STATE = new State();
     static volatile WristService running;
@@ -85,6 +93,7 @@ public final class WristService extends Service implements SensorEventListener {
     private ConnectivityManager.NetworkCallback netCallback;
     private volatile Network wifi;
     private volatile Socket socket;
+    private volatile String host;          // Keystone's address, for the update download
     private volatile OutputStream out;
     private volatile boolean alive;
     private Thread linkThread;
@@ -116,6 +125,12 @@ public final class WristService extends Service implements SensorEventListener {
         if (rv != null) sensors.registerListener(this, rv, 20000, sensorHandler);
         else STATE.status = "This watch has no motion sensor";
         askForWifi();
+        // just updated from Keystone: say so for a few seconds, with a double buzz
+        String from = prefs().getString("updatingFrom", null);
+        if (from != null) {
+            prefs().edit().remove("updatingFrom").apply();
+            if (!from.equals(VERSION)) { STATE.updatedUntil = System.currentTimeMillis() + 3000; buzz(new long[] { 0, 40, 90, 40 }); }
+        }
         linkThread = new Thread(this::linkLoop, "Keystone watch link");
         linkThread.start();
     }
@@ -255,6 +270,7 @@ public final class WristService extends Service implements SensorEventListener {
                 socket = s;
                 out = s.getOutputStream();
                 prefs().edit().putString("last", target.getAddress().getHostAddress()).apply();
+                host = target.getAddress().getHostAddress();
                 STATE.connected = true;
                 STATE.status = "Connected";
                 buzz(new long[] { 0, 30, 80, 30 });
@@ -331,6 +347,16 @@ public final class WristService extends Service implements SensorEventListener {
                 }
                 return;
             }
+            if ("watchUpdate".equals(m.optString("t"))) {
+                String v = m.optString("v", "");
+                if (WatchUpdate.newer(v, VERSION)) {
+                    STATE.updSize = m.optLong("size", 0);
+                    STATE.updPort = m.optInt("port", 47802);
+                    STATE.updV = v;
+                    if (STATE.updStage == UPD_NONE) STATE.updStage = UPD_OFFERED;
+                }
+                return;
+            }
             if (!"meter".equals(m.optString("t"))) return;
             STATE.bank = m.optInt("bank", STATE.bank);
             STATE.jobName = m.optString("jobName", STATE.jobName);
@@ -355,6 +381,13 @@ public final class WristService extends Service implements SensorEventListener {
             lastJobv = STATE.jobv;
             STATE.live = live;
         } catch (Exception ignored) { }
+    }
+
+    /** Install on the update screen: fetch the watch app from Keystone and install it. */
+    void startUpdate() {
+        if (STATE.updStage == UPD_DOWNLOADING || STATE.updStage == UPD_INSTALLING) return;
+        STATE.updErr = "";
+        WatchUpdate.run(getApplicationContext(), wifi, host);
     }
 
     /** Tap on the screen: the tuner on or off. */
