@@ -139,6 +139,9 @@ static void aliasing()
         { "Preamp flipped to Cut, 2.1 kHz", [only] (Engine& e) { only ({ P::PreOn }) (e); e.setParam (P::PreBlend, 1); }, 2100, 0.7, -70 },
         { "Output iron at full, 110 Hz", [] (Engine& e) { neutral (e); e.setParam (P::OutLimit, 0); e.setParam (P::OutIron, 1); }, 110, 0.8, -80 },
         { "Limiter working hard, 2.1 kHz", [] (Engine& e) { neutral (e); e.setParam (P::OutIron, 0); e.setParam (P::OutLevel, 12); }, 2100, 0.6, -74 },
+        // Gloss (0.6.1): every jump in its waves is BLEP-smoothed, filter wide open, no clean
+        { "Gloss saw, 220 Hz, filter open", [only] (Engine& e) { only ({ P::GlossOn }) (e); e.setParam (P::GlossWave, 1); e.setParam (P::GlossClean, 0); e.setParam (P::GlossSub, 0); e.setParam (P::GlossCutoff, 8000); e.setParam (P::GlossEnvAmt, 0); e.setParam (P::GlossTone, 10); }, 220, 0.5, -64 },
+        { "Gloss square, 330 Hz, filter open", [only] (Engine& e) { only ({ P::GlossOn }) (e); e.setParam (P::GlossClean, 0); e.setParam (P::GlossSub, 0); e.setParam (P::GlossCutoff, 8000); e.setParam (P::GlossEnvAmt, 0); e.setParam (P::GlossTone, 10); }, 330, 0.5, -64 },
     };
     for (const auto& c : cases)
     {

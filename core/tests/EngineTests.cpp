@@ -7,6 +7,7 @@
 
 #include "keystone/Controller.h"
 #include "keystone/Engine.h"
+#include "keystone/Visuals.h"
 
 #include "Analysis.h"
 #include "Drone.h"
@@ -862,6 +863,182 @@ static void testBitrotSynth()
     CHECK (tail < 1.0e-4, "between notes the synth is silent, so hiss never plays it");
 }
 
+// ---------------------------------------------------------------------------------------
+// Gloss (0.6.1): the clean synth. It rides the bass's crossings, so it plays the note you
+// play at once, its sub sits an octave down, Tracked plays the interval, it lands near your
+// playing level and it falls silent after the note.
+static void testGloss()
+{
+    std::printf ("Gloss\n");
+    auto make = [] (Engine& e)
+    {
+        e.prepare (kSr, 128);
+        neutral (e);
+        e.setParam (P::GlossOn, 1);
+        e.setParam (P::GlossClean, 0);
+        e.setParam (P::GlossSub, 0);
+        e.setParam (P::GlossCutoff, 8000);
+        e.setParam (P::GlossEnvAmt, 0);
+    };
+    auto in = pluck (55.0, 1.5, 0.4, 3.0);   // A on the E string
+    in.resize (in.size() + (size_t) (1.5 * kSr), 0.0f);
+    const size_t a = (size_t) (0.4 * kSr), n = (size_t) (0.5 * kSr);
+    {
+        Engine e; make (e);
+        const auto out = render (e, in);
+        const double f1 = toneAt (out, a, n, 55.0), sub = toneAt (out, a, n, 27.5);
+        double clarity = 0;
+        const double heard = yinPitch (out.data() + a, 4096, kSr, 30.0, 400.0, clarity);
+        bool finite = true;
+        for (float y : out) finite = finite && std::isfinite (y);
+        CHECK (finite, "Gloss never makes a NaN or an infinity");
+        CHECK (f1 > 0.01 && f1 > 4 * sub && std::fabs (1200.0 * std::log2 (heard / 55.0)) < 15.0, "Instant square plays the note (%.2f Hz, level %.3f)", heard, f1);
+        const double tail = rms (out.data() + (size_t) (2.4 * kSr), (size_t) (0.4 * kSr));
+        CHECK (tail < 1.0e-4, "after the note it falls silent (%.6f)", tail);
+        Engine dry; dry.prepare (kSr, 128); neutral (dry);
+        const auto ref = render (dry, in);
+        const double ratio = rms (out.data() + a, n) / std::max (1.0e-9, rms (ref.data() + a, n));
+        CHECK (ratio > 0.25 && ratio < 4.0, "it lands near your playing level (%.2f times the clean bass)", ratio);
+    }
+    {
+        Engine e; make (e);
+        e.setParam (P::GlossWaveLvl, 0); e.setParam (P::GlossSub, 1);
+        const auto out = render (e, in);
+        const double sub = toneAt (out, a, n, 27.5), f1 = toneAt (out, a, n, 55.0);
+        CHECK (sub > 0.005 && sub > 2 * f1, "the sub sits an octave down (27.5 Hz %.3f, 55 Hz %.3f)", sub, f1);
+    }
+    {
+        Engine e; make (e);
+        e.setParam (P::GlossTrack, 1); e.setParam (P::GlossInterval, 1); e.setParam (P::GlossWave, 1);
+        const auto out = render (e, in);
+        const double up = toneAt (out, a, n, 110.0), root = toneAt (out, a, n, 55.0);
+        CHECK (up > 0.01 && up > 3 * root, "Tracked, octave up: plays 110 Hz (%.3f) over 55 Hz (%.3f)", up, root);
+    }
+    {
+        // a change of note: it follows straight away
+        Engine e; make (e);
+        auto line = pluck (41.2, 0.6, 0.4, 3.0);
+        const auto g = pluck (98.0, 0.8, 0.4, 3.0);
+        line.insert (line.end(), g.begin(), g.end());
+        const auto out = render (e, line);
+        double clarity = 0;
+        const double heard = yinPitch (out.data() + (size_t) (0.68 * kSr), 4096, kSr, 30.0, 400.0, clarity);
+        CHECK (std::fabs (1200.0 * std::log2 (heard / 98.0)) < 15.0, "a new note: it plays G within 80 ms (%.2f Hz)", heard);
+    }
+    {
+        // Gloss off costs nothing and changes nothing
+        Engine e; make (e); e.setParam (P::GlossOn, 0);
+        Engine dry; dry.prepare (kSr, 128); neutral (dry);
+        const auto out = render (e, in), ref = render (dry, in);
+        double diff = 0;
+        for (size_t i = 0; i < out.size(); ++i) diff = std::max (diff, (double) std::fabs (out[i] - ref[i]));
+        CHECK (diff < 1.0e-6, "off means off (%.2g)", diff);
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// The listener (0.6.1): what the projector reacts to. One count per note start, a level
+// near 1 for a normal note against your own playing, and the note itself.
+static void testListener()
+{
+    std::printf ("Listener\n");
+    Engine e;
+    e.prepare (kSr, 64);
+    e.setListening (true);
+    std::vector<float> line;
+    // replucks of a ringing string, and a soft note after the string is damped for 30 ms
+    for (int k = 0; k < 4; ++k)
+    {
+        if (k == 2) line.resize (line.size() + (size_t) (0.03 * kSr), 0.0f);
+        auto n = pluck (55.0, 0.45, k == 2 ? 0.15 : 0.4, 0.8);
+        line.insert (line.end(), n.begin(), n.end());
+    }
+    auto first = pluck (55.0, 0.15, 0.4, 0.8);
+    line.insert (line.end(), first.begin(), first.end());
+    const int before = e.meters().onsets;
+    render (e, line);
+    const auto m = e.meters();
+    CHECK (m.onsets - before == 5, "a note start counted for every pluck (%d of 5)", m.onsets - before);
+    CHECK (m.listenLevel > 0.4f && m.listenLevel < 1.5f, "a fresh note reads near your playing level (%.2f)", m.listenLevel);
+    std::this_thread::sleep_for (std::chrono::milliseconds (50));
+    e.runIdleNow();
+    CHECK (e.meters().notePc == 9, "the note: A (pitch class %d)", e.meters().notePc);
+    render (e, std::vector<float> ((size_t) kSr, 0.0f));
+    std::this_thread::sleep_for (std::chrono::milliseconds (50));
+    e.runIdleNow();
+    CHECK (e.meters().notePc == -1 && e.meters().listenLevel < 0.05f, "silence: no note, no level");
+    {
+        // one long note dying away, and a G with its harmonics beating: one start each, no more
+        Engine q; q.prepare (kSr, 64);
+        auto held = pluck (41.2, 3.0, 0.4, 1.5);
+        auto g = pluck (98.0, 2.0, 0.3, 1.0);
+        for (size_t i = 0; i < g.size(); ++i) g[i] *= (float) (1.0 + 0.15 * std::sin (2 * M_PI * 5.0 * i / kSr));   // a little vibrato-ish wobble
+        held.resize (held.size() + (size_t) (0.05 * kSr), 0.0f);
+        held.insert (held.end(), g.begin(), g.end());
+        const int b = q.meters().onsets;
+        render (q, held);
+        CHECK (q.meters().onsets - b == 2, "a held note and a wobbling one: exactly two starts (%d)", q.meters().onsets - b);
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// The projector's reactive layer (0.6.1): the scene map, the families, and what the bass and
+// the feet do to the picture.
+static void testVisuals()
+{
+    std::printf ("Reactive visuals\n");
+    using namespace ks::visuals;
+    CHECK (loopScenes().size() == 41 && sceneAt (0) == 0 && std::string (loopScenes()[(size_t) sceneAt (160)].name) == "Synthwave sun"
+           && sceneAt (480.5) == 40 && sceneAt (481.0 + 160) == sceneAt (160), "41 scenes; 2:40 is the Synthwave sun; it wraps");
+    CHECK (isLoop (481.2) && ! isLoop (300), "the loop is told apart by its length");
+    CHECK (strengthFor (Busy, "auto") < 0.2f && strengthFor (Calm, "auto") == 1.0f && strengthFor (Busy, "full") == 1.0f && strengthFor (Calm, "off") == 0.0f,
+           "Auto follows the family; Off, Subtle and Full override it");
+    auto run = [] (Reactor& r, Feed f, int family, float strength, float seconds)
+    {
+        Out o;
+        for (float t = 0; t < seconds; t += 1.0f / 30.0f) o = r.step (f, 1.0f / 30.0f, family, strength);
+        return o;
+    };
+    {
+        Reactor r; Feed f; f.level = 1.0f;
+        run (r, f, Calm, 1.0f, 1.0f);
+        f.onsets = 1; f.onsetStrength = 1.0f;
+        const Out hit = r.step (f, 1.0f / 30.0f, Calm, 1.0f);
+        CHECK (hit.pulse > 0.5f && hit.bright > 0.15f, "calm scene: a note pushes in (%.2f) and brightens (%.2f)", hit.pulse, hit.bright);
+        const Out later = run (r, f, Calm, 1.0f, 0.6f);
+        CHECK (later.pulse < 0.05f, "the push falls back within half a second");
+    }
+    {
+        Reactor r; Feed f; f.level = 1.0f;
+        run (r, f, Busy, strengthFor (Busy, "auto"), 1.0f);
+        f.onsets = 1; f.onsetStrength = 1.0f;
+        const Out hit = r.step (f, 1.0f / 30.0f, Busy, strengthFor (Busy, "auto"));
+        CHECK (hit.pulse < 0.2f && hit.bright < 0.06f, "busy scene: barely moves (%.2f, %.2f)", hit.pulse, hit.bright);
+        f.bitrot = true; f.bitrotAmount = 1.0f;
+        const Out g = run (r, f, Busy, 0.0f, 0.5f);
+        CHECK (g.glitch > 0.5f, "Bitrot glitches the picture even in a scene set to Off (%.2f)", g.glitch);
+    }
+    {
+        Reactor r; Feed f; f.key = 4; f.notePc = -1; f.noteClarity = 0.9f; f.onsets = 0;
+        run (r, f, Colour, 1.0f, 1.0f);
+        f.onsets = 1; f.notePc = 4;
+        const Out o = run (r, f, Colour, 1.0f, 0.1f);
+        CHECK (o.tint > 0.5f && o.tg > o.tr && o.tg > o.tb, "the song's root (E) flashes Successpit green (%.2f %.2f %.2f, %.2f)", o.tr, o.tg, o.tb, o.tint);
+        f.notePc = 7; run (r, f, Colour, 1.0f, 0.3f);
+        f.notePc = 4; f.onsets = 2;
+        const Out p = run (r, f, Colour, 1.0f, 0.1f);
+        CHECK (p.tb > p.tg, "the next root flash is purple (%.2f %.2f %.2f)", p.tr, p.tg, p.tb);
+    }
+    {
+        Reactor r; Feed f; f.hold = true; f.drone = true; f.space = true; f.level = 1.0f;
+        const Out o = run (r, f, Calm, 1.0f, 4.0f);
+        CHECK (o.pause && o.smear > 0.4f && o.bloom > 0.6f && o.haze > 0.3f, "Speckle Hold freezes and smears, the drone blooms, the space hazes");
+        f.hold = false; f.drone = false; f.space = false;
+        const Out off = run (r, f, Calm, 1.0f, 9.0f);
+        CHECK (! off.pause && off.smear < 0.02f && off.bloom < 0.02f && off.haze < 0.02f, "and they all clear when the effects go off");
+    }
+}
+
 static void testGrainEffects()
 {
     std::printf ("Speckle effects\n");
@@ -1527,12 +1704,29 @@ static void testController()
     CHECK (c.value (P::GrOn) == 1 && c.value (P::DlOn) == 1 && c.value (P::RvOn) == 1, "Glow: taps A, B, C switch Speckle, delay and reverb");
     hold (0);
     CHECK (c.bank() == 0 && e.meters().pedalTarget == (int) PedalJob::Dirt, "hold A a third time: back to Grit, the pedal is the dirt blend");
+    // hold B (0.6.1): songs only move in Song mode now. Grit: Gloss, Glow: Speckle's Hold
     hold (1);
-    CHECK (c.currentSong() == 1 && c.value (P::BitrotOn) == 0 && c.value (P::PreFlip) == 0, "hold B: next song, back to its saved state");
-    hold (1); hold (1);
-    CHECK (c.currentSong() == 3, "hold B steps on to the last song");
+    CHECK (c.currentSong() == 0 && c.value (P::GlossOn) == 1 && c.lastToast() == "GLOSS ON", "Grit, hold B: Gloss on, the song stays put");
     hold (1);
-    CHECK (c.currentSong() == 3 && c.lastToast() == "LAST SONG", "hold B at the last song stays put, no wrap to song one");
+    CHECK (c.value (P::GlossOn) == 0 && c.lastToast() == "GLOSS OFF", "Grit, hold B again: Gloss off");
+    hold (0);
+    {
+        const float before = c.value (P::GrHold);
+        hold (1);
+        CHECK (c.bank() == 1 && c.currentSong() == 0 && c.value (P::GrHold) == before && c.value (P::GlossOn) == 0, "Groove, hold B: nothing yet");
+    }
+    hold (0);
+    hold (1);
+    CHECK (c.bank() == 2 && c.value (P::GrHold) == 1 && c.lastToast() == "SPECKLE HOLD", "Glow, hold B: Speckle's Hold on");
+    hold (1);
+    CHECK (c.value (P::GrHold) == 0, "Glow, hold B again: Hold off");
+    hold (0);
+    c.stepSong (1);
+    CHECK (c.currentSong() == 1 && c.value (P::BitrotOn) == 0 && c.value (P::PreFlip) == 0, "next song: back to its saved state");
+    c.stepSong (1); c.stepSong (1);
+    CHECK (c.currentSong() == 3, "steps on to the last song");
+    c.stepSong (1);
+    CHECK (c.currentSong() == 3 && c.lastToast() == "LAST SONG", "at the last song it stays put, no wrap to song one");
     c.selectSong (0);
     hold (3);
     CHECK (c.value (P::CompSlap) == 1, "hold D: slap on");
@@ -1546,13 +1740,29 @@ static void testController()
     // hold B counts from 0.3 s
     {
         const int before = c.currentSong();
+        const float gl = c.value (P::GlossOn);
         c.footswitchPress (1, t); t += 0.32; c.tick (t); c.footswitchRelease (1, t); t += 0.5;
-        CHECK (c.currentSong() == before + 1, "hold B counts from 0.3 s now");
-        c.selectSong (before);
-        // A and B pressed together in Stomp mode: nothing, and neither tap fires
+        CHECK (c.currentSong() == before && c.value (P::GlossOn) != gl, "hold B counts from 0.3 s");
+        c.setValue (P::GlossOn, gl);
+        // A and B pressed together in Stomp mode (0.6.1): tap tempo. Neither tap fires, then
+        // each press of B is a tap, and two seconds after the last one B is B again
         const float dv = c.value (P::DriveVoice), br = c.value (P::BitrotOn);
         c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02); c.footswitchRelease (0, t + 0.1); c.footswitchRelease (1, t + 0.12); t += 0.5;
-        CHECK (c.currentSong() == before && c.value (P::DriveVoice) == dv && c.value (P::BitrotOn) == br, "A and B together: no song change, no taps");
+        CHECK (c.currentSong() == before && c.value (P::DriveVoice) == dv && c.value (P::BitrotOn) == br && c.lastToast() == "TAP TEMPO",
+               "A and B together: tap tempo, no song change, no taps");
+        // the controller times taps on its own clock: four presses of B half a second apart
+        for (int k = 0; k < 4; ++k)
+        {
+            c.footswitchPress (1, t); c.footswitchRelease (1, t + 0.05); t += 0.5;
+            std::this_thread::sleep_for (std::chrono::milliseconds (500));
+        }
+        CHECK (std::fabs (c.value (P::Tempo) - 120.0f) < 3.0f && c.value (P::BitrotOn) == br, "tapping B: 120 BPM, Bitrot left alone (%.1f)", c.value (P::Tempo));
+        std::this_thread::sleep_for (std::chrono::milliseconds (2100));
+        c.tick (t);
+        CHECK (c.lastToast() == "120 BPM" || c.lastToast().find ("BPM") != std::string::npos, "two seconds on, tapping ends with the tempo shown");
+        tap (1);
+        CHECK (c.value (P::BitrotOn) != br, "then tap B is Bitrot again");
+        tap (1);
     }
     // C and D pressed together: Song mode, the moment both are down; Keep is off the feet
     const float slapBefore = c.value (P::CompSlap);
@@ -1623,9 +1833,9 @@ static void testController()
     msg (R"({"t":"setlist","op":"save"})");
     c.selectSong (0);
     CHECK (c.bank() == 2 && c.value (P::DlOn) == 1, "the song opens in Glow with the delay on");
-    hold (1);
+    c.stepSong (1);
     CHECK (c.currentSong() == 1 && c.bank() == 0 && c.value (P::DlOn) == 0 && c.value (P::DriveVoice) == 1,
-           "hold B: one press to the part, in Grit with Drive on and the space off");
+           "next part: one step, in Grit with Drive on and the space off");
     msg (R"({"t":"setlist","op":"add"})");
     CHECK (c.songCount() == 16 && c.songsOnly() == 15, "fifteen songs plus a part");
     msg (R"({"t":"setlist","op":"add"})");
@@ -2187,15 +2397,15 @@ static void testBandSetlist()
         double t = 0;
         auto hold = [&] (int sw) { c.footswitchPress (sw, t); for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); } c.footswitchRelease (sw, t); t += 0.5; };
         auto tap = [&] (int sw) { c.footswitchPress (sw, t); t += 0.1; c.footswitchRelease (sw, t); t += 0.5; };
-        hold (1);
+        c.stepSong (1);
         CHECK (c.songName (1) == "When the Circus Comes to Town" && c.value (P::DriveVoice) == 1 && c.value (P::PreGain) > 0.55f, "Circus starts heavy: the Blumes and the preamp pushed");
-        hold (1);
+        c.stepSong (1);
         CHECK (c.isPart (2) && c.currentSong() == 2 && c.value (P::DriveOn) == 0 && c.value (P::RvOn) == 1 && c.bank() == 2, "Circus verse: clean with reverb, in Glow");
-        hold (1); hold (1); hold (1);
+        c.stepSong (1); c.stepSong (1); c.stepSong (1);
         CHECK (c.songName (5) == "Bridge" && c.value (P::BitrotOn) == 1 && c.value (P::GrOn) == 1, "Circus bridge: Bitrot and Speckle sparkle");
-        hold (1);
+        c.stepSong (1);
         CHECK (c.songName (6) == "Ending" && c.value (P::PreGain) > 0.55f && c.value (P::DriveOn) == 1, "Circus ending: Blumes and preamp");
-        hold (1);
+        c.stepSong (1);
         CHECK (c.songName (7) == "DWHALTS" && c.value (P::DriveOn) == 0, "DWHALTS opens clean");
         tap (0);
         CHECK (c.value (P::DriveOn) == 1 && c.value (P::DriveVoice) == 1, "DWHALTS, tap A: straight to Drive for the chorus");
@@ -2562,6 +2772,9 @@ int main (int argc, char** argv)
         testDelayLimits();
         testTempo();
         testBitrotSynth();
+        testGloss();
+        testListener();
+        testVisuals();
         testBitrotLevel();
         testBitrotSteady();
     testOffMeansOff();

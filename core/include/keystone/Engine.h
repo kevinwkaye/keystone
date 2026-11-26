@@ -42,6 +42,14 @@ struct Meters
     float kuddleSqueezeDb = 0;                   // the Opto's gain reduction
     float cpuLoad = 0;                           // filled by the host
     bool light = false;                          // effects in light mode right now
+    // the listener (0.6.1), for the projector: how hard you're playing against your own
+    // playing level (about 1 on a normal note), the top end the same way, a count that goes
+    // up on every note start with how hard it was hit, and the note you're on (pitch class
+    // 0 = C, -1 none) with how sure it is. The note only runs while setListening is on.
+    float listenLevel = 0, listenHigh = 0, onsetStrength = 0;
+    int onsets = 0;
+    int notePc = -1;
+    float noteClarity = 0;
 };
 
 enum class Action
@@ -124,6 +132,8 @@ public:
     float bloom() const { return job[3].value.load(); }
     void action (Action a);
     void setLightMode (bool light) { lightRequest.store (light); }
+    // the projector is reacting: work out the note you're on as well (housekeeping thread)
+    void setListening (bool on) { listening.store (on); }
     Meters meters() const;
     void setCpuLoad (float l) { cpuLoad.store (l); }
 
@@ -170,6 +180,7 @@ private:
     int pedalTarget() const;
     const JobState& job_ (PedalJob j) const { return job[(size_t) j]; }
     std::atomic<bool> lightRequest { false };
+    std::atomic<bool> listening { false };
 };
 
 // Parameter value text for display and for Keeper logs.

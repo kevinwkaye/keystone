@@ -98,6 +98,10 @@ struct Controller::State
     int otherCurrent = 0;
     bool droneHeld = false;
     bool dTapCaptured = false;
+    // tap tempo from the feet (0.6.1): A and B pressed together arm it in Stomp mode, then
+    // each press of B is a tap; two seconds after the last one it hands B back
+    bool tapArmed = false;
+    double tapArmedAt = -10;
     // Kaleidoscope
     bool kal = false, gigLock = false;
     int kalPick = 0;              // the pedal highlighted on the floor screen
@@ -787,6 +791,14 @@ void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, 
 void Controller::tick (double now)
 {
     s->logic.tick (now);
+    if (s->tapArmed && std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count() - s->tapArmedAt > 2.0)
+    {
+        s->tapArmed = false;
+        char t[32];
+        std::snprintf (t, sizeof (t), "%d BPM", (int) std::lround (value (P::Tempo)));
+        queueToast (t);
+        queueState();
+    }
     // once a watch has been used, Bitrot stays fully wet, so a Wi-Fi blip can't swing the level
     engine.setWatchConnected (s->watchSeen > 0);
     engine.setWatchMoving (s->watchLive || s->watchGliding);
@@ -1108,7 +1120,7 @@ void Controller::onFootswitch (int sw, int ev)
         return;
     }
     // hold A and B for a second: the other rig (Stomp mode in Keystone, any time in Kuddle)
-    if (ev == E::ComboHoldAB) { if (! tuning) setRig (1 - s->rig); return; }
+    if (ev == E::ComboHoldAB) { s->tapArmed = false; if (! tuning) setRig (1 - s->rig); return; }
     if (s->rig == 1)
     {
         // Kuddle: tap A Mute, B Auto wah, C Room, D Tape. Hold A previous preset, B next,
@@ -1140,7 +1152,30 @@ void Controller::onFootswitch (int sw, int ev)
         setFootMode (1 - s->footMode);
         return;
     }
-    if (ev == E::ComboAB || ev == E::ComboHoldCD) return;
+    if (ev == E::ComboAB)
+    {
+        // Stomp mode: arm tap tempo, then tap B on the beat (Song mode has no A+B combo)
+        if (s->footMode == 0 && ! tuning)
+        {
+            s->tapArmed = true;
+            s->tapArmedAt = now();
+            queueToast ("TAP TEMPO");
+            queueState();
+        }
+        return;
+    }
+    if (ev == E::ComboHoldCD) return;
+    if (s->tapArmed)
+    {
+        // while tapping, B is the tap (on the press, so it lands where your foot does) and its
+        // own tap and hold jobs wait; any other switch ends tapping and does its job as usual
+        if (sw == 1)
+        {
+            if (ev == E::Down) { tapTempo (now()); s->tapArmedAt = now(); queueState(); }
+            return;
+        }
+        if (ev == E::Down) { s->tapArmed = false; queueState(); }
+    }
     if (s->footMode == 1)
     {
         // Song mode acts on press, so changes land on the beat: A previous song, B next
@@ -1227,7 +1262,21 @@ void Controller::onFootswitch (int sw, int ev)
         switch (sw)
         {
             case 0: if (! tuning) setBank ((s->bank + 1) % 3); break;
-            case 1: if (! tuning) stepSong (1); break;
+            case 1:
+                // hold B (0.6.1): Grit the synth, Glow Speckle's Hold, Groove nothing yet.
+                // Songs and parts only move in Song mode now.
+                if (tuning) break;
+                if (s->bank == 0)
+                {
+                    toggle (P::GlossOn);
+                    queueToast (value (P::GlossOn) > 0.5f ? "GLOSS ON" : "GLOSS OFF");
+                }
+                else if (s->bank == 2)
+                {
+                    toggle (P::GrHold);
+                    queueToast (value (P::GrHold) > 0.5f ? "SPECKLE HOLD" : "HOLD OFF");
+                }
+                break;
             case 2:
                 // Glow: runaway while held (Grotto's footswitch B). Groove: the vinyl brake
                 // (Lathe's). Grit: the tuner
@@ -1433,6 +1482,7 @@ std::string Controller::stateJson() const
     for (const auto& song : s->songs) { j["songs"].push_back (song.name); j["parts"].push_back (song.part); }
     j["current"] = s->current;
     j["bank"] = s->bank;
+    j["tapping"] = s->tapArmed;
     j["rig"] = s->rig;
     j["footMode"] = s->footMode;
     j["maxEntries"] = kMaxEntries;

@@ -7,6 +7,7 @@
 #include "Drive.h"
 #include "Drone.h"
 #include "Grains.h"
+#include "Gloss.h"
 #include "Valve.h"
 #include "Modules.h"
 #include "KuddleEngine.h"
@@ -76,6 +77,11 @@ struct Engine::Impl
     double bitRefAcc = 0, bitOutAcc = 0;
     float bitRefS = 0, bitOutS = 0, bitDryGain = 1, bitMake = 1;
     std::vector<float> bitG;
+    // Gloss (0.6.1): its voice, and after the preamp its gain and how much clean it keeps
+    Gloss gloss;
+    Smoothed glossOn, glossClean;
+    std::vector<float> glossBuf, glossG, glossKeep, bitKeep;
+    bool glossWasOn = false;
     DelayLine bitLow;   // the bottom end, lined up with the drive for Bitrot's reference
     bool bitFresh = true;
     // Bitrot's level lands quickly when you switch it on, then holds steady: it learns only
@@ -99,6 +105,28 @@ struct Engine::Impl
     double tunerSmoothCents = 0;
     int tunerLastMidi = -1;
     std::chrono::steady_clock::time_point lastTunerRun {};
+    // the listener (0.6.1): followers on the raw bass and the top band, note starts, and the
+    // note itself from the tuner's ring on the housekeeping thread
+    Follower lsLevel, lsHigh;
+    OnsetDetector lsOnset;
+    float lsPlay = 0.05f, lsPlayFall = 0.9999f;
+    std::atomic<float> lsLevelOut { 0 }, lsHighOut { 0 }, lsOnsetStrength { 0 };
+    std::atomic<int> lsOnsets { 0 }, lsNotePc { -1 };
+    std::atomic<float> lsNoteClarity { 0 };
+    std::chrono::steady_clock::time_point lastListenRun {};
+    void listen (float raw, float high)
+    {
+        const float e = lsLevel.process (raw);
+        const float hi = lsHigh.process (high);
+        lsPlay = std::max (std::max (lsPlay * lsPlayFall, e), 1.0e-3f);
+        if (lsOnset.process (raw, lsPlay))
+        {
+            lsOnsetStrength.store (clampf (lsOnset.strength, 0.0f, 2.0f), std::memory_order_relaxed);
+            lsOnsets.fetch_add (1, std::memory_order_relaxed);
+        }
+        lsE = e; lsHi = hi;
+    }
+    float lsE = 0, lsHi = 0;
 
     // tails ring over a part change: a short window in which delay and reverb switched
     // off keep their tails instead of fading them out
@@ -235,10 +263,21 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.lowMul.assign ((size_t) d.maxBlock, 1.0f);
     d.synthG.assign ((size_t) d.maxBlock, 0.0f);
     d.bitG.assign ((size_t) d.maxBlock, 0.0f);
+    d.glossBuf.assign ((size_t) d.maxBlock, 0.0f);
+    d.glossG.assign ((size_t) d.maxBlock, 0.0f);
+    d.glossKeep.assign ((size_t) d.maxBlock, 1.0f);
+    d.bitKeep.assign ((size_t) d.maxBlock, 1.0f);
+    d.gloss.prepare ((float) s);
+    d.glossOn.setTime (0.015f, (float) s); d.glossOn.reset (0);
+    d.glossClean.setTime (0.03f, (float) s); d.glossClean.reset (0.5f);
     d.bitrotClean.setTime (0.03f, s); d.bitrotClean.reset (0.5f);
     d.tunerLp1.lowPass (2000, 0.54f, s);
     d.tunerLp2.lowPass (2000, 1.31f, s);
     d.tunerRing.assign (8192, 0.0f);
+    d.lsLevel.set (0.002f, 0.12f, (float) s);
+    d.lsHigh.set (0.002f, 0.12f, (float) s);
+    d.lsOnset.prepare ((float) s, 1.2f);   // the picture can take a few more than the synth
+    d.lsPlayFall = onePoleCoef (5.0f, (float) s);
     d.tunerPos = 0;
     d.inPk = d.outPk = d.outMs = 0;
 }
@@ -344,6 +383,12 @@ Meters Engine::meters() const
     m.outPeak = d.outPeak.load();
     m.outRms = d.outRms.load();
     m.droneLayers = d.drone.layerCount();
+    m.listenLevel = d.lsLevelOut.load (std::memory_order_relaxed);
+    m.listenHigh = d.lsHighOut.load (std::memory_order_relaxed);
+    m.onsets = d.lsOnsets.load (std::memory_order_relaxed);
+    m.onsetStrength = d.lsOnsetStrength.load (std::memory_order_relaxed);
+    m.notePc = d.lsNotePc.load (std::memory_order_relaxed);
+    m.noteClarity = d.lsNoteClarity.load (std::memory_order_relaxed);
     m.droneSwelling = d.drone.swelling();
     m.grainsActivity = d.grains.activityLevel();
     m.limiterReduction = d.limRed.load();
@@ -524,6 +569,9 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.drive.update (v, bloomOn, bl, subCut, d.haveCapture.load(), driveMix);
         auto* cap = d.capture.take();
         d.bitrot.update (v);
+        d.gloss.update (v);
+        d.glossOn.set (Vb (v, P::GlossOn) ? 1.0f : 0.0f);
+        d.glossClean.set (V (v, P::GlossClean));
         d.preamp.update (v, d.play.level);
         d.iron.set (V (v, P::OutIron));
         d.filter.update (v);
@@ -575,6 +623,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                 const float raw = d.dc.process (x[i]);
                 d.inPk = std::max (d.inPk * 0.9995f, std::fabs (raw));
                 d.feedTuner (raw);
+                d.listen (raw, raw);
                 y[i] = 0.0f;
             }
         }
@@ -592,6 +641,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                 d.play.process (s);
                 float lo, hi;
                 d.split.split (s, lo, hi);
+                d.listen (raw, hi);
                 d.lowBuf[(size_t) i] = d.low.process (lo);
                 (void) hi;
                 const float full = d.subCut2.process (d.subCut1.process (s));
@@ -685,16 +735,45 @@ void Engine::process (const float* in, float* out, int numSamples)
                 {
                     const float g = d.bitrotOn.next();
                     const float keep = 1.0f - g * (1.0f - d.bitrotClean.next());
-                    lm[i] = keep;
+                    lm[i] *= keep;
+                    d.bitKeep[(size_t) i] = keep;
                     bg[i] = g;
                     // after the preamp, the synth joins the full sound later, untouched by the valve
                     if (bitrotPlace == 2) { sg[i] = g; continue; }
                     hb[i] = hb[i] * keep + sy[i] * g;
                 }
             };
+            // Gloss: into the drive, after it, or after the preamp (0.6.1). It hears the clean
+            // bass, so the drive and Bitrot never confuse its crossings.
+            const int glossPlace = Vi (v, P::GlossPlace);
+            float* gg = d.glossG.data();
+            std::fill (gg, gg + n, 0.0f);
+            auto runGloss = [&]()
+            {
+                const bool active = Vb (v, P::GlossOn) || d.glossOn.current() > 1.0e-4f;
+                if (! active)
+                {
+                    for (int i = 0; i < n; ++i) { d.glossOn.next(); d.glossClean.next(); }
+                    if (d.glossWasOn) { d.gloss.reset(); d.glossWasOn = false; }
+                    return;
+                }
+                d.glossWasOn = true;
+                float* gy = d.glossBuf.data();
+                d.gloss.process (d.cleanBuf.data(), gy, n);
+                for (int i = 0; i < n; ++i)
+                {
+                    const float g = d.glossOn.next();
+                    const float keep = 1.0f - g * (1.0f - d.glossClean.next());
+                    lm[i] *= keep;
+                    if (glossPlace == 2) { gg[i] = g; d.glossKeep[(size_t) i] = keep; continue; }
+                    hb[i] = hb[i] * keep + gy[i] * g;
+                }
+            };
             if (bitrotFirst) runBitrot();
+            if (glossPlace == 0) runGloss();
             d.drive.process (hb, d.lowBuf.data(), n, cap);
             if (! bitrotFirst) runBitrot();
+            if (glossPlace != 0) runGloss();
 
             float playLevel = d.play.level;
             const bool filtHigh = Vi (v, P::FiltRange) == 1;
@@ -717,7 +796,8 @@ void Engine::process (const float* in, float* out, int numSamples)
                     const float r = h + lowA * llNow;
                     d.bitRefAcc += (double) r * r;
                 }
-                if (sg[i] > 0.0f) h = h * lm[i] + d.synthBuf[(size_t) i] * sg[i];
+                if (sg[i] > 0.0f) h = h * d.bitKeep[(size_t) i] + d.synthBuf[(size_t) i] * sg[i];
+                if (gg[i] > 0.0f) h = h * d.glossKeep[(size_t) i] + d.glossBuf[(size_t) i] * gg[i];
                 {
                     const float r = h + lowA * llNow * lm[i];
                     d.bitOutAcc += (double) r * r;
@@ -851,6 +931,8 @@ void Engine::process (const float* in, float* out, int numSamples)
         if (! hostRecords.load (std::memory_order_relaxed))
             if (auto* r = recorder.load()) r->push (x, y, n);   // the dry bass as it came in, and what goes out
         d.inPeak.store (d.inPk);
+        d.lsLevelOut.store (d.lsE / d.lsPlay, std::memory_order_relaxed);
+        d.lsHighOut.store (d.lsHi / d.lsPlay, std::memory_order_relaxed);
         d.outPeak.store (d.outPk);
         d.outRms.store (std::sqrt (d.outMs));
         d.limRed.store (d.limiter.reductionDb());
@@ -863,6 +945,30 @@ void Engine::idle()
     d.drone.analyse (d.play.level);
     d.capture.collect();
     d.reverb.convolver().collect();
+
+    // the listener's note, about 25 times a second while the projector reacts (0.6.1)
+    if (listening.load() && std::chrono::steady_clock::now() - d.lastListenRun > std::chrono::milliseconds (40))
+    {
+        d.lastListenRun = std::chrono::steady_clock::now();
+        const int n = 1024;   // 85 ms at 12 kHz: over three cycles of low E
+        std::vector<float> buf ((size_t) n);
+        const int end = d.tunerPos.load (std::memory_order_acquire);
+        double peak = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            buf[(size_t) i] = d.tunerRing[(size_t) ((end - n + 1 + i) & 8191)];
+            peak = std::max (peak, (double) std::fabs (buf[(size_t) i]));
+        }
+        double clarity = 0;
+        const double f = peak < 2.0e-3 ? 0.0 : yinPitch (buf.data(), n, d.sr / 4.0, 36.0, 1000.0, clarity);
+        if (f > 0 && clarity > 0.6)
+        {
+            const int midi = (int) std::lround (69.0 + 12.0 * std::log2 (f / 440.0));
+            d.lsNotePc.store (((midi % 12) + 12) % 12);
+            d.lsNoteClarity.store ((float) clarity);
+        }
+        else { d.lsNotePc.store (-1); d.lsNoteClarity.store (0); }
+    }
 
     // tuner, about 20 times a second while it's on
     if (! d.tunerOn.load()) { d.tunerMidi.store (-1); return; }

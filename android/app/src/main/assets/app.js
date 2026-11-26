@@ -57,7 +57,7 @@ var KS = (function () {
         queueRender(); break;
       case 'state':
         S.values = m.values; S.songs = m.songs; S.parts = m.parts || []; S.current = m.current; S.edited = m.edited;
-        S.bank = m.bank || 0; S.maxEntries = m.maxEntries || 40; S.rig = m.rig || 0; S.footMode = m.footMode || 0;
+        S.bank = m.bank || 0; S.maxEntries = m.maxEntries || 40; S.rig = m.rig || 0; S.footMode = m.footMode || 0; S.tapping = !!m.tapping;
         S.maxSongs = m.maxSongs; S.captures = m.captures || []; S.capture = m.capture; S.captureFile = m.captureFile; S.spaces = m.spaces || []; S.space = m.space || ''; S.spaceFile = m.spaceFile || '';
         S.namAvailable = m.namAvailable; S.footswitch = m.footswitch; S.audio = m.audio; S.keeperLive = m.keeperLive; S.wifi = m.wifi || null;
         S.kal = m.kal || { on: false, loaded: '', pick: 0, installed: [], gigLock: false };
@@ -651,6 +651,23 @@ var KS = (function () {
       '<span style="display:flex;align-items:center;gap:10px;width:100%">' + flip(w.num) +
       '<span style="display:flex;flex-direction:column;min-width:0;flex:1;text-align:left"><span class="vname">' + esc(w.name) + '</span><span class="small">' + esc(w.sub) + '</span></span>' + ICON.right + '</span></button>';
   }
+  // the Successpit loop's scenes and how each reacts (0.6.1), as in core/include/keystone/Visuals.h
+  var SCENES = [['TV static', 3], ['Test card', 3], ['Square tunnel', 1], ['Blocky plasma', 2], ['Copper bars', 2], ['Hypnotic rings', 1], ['Checker floor', 0], ['Static', 3],
+    ['Logo wave', 3], ['Pixel kaleidoscope', 1], ['Checker tunnel', 1], ['Oscilloscope', 4], ['Starfield', 0], ['Synthwave sun', 0], ['Moiré ripples', 2], ['Pixel rain', 3],
+    ['Channel flicking', 3], ['Equaliser', 4], ['Logo rotozoomer', 3], ['Double spiral', 1], ['Plasma 2', 2], ['Synthwave mountains', 0], ['Broken test card', 3], ['Reverse tunnel', 1],
+    ['Wobbling copper bars', 2], ['Checkerboard floor', 0], ['Static', 3], ['Logo wave 2', 3], ['Checker tunnel 2', 1], ['Moiré 2', 2], ['Kaleidoscope 2', 1], ['Starfield 2', 0],
+    ['Plasma 3', 2], ['Equaliser 2', 4], ['Rings 2', 1], ['Mountains 2', 0], ['Synthwave grid', 0], ['Spiral 2', 1], ['Channel flicking 2', 3], ['Logo rotozoomer 2', 3], ['Static', 3]];
+  var FAMILIES = ['Calm', 'Movement', 'Colour', 'Busy', 'Live'];
+  var SCENE_SET = ['auto', 'off', 'subtle', 'full'], SCENE_LABEL = { auto: 'AUTO', off: 'OFF', subtle: 'SUBTLE', full: 'FULL' };
+  function sceneRows(p) {
+    var sets = p.scenes || {};
+    return SCENES.map(function (sc, i) {
+      var v = sets[i] || 'auto', cur = p.scene === i;
+      return '<button type="button" class="row" data-act="projScene" data-i="' + i + '" style="min-height:48px;background:' + (cur ? '#262626' : '#18181B') + (cur ? ';outline:2px solid #5DCAA5' : '') + '">' +
+        '<span><span class="t" style="font-size:16px">' + esc(sc[0]) + '</span><span class="s">' + FAMILIES[sc[1]] + (cur ? ', playing now' : '') + '</span></span>' +
+        '<span class="r" style="color:' + (v === 'auto' ? '#8A847A' : v === 'off' ? '#F0997B' : '#5DCAA5') + '">' + SCENE_LABEL[v] + '</span></button>';
+    }).join('');
+  }
   function visualsScreen() {
     var p = proj() || { on: false, mode: 'loop', setting: 'auto', videos: [] }, w = nowShowing();
     var dotCol = p.on ? (p.mode === 'black' ? '#F0997B' : '#5DCAA5') : '#8A847A';
@@ -670,6 +687,11 @@ var KS = (function () {
       '<span class="label">Projector</span>' +
       '<div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))">' + sets + '</div>' +
       '<span class="small">On plays the loop whenever a projector is plugged into the Pi\'s HDMI port. Align shows Hev\'s card for lining the picture up with the Max 115\'s grille, badge and hypervent.</span>' +
+      '<span class="label">Reacting to your playing</span>' +
+      '<span class="small">' + (p.reactive ? (p.scene >= 0 && SCENES[p.scene] ? 'Now: ' + esc(SCENES[p.scene][0]) + ' (' + FAMILIES[SCENES[p.scene][1]] + ').' : 'Reacting.') : 'Reacts when the loop plays on the Pi.') +
+        ' Notes push and brighten the picture, the song\'s root flashes green and purple, and Bitrot, Speckle Hold, the drone and your delay and reverb show up in every scene. The badge and its glint are never touched. Set each song\'s key under Tempo.</span>' +
+      '<button type="button" class="wide" data-act="projScenes">' + (S.showScenes ? 'Hide the scenes' : 'Scenes: how each one reacts') + '</button>' +
+      (S.showScenes ? '<span class="small">Tap a scene to step it through Auto, Off, Subtle and Full. Auto is its family\'s own: busy and logo scenes barely move.</span><div class="group">' + sceneRows(p) + '</div>' : '') +
       '</section>';
   }
 
@@ -830,7 +852,8 @@ var KS = (function () {
     if (b === 2) return [
       { k: 'A', name: 'Speckle', st: lit('grains.on'), id: 'grains.on', mod: 'grains' },
       { k: 'B', name: 'Delay', st: lit('delay.on'), id: 'delay.on', mod: 'delay' },
-      { k: 'C', name: 'Reverb', st: on('reverb.on') ? fmt('reverb.type').toUpperCase() : 'OFF', id: 'reverb.on', mod: 'reverb' }];
+      { k: 'C', name: 'Reverb', st: on('reverb.on') ? fmt('reverb.type').toUpperCase() : 'OFF', id: 'reverb.on', mod: 'reverb' },
+      { k: 'B', name: 'Hold · Speckle Hold', st: on('grains.hold') ? 'HOLDING' : 'OFF', id: 'grains.hold', mod: 'grains', hold: true }];
     if (b === 3) return [
       { k: 'A', name: 'Mute', st: lit('kuddle.muteOn'), id: 'kuddle.muteOn', mod: 'k.mute' },
       { k: 'B', name: 'Auto wah', st: lit('kuddle.wahOn'), id: 'kuddle.wahOn', mod: 'k.wah' },
@@ -840,7 +863,8 @@ var KS = (function () {
     return [
       { k: 'A', name: 'Drive', st: !driveOn ? 'OFF' : voice ? 'DRIVE' : 'EDGE', col: !driveOn ? '#8A847A' : voice ? '#F0997B' : '#5DCAA5', border: !driveOn ? '#262626' : voice ? '#F0997B' : '#5DCAA5', id: 'drive.on', mod: 'drive' },
       { k: 'B', name: 'Bitrot', st: lit('bitrot.on'), id: 'bitrot.on', mod: 'bitrot' },
-      { k: 'C', name: 'Growl/Cut', st: on('preamp.flip') ? 'FLIPPED' : 'OFF', id: 'preamp.flip', mod: 'preamp' }];
+      { k: 'C', name: 'Growl/Cut', st: on('preamp.flip') ? 'FLIPPED' : 'OFF', id: 'preamp.flip', mod: 'preamp' },
+      { k: 'B', name: 'Hold · Gloss', st: lit('gloss.on'), id: 'gloss.on', mod: 'gloss', hold: true }];
   }
   function fmtBpm() { var b = val('tempo.bpm'); return (Math.round(b * 10) / 10) + '<span class="unit"> BPM</span>'; }
   // a dot that blinks on the beat, so you can check the tempo against the drummer
@@ -909,14 +933,16 @@ var KS = (function () {
           var d = k[0] === 'D';
           return '<div class="mkey" style="' + (d ? '' : 'background:' + col + ';color:#0E0E10') + '"><span class="l">' + k[0] + '</span><span class="w">' + k[1] + '</span></div>';
         }).join('') + '</div><span class="small">Each press acts straight away, on the beat. The effects below switch from the phone only.</span>'
-        : '<span class="small">Tap A, B, C for the effects below, D for the drone. Hold A for the next bank. Hold C: ' + ['tuner', 'vinyl brake', 'runaway'][S.bank] + '.</span>') + '</div>';
+        : (S.tapping ? '<span class="small" style="color:#5DCAA5;font-weight:700">TAP TEMPO: tap B on the beat. B is B again two seconds after your last tap.</span>'
+          : '<span class="small">Tap A, B, C for the effects below, D for the drone. Hold A for the next bank. Hold B: ' + ['Gloss', 'nothing yet', 'Speckle Hold'][S.bank] + '. Hold C: ' + ['tuner', 'vinyl brake', 'runaway'][S.bank] + '. A and B together: tap tempo.</span>')) + '</div>';
   }
 
   function playScreen() {
     var n = songsOnly(), i = S.current, head = headOf(i), K = kud();
     var song = S.songs[head] || 'No songs yet', part = isPart(i) ? S.songs[i] : '';
     var layers = S.meter.drone || 0;
-    var tiles = K ? bankTiles(3) : bankTiles(S.bank).concat([{ k: 'D', name: 'Drone', st: layers ? 'HOLDING' : 'READY', mod: 'drone', drone: true }]);
+    var bt = K ? [] : bankTiles(S.bank);
+    var tiles = K ? bankTiles(3) : bt.filter(function (t) { return !t.hold; }).concat([{ k: 'D', name: 'Drone', st: layers ? 'HOLDING' : 'READY', mod: 'drone', drone: true }], bt.filter(function (t) { return t.hold; }));
     var bc = K ? '#F28C28' : BANKS[S.bank].col, offCol = K ? '#8A6A50' : '#8A847A', offBorder = K ? '#4A3426' : '#262626', pi = pedalInfo();
     // tap a tile for its page; the small button in the corner switches it
     var stomps = tiles.map(function (t) {
@@ -945,7 +971,7 @@ var KS = (function () {
       '<div class="songbar"><button type="button" class="arrow" data-act="prev" aria-label="Previous song">' + ICON.left + '</button>' +
       '<button type="button" class="song" data-go="setlist" aria-label="Open the setlist">' + flip(n ? two(songNo(i)) : '--', 'blue') +
       '<span style="display:flex;flex-direction:column;min-width:0"><span class="name">' + esc(song) + (part ? '<span class="partname">, ' + esc(part) + '</span>' : '') + '</span><span class="pos">' + (K ? 'Preset ' : 'Song ') + songNo(i) + ' of ' + n +
-      (S.edited ? ', <span class="edited">edited</span>' : K ? '. Hold B for next.' : S.footMode === 1 ? '. C for next song.' : '. Hold B for next.') + '</span></span></button>' +
+      (S.edited ? ', <span class="edited">edited</span>' : K ? '. Hold B for next.' : S.footMode === 1 ? '. C for next song.' : '. Song mode to move on.') + '</span></span></button>' +
       '<button type="button" class="arrow" data-act="next" aria-label="Next song">' + ICON.right + '</button></div>' +
       saveBar() +
       (K ? '' : modePanel()) +
@@ -1115,7 +1141,14 @@ var KS = (function () {
       ['Split', ['split']],
       ['Bottom end dry', ['lowcomp']],
       ['Bottom end wet', dimFull ? ['drone'] : ['dim', 'drone']],
-      ['Full sound', (place === 0 ? ['bitrot', 'drive', 'preamp'] : place === 1 ? ['drive', 'bitrot', 'preamp'] : ['drive', 'preamp', 'bitrot']).concat(['filter', 'wah'], dimFull ? ['dim'] : [], ['grains', 'delay', 'reverb'])],
+      ['Full sound', (function () {
+        // Bitrot and Gloss where each one goes: before or after the drive, or after the preamp
+        var gp = Math.round(val('gloss.place'));
+        var at = function (p) { return p === 0 ? 0 : p === 1 ? 1 : 2; };
+        var slots = [[], [], []];
+        slots[at(place)].push('bitrot'); slots[at(gp)].push('gloss');
+        return slots[0].concat(['drive'], slots[1], ['preamp'], slots[2]);
+      })().concat(['filter', 'wah'], dimFull ? ['dim'] : [], ['grains', 'delay', 'reverb'])],
       ['Control', ['tempo', 'footswitches', 'pedal', 'bloom', 'output']]];
     var seen = {}, out = [];
     paths.forEach(function (pg) {
@@ -1207,6 +1240,11 @@ var KS = (function () {
       var name = S.params['grains.effect'].choices[e];
       return name + ' ' + 'ABCD'[v] + ': ' + (GRAIN_FX[e] || [])[v] + '.';
     }
+    if (id === 'tempo.key') return 'For the projector: when you hit this note, the grille flashes Successpit green, then purple.';
+    if (id === 'gloss.track') return 'Instant rides your own notes, so it never lags or picks the wrong one. Tracked plays any interval with glide, best for pads and leads; low notes come in a touch late.';
+    if (id === 'gloss.env') return 'Follow copies how you play. ADSR fires on every new note; pick strength sets how loud it comes in. Slides and soft legato glide on without retriggering.';
+    if (id === 'gloss.place') return 'Into drive is the big one: the synth goes through your capture with the bass. It always listens to the clean bass, so the drive and Bitrot never confuse it.';
+    if (id === 'gloss.clean') return 'How much of your clean bass stays under Gloss, lows included.';
     if (id === 'bitrot.subInt') return 'The sub plays the note divided by this: 2 is an octave down, 3 an octave and a fifth, 4 two octaves.';
     if (id === 'bitrot.oscInt') return 'The oscillator locks onto this harmonic of the note: x2 an octave up, x3 an octave and a fifth, x4 two octaves.';
     if (id === 'bitrot.floor') return 'Lifts any sub that falls below the floor by octaves, so low notes stay felt rather than flapping.';
@@ -1335,7 +1373,7 @@ var KS = (function () {
       }).join('') + '<div class="small">Hold A and B for a second: back to Keystone. Hold C and D: Keep. Learn and pedal calibration are shared with Keystone: switch to Keystone to change them.</div></section>';
     }
     else if (mod === 'footswitches') {
-      var jobs = [['A', 'Grit: Edge / Drive. Groove: auto filter. Glow: Speckle', 'Next bank. Song mode: last song, on the press'], ['B', 'Grit: Bitrot. Groove: Dimension. Glow: delay', 'Next song or part. Song mode: next part, on the press'],
+      var jobs = [['A', 'Grit: Edge / Drive. Groove: auto filter. Glow: Speckle', 'Next bank. Song mode: last song, on the press'], ['B', 'Grit: Bitrot. Groove: Dimension. Glow: delay', 'Grit: Gloss. Groove: nothing yet. Glow: Speckle Hold. Song mode: next part, on the press'],
                   ['C', 'Grit: Growl/Cut flip. Groove: wah. Glow: reverb', 'Grit: tuner. Groove: vinyl brake. Glow: runaway. Song mode: next song, on the press'], ['D', 'Drone hold / trail off, in every bank', 'Slap']];
       pre = '<section class="card"><h2 class="label">Banks</h2>' + bankBar() +
         '<span class="small">Hold A to step Grit, Groove, Glow. The bank sets what A, B and C do and what the pedal does: dirt blend in Grit, wah in Groove (volume with the wah off), Bloom in Glow. Changing bank never changes the sound. Each song opens in its own bank (This song, below).</span></section>' +
@@ -1343,7 +1381,7 @@ var KS = (function () {
         return '<div style="display:flex;align-items:center;gap:12px">' + flip(j[0]).replace('class="flip "', 'class="flip" style="width:36px;height:42px;font-size:22px"') +
           '<span style="flex:1"><span style="display:block;font-size:16px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span>' +
           '<button type="button" class="wide" style="height:44px;padding:0 14px;font-size:14px" data-learn="' + i + '">Learn</button></div>';
-      }).join('') + '<div class="small">Press C and D together to swap Stomp and Song mode. Hold A and B for a second (Stomp mode) for Kuddle. Keep is the button on the phone.</div></section>' +
+      }).join('') + '<div class="small">Press C and D together to swap Stomp and Song mode. In Stomp mode, press A and B together for tap tempo, then tap B on the beat; hold them for a second for Kuddle. Songs and parts move in Song mode. Keep is the button on the phone.</div></section>' +
         '<section class="card"><h2 class="label">Expression</h2><div class="small">Rock the pedal to heel and press Heel, then to toe and press Toe. If heel and toe still work the wrong way round, press Reverse.</div>' +
         '<div class="pair"><button type="button" class="wide" data-cal="0">Heel</button><button type="button" class="wide" data-cal="1">Toe</button></div>' +
         '<div class="pair"><button type="button" class="wide" data-cal="3">' + (S.health && S.health.exp && S.health.exp.rev ? 'Reversed: on' : 'Reverse') + '</button></div>' +
@@ -1799,6 +1837,15 @@ var KS = (function () {
       case 'projMode': send({ t: 'proj', op: 'mode', mode: d.mode }); if (S.health && S.health.proj) { S.health.proj.mode = d.mode; render(true); } break;
       case 'projSetting': send({ t: 'proj', op: 'setting', v: d.v }); if (S.health && S.health.proj) { S.health.proj.setting = d.v; render(true); } break;
       case 'projVideo': send({ t: 'proj', op: 'video', file: d.file }); toast('LOOPING'); break;
+      case 'projScenes': S.showScenes = !S.showScenes; render(true); break;
+      case 'projScene': {
+        var pj = proj(), si = +d.i;
+        if (!pj) break;
+        pj.scenes = pj.scenes || {};
+        var nv = SCENE_SET[(SCENE_SET.indexOf(pj.scenes[si] || 'auto') + 1) % 4];
+        if (send({ t: 'proj', op: 'scene', i: si, v: nv })) { if (nv === 'auto') delete pj.scenes[si]; else pj.scenes[si] = nv; render(true); }
+        break;
+      }
       case 'filesPick': if (window.KeystoneNative && KeystoneNative.filesPick) KeystoneNative.filesPick(); break;
       case 'filesCancel': if (window.KeystoneNative && KeystoneNative.filesCancel) KeystoneNative.filesCancel(); break;
       case 'filesClear': if (window.KeystoneNative && KeystoneNative.filesClear) KeystoneNative.filesClear(); break;

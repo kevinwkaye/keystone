@@ -536,6 +536,28 @@ private:
             const auto f = home.getChildFile ("wifi.json");
             if (f.existsAsFile()) f.replaceWithText (f.loadFileAsString());
         };
+        // the reactive layer (0.6.1): what the bass and the effects are doing, read from the
+        // projector's thread about 30 times a second (meters and params are atomics)
+        projector->feed = [this]
+        {
+            ks::visuals::Feed f;
+            const auto m = engine.meters();
+            f.level = m.listenLevel;
+            f.high = m.listenHigh;
+            f.onsets = m.onsets;
+            f.onsetStrength = m.onsetStrength;
+            f.notePc = m.notePc;
+            f.noteClarity = m.noteClarity;
+            f.key = (int) std::lround (engine.getParam (ks::P::SongKey)) - 1;
+            f.bitrot = engine.getParam (ks::P::BitrotOn) > 0.5f && m.rig == 0;
+            f.bitrotAmount = m.bitrotActive ? m.bitrot : 0.4f;
+            f.hold = engine.getParam (ks::P::GrOn) > 0.5f && engine.getParam (ks::P::GrHold) > 0.5f && m.rig == 0;
+            f.drone = m.droneLayers > 0;
+            f.space = (engine.getParam (ks::P::DlOn) > 0.5f || engine.getParam (ks::P::RvOn) > 0.5f) && m.rig == 0;
+            f.runaway = engine.runawayAmount();
+            return f;
+        };
+        projector->listening = [this] (bool on) { engine.setListening (on); };
         controller->onProjector = [this] (const std::string& line) { projector->handleMessage (line); };
         projector->start();
 

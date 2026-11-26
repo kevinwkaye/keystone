@@ -74,6 +74,15 @@ void Projector::handleMessage (const std::string& lineJson)
             lastTry = -100;
             save();
         }
+        else if (op == "scene")
+        {
+            const int i = (int) m["i"];
+            const auto v = m["v"].toString();
+            if (i < 0 || i >= (int) ks::visuals::loopScenes().size()) return;
+            if (v != "auto" && v != "off" && v != "subtle" && v != "full") return;
+            { std::lock_guard<std::mutex> l (statusLock); if (v == "auto") sceneSettings.erase (i); else sceneSettings[i] = v; }
+            save();
+        }
         else if (op == "video")
         {
             const auto name = m["file"].toString();
@@ -121,6 +130,18 @@ juce::String Projector::statusJson() const
     o->setProperty ("screen", screen);
     o->setProperty ("player", havePlayer);
     o->setProperty ("problem", problem);
+    // the reactive layer (0.6.1)
+    o->setProperty ("reactive", reactive);
+    o->setProperty ("scene", scene);
+    if (scene >= 0)
+    {
+        const auto& sc = ks::visuals::loopScenes()[(size_t) scene];
+        o->setProperty ("sceneName", String::fromUTF8 (sc.name));
+        o->setProperty ("family", ks::visuals::familyName (sc.family));
+    }
+    auto* ss = new DynamicObject();
+    for (const auto& [i, v] : sceneSettings) ss->setProperty (String (i), v);
+    o->setProperty ("scenes", var (ss));
     return JSON::toString (var (o), true);
 }
 
@@ -130,12 +151,26 @@ void Projector::load()
     std::lock_guard<std::mutex> l (statusLock);
     if (v["setting"].toString() == "off") setting = "off";
     chosen = v["video"].toString();
+    if (auto* ss = v["scenes"].getDynamicObject())
+        for (const auto& p : ss->getProperties())
+        {
+            const int i = p.name.toString().getIntValue();
+            const auto val = p.value.toString();
+            if (i >= 0 && i < (int) ks::visuals::loopScenes().size() && (val == "off" || val == "subtle" || val == "full")) sceneSettings[i] = val;
+        }
 }
 
 void Projector::save() const
 {
     auto* o = new DynamicObject();
-    { std::lock_guard<std::mutex> l (statusLock); o->setProperty ("setting", setting); o->setProperty ("video", chosen); }
+    {
+        std::lock_guard<std::mutex> l (statusLock);
+        o->setProperty ("setting", setting);
+        o->setProperty ("video", chosen);
+        auto* ss = new DynamicObject();
+        for (const auto& [i, v] : sceneSettings) ss->setProperty (String (i), v);
+        o->setProperty ("scenes", var (ss));
+    }
     settingsFile.replaceWithText (JSON::toString (var (o)));
 }
 
@@ -171,7 +206,15 @@ bool Projector::launch()
     if (File ("/usr/bin/taskset").existsAsFile() && SystemStats::getNumCpus() >= 4)
         args.addArray ({ "/usr/bin/taskset", "-c", "0-" + String (SystemStats::getNumCpus() - 2) });
     args.add ("/usr/bin/mpv");
-    if (useGpu) args.addArray ({ "--vo=gpu", "--gpu-context=drm" });
+    // gpu-next carries the reactive shader (its options can change while it plays); gpu and
+    // the simple output are the fallbacks, with no reaction
+    const auto shader = cards.getChildFile ("keystone-react.glsl");
+    if (output == 0)
+    {
+        args.addArray ({ "--vo=gpu-next", "--gpu-context=drm" });
+        if (shader.existsAsFile()) args.add ("--glsl-shaders=" + shader.getFullPathName());
+    }
+    else if (output == 1) args.addArray ({ "--vo=gpu", "--gpu-context=drm" });
     else args.add ("--vo=drm");
     args.addArray ({ "--drm-device=" + device, "--drm-connector=" + connector,
                      "--hwdec=no", "--no-audio", "--idle=yes", "--force-window=yes", "--keep-open=always",
@@ -195,8 +238,17 @@ bool Projector::launch()
         else ::close (s);
     }
     if (sock < 0) { quit(); return false; }
-    { std::lock_guard<std::mutex> l (statusLock); running = true; }
-    if (log) log ("Projector: playing on " + connector + (useGpu ? "" : " (simple output)"));
+    // where the loop is, so the reaction can follow it scene by scene
+    send ("{\"command\":[\"observe_property\",1,\"time-pos\"]}");
+    send ("{\"command\":[\"observe_property\",2,\"duration\"]}");
+    {
+        std::lock_guard<std::mutex> l (statusLock);
+        running = true;
+        reactive = output == 0 && shader.existsAsFile() && (bool) feed;
+    }
+    timePos = -1; duration = 0; paused = false; lastOpts = {};
+    if (listening) listening (reactive);
+    if (log) log ("Projector: playing on " + connector + (output == 0 ? (reactive ? " (reacting)" : "") : output == 1 ? " (no reaction)" : " (simple output)"));
     return true;
 }
 
@@ -210,8 +262,11 @@ void Projector::quit()
         mpv.reset();
     }
     if (sockPath.isNotEmpty()) ::unlink (sockPath.toRawUTF8());
+    if (listening) listening (false);
     std::lock_guard<std::mutex> l (statusLock);
     running = false;
+    reactive = false;
+    scene = -1;
     showing = {};
 }
 
@@ -231,10 +286,77 @@ bool Projector::send (const String& json)
     return left == 0;
 }
 
-void Projector::drain()   // mpv's replies and events: not needed, just kept from piling up
+void Projector::drain()   // mpv's replies and events: the playback position and length, the rest dropped
 {
     char buf[4096];
-    while (sock >= 0 && ::recv (sock, buf, sizeof (buf), MSG_DONTWAIT) > 0) {}
+    for (;;)
+    {
+        if (sock < 0) return;
+        const auto n = ::recv (sock, buf, sizeof (buf), MSG_DONTWAIT);
+        if (n <= 0) break;
+        readBuf += String::fromUTF8 (buf, (int) n);
+        for (int nl = readBuf.indexOfChar ('\n'); nl >= 0; nl = readBuf.indexOfChar ('\n'))
+        {
+            takeLine (readBuf.substring (0, nl));
+            readBuf = readBuf.substring (nl + 1);
+        }
+        if (readBuf.length() > 65536) readBuf = {};
+    }
+}
+
+void Projector::takeLine (const String& line)
+{
+    if (! line.contains ("property-change")) return;
+    const auto v = JSON::parse (line);
+    const int id = (int) v["id"];
+    const auto& d = v["data"];
+    if (id == 1) timePos = d.isVoid() ? -1.0 : (double) d;
+    else if (id == 2) duration = d.isVoid() ? 0.0 : (double) d;
+}
+
+// The reactive layer: about 30 times a second while the loop plays on gpu-next
+void Projector::react (double now)
+{
+    String m, playing;
+    { std::lock_guard<std::mutex> l (statusLock); m = mode; playing = showing; }
+    const bool looping = m == "loop" && playing.isNotEmpty();
+    const double dt = lastReact > 0 ? now - lastReact : 1.0 / 30.0;
+    lastReact = now;
+    auto f = feed ? feed() : ks::visuals::Feed();
+    if (! looping) f = ks::visuals::Feed();   // Blackout and the card stay as they are
+
+    // the scene, when it's the Successpit loop; any other video reacts as one calm scene
+    int sc = -1, family = ks::visuals::Calm;
+    String set = "auto";
+    if (looping && ks::visuals::isLoop (duration) && timePos >= 0)
+    {
+        sc = ks::visuals::sceneAt (timePos);
+        family = ks::visuals::loopScenes()[(size_t) sc].family;
+        std::lock_guard<std::mutex> l (statusLock);
+        if (auto it = sceneSettings.find (sc); it != sceneSettings.end()) set = it->second;
+    }
+    { std::lock_guard<std::mutex> l (statusLock); scene = sc; }
+    const auto o = reactor.step (f, (float) dt, family, looping ? ks::visuals::strengthFor (family, set.toStdString()) : 0.0f);
+
+    // Speckle Hold freezes the picture: pause the video, and play on when it's let go
+    if (looping && o.pause != paused)
+    {
+        paused = o.pause;
+        send (String ("{\"command\":[\"set_property\",\"pause\",") + (paused ? "true" : "false") + "]}");
+    }
+    else if (! looping && paused) { paused = false; send ("{\"command\":[\"set_property\",\"pause\",false]}"); }
+
+    auto num = [] (float x) { return String (x, 3); };
+    const String opts = "ks_on=" + String (looping ? 1 : 0) + ",ks_bright=" + num (o.bright) + ",ks_pulse=" + num (o.pulse)
+                      + ",ks_tr=" + num (o.tr) + ",ks_tg=" + num (o.tg) + ",ks_tb=" + num (o.tb) + ",ks_tint=" + num (o.tint)
+                      + ",ks_glitch=" + num (o.glitch) + ",ks_seed=" + num (o.seed) + ",ks_smear=" + num (o.smear)
+                      + ",ks_drift=" + num (o.drift) + ",ks_bloom=" + num (o.bloom) + ",ks_haze=" + num (o.haze);
+    if (opts == lastOpts) return;
+    lastOpts = opts;
+    Array<var> cmd { "change-list", "glsl-shader-opts", "set", opts };
+    auto* c = new DynamicObject();
+    c->setProperty ("command", cmd);
+    send (JSON::toString (var (c), true));
 }
 
 void Projector::show()
@@ -281,7 +403,7 @@ void Projector::run()
             if (mpv && (! mpv->isRunning() || sock < 0))
             {
                 // gone straight away twice on the GPU: use the simple output instead
-                if (now - launchedAt < 8 && ++quickExits >= 2 && useGpu) { useGpu = false; quickExits = 0; }
+                if (now - launchedAt < 8 && ++quickExits >= 2 && output < 2) { ++output; quickExits = 0; if (log) log ("Projector: falling back to " + String (output == 1 ? "gpu (no reaction)" : "the simple output")); }
                 if (log) log ("Projector: the video player stopped, starting it again");
                 quit();
             }
@@ -317,7 +439,10 @@ void Projector::run()
             job();
         }
         drain();
-        wait (200);
+        bool react_;
+        { std::lock_guard<std::mutex> l (statusLock); react_ = running && reactive; }
+        if (react_ && sock >= 0) react (now);
+        wait (react_ ? 33 : 200);
     }
     quit();
 }
@@ -329,6 +454,8 @@ bool Projector::launch() { return false; }
 void Projector::quit() {}
 bool Projector::send (const String&) { return false; }
 void Projector::drain() {}
+void Projector::takeLine (const String&) {}
+void Projector::react (double) {}
 void Projector::show() {}
 void Projector::run() {}
 
