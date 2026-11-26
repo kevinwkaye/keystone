@@ -19,7 +19,8 @@ jobs:
           LOOP=$(sudo losetup -fP --show Keystone-0.5.5-pi.img)
           sudo mkdir -p /mnt/pi && sudo mount ${LOOP}p2 /mnt/pi
           tar -xzf Keystone-0.6.3-linux-arm64.tar.gz
-          sudo mkdir -p /mnt/pi/tmp/player && sudo cp keystone/pi/player/*.deb /mnt/pi/tmp/player/
+          ls keystone/pi/player | grep -c "%3a" || true
+          sudo mkdir -p /mnt/pi/tmp/player && for f in keystone/pi/player/*.deb; do b=$(basename "$f"); sudo cp "$f" "/mnt/pi/tmp/player/${b//%3a/_}"; done
           sudo mount --bind /dev /mnt/pi/dev; sudo mount -t proc proc /mnt/pi/proc; sudo mount -t sysfs sys /mnt/pi/sys
           echo "== installed already"; sudo chroot /mnt/pi dpkg-query -W libc6 libgl1 libdrm2 libstdc++6 mesa-libgallium libgbm1 libegl1 2>&1 || true
           echo "== simulate"; sudo chroot /mnt/pi bash -c "DEBIAN_FRONTEND=noninteractive apt-get install -s --no-download --no-install-recommends /tmp/player/*.deb" > sim.txt 2>&1 || true
