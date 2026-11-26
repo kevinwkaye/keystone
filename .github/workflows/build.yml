@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: "0.6.2"
+  VERSION: "0.6.3"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.
@@ -270,8 +270,10 @@ jobs:
       - name: Video player into the package
         run: |
           mkdir -p repack && tar -xzf "Keystone-$VERSION-linux-arm64.tar.gz" -C repack
-          mkdir -p repack/keystone/pi/debs && cp "$RUNNER_TEMP"/debs/*.deb repack/keystone/pi/debs/
-          test "$(ls repack/keystone/pi/debs | wc -l)" -gt 0
+          # pi/player (0.6.3), not pi/debs: updaters from 0.6.0 to 0.6.2 tried pi/debs themselves
+          # and threw the packages away when it failed, so the Pi's helper couldn't try again
+          mkdir -p repack/keystone/pi/player && cp "$RUNNER_TEMP"/debs/*.deb repack/keystone/pi/player/
+          test "$(ls repack/keystone/pi/player | wc -l)" -gt 0
           tar -C repack -czf "Keystone-$VERSION-linux-arm64.tar.gz" keystone
           ls -la "Keystone-$VERSION-linux-arm64.tar.gz"
       - name: Add to the release

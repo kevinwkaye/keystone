@@ -410,11 +410,16 @@ void Projector::run()
             const bool wanted = set == "auto" && hasScreen && player;
             if (! player)
             {
-                // the package carries it (0.6.0): ask the Pi's helper once, a little after start
-                const bool carried = File::getSpecialLocation (File::currentExecutableFile).getSiblingFile ("pi").getChildFile ("debs").isDirectory();
+                // the package carries it (0.6.0, pi/player from 0.6.3): ask the Pi's helper once, a
+                // little after start, and show what it says in player.txt (0.6.3)
+                const auto pi = File::getSpecialLocation (File::currentExecutableFile).getSiblingFile ("pi");
+                const bool carried = pi.getChildFile ("player").isDirectory() || pi.getChildFile ("debs").isDirectory();
                 if (carried && ! asked && now - startedAt > 20 && askForPlayer) { asked = true; askForPlayer(); if (log) log ("Projector: asking the Pi to install the video player"); }
-                setProblem (carried ? (asked ? "Installing the video player, about a minute" : "The video player goes in shortly")
-                                    : "The video player isn't installed: update firmware");
+                const auto said = folder.getParentDirectory().getChildFile ("Updates").getChildFile ("player.txt").loadFileAsString().trim();
+                if (said.startsWith ("failed")) setProblem ("The video player couldn't install (" + said.fromFirstOccurrenceOf ("failed:", false, false).trim().substring (0, 160) + "). Restart the Pi to try again");
+                else if (said == "installing") setProblem ("Installing the video player, a minute or two");
+                else setProblem (carried ? (asked ? "Installing the video player, a minute or two" : "The video player goes in shortly")
+                                         : "The video player isn't installed: update firmware");
             }
             else if (set == "auto" && ! hasScreen && ! running) setProblem ({});
             if (wanted && ! mpv && now - lastTry > 5)

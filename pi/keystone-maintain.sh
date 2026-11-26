@@ -36,15 +36,37 @@ if [ -f "$CUR/pi/keystone-power.sh" ]; then
             && systemctl restart --no-block keystone
     fi
 fi
-# the projector's video player, carried in the package (no internet on Keystone's Wi-Fi)
-if [ -d "$CUR/pi/debs" ]; then
-    if ! command -v mpv >/dev/null 2>&1; then
-        if DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-download --no-install-recommends "$CUR"/pi/debs/*.deb >> "$LOG" 2>&1; then
+# the projector's video player, carried in the package (no internet on Keystone's Wi-Fi).
+# 0.6.3: it lives in pi/player, and stays there until it's in, so a failed try is tried
+# again at the next start. Keystone shows what happened from player.txt.
+PLAYER="$CUR/pi/player"; [ -d "$PLAYER" ] || PLAYER="$CUR/pi/debs"
+STATE="$(dirname "$LOG")/player.txt"
+state() { mkdir -p "$(dirname "$STATE")"; echo "$*" > "$STATE"; chown keystone:keystone "$STATE" 2>/dev/null; }
+if [ -d "$PLAYER" ] && ls "$PLAYER"/*.deb >/dev/null 2>&1; then
+    if ! [ -x /usr/bin/mpv ]; then
+        state "installing"
+        export DEBIAN_FRONTEND=noninteractive
+        # a half-finished install from before (a power cut, say) stops apt until it's finished off
+        dpkg --configure -a >> "$LOG" 2>&1
+        OUT="$(apt-get install -y -q --no-download --no-install-recommends -o DPkg::Lock::Timeout=180 "$PLAYER"/*.deb 2>&1)"
+        echo "$OUT" >> "$LOG"
+        if [ -x /usr/bin/mpv ]; then
             log "Installed the video player for the projector"
         else
-            log "Couldn't install the video player"
+            # once more, letting apt sort out anything half there
+            OUT2="$(apt-get install -y -q --no-download --no-install-recommends --fix-broken -o DPkg::Lock::Timeout=180 "$PLAYER"/*.deb 2>&1)"
+            echo "$OUT2" >> "$LOG"
+        fi
+        if [ -x /usr/bin/mpv ]; then
+            log "Installed the video player for the projector"
+        else
+            WHY="$(printf '%s\n%s\n' "$OUT" "$OUT2" | grep -E '^(E:|dpkg: error| [a-z0-9.+-]+ : Depends)' | head -3 | tr '\n' ' ' | cut -c1-300)"
+            state "failed: ${WHY:-apt gave no reason, see Updates/update.log}"
+            log "Couldn't install the video player: ${WHY:-no reason given}"
+            exit 0
         fi
     fi
-    command -v mpv >/dev/null 2>&1 && rm -rf "$(readlink -f "$CUR")/pi/debs"
+    state "ok"
+    rm -rf "$(readlink -f "$PLAYER")"
 fi
 exit 0

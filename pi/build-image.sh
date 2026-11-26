@@ -57,16 +57,21 @@ tar -xzf "$PACKAGE" -C "$MNT/tmp/keystone-pkg"
 # no services may start inside the build
 printf '#!/bin/sh\nexit 101\n' > "$MNT/usr/sbin/policy-rc.d"
 chmod 755 "$MNT/usr/sbin/policy-rc.d"
-chroot "$MNT" env KS_NO_MPV=1 /bin/bash /tmp/keystone-pkg/keystone/pi/deps.sh
 # The projector's video player. Its packages are kept as well: Pis already running Keystone
 # have no internet on Keystone's Wi-Fi, so Update firmware carries them in the package.
+# 0.6.3: taken from the plain Raspberry Pi OS, before Keystone's own libraries go in, so
+# the set is complete for any Keystone Pi: everything mpv needs that the plain system
+# lacks, at today's versions, including the ones Keystone's libraries share with it (a Pi
+# set up a while ago has older copies of those, which 0.6.0's set left out).
+chroot "$MNT" apt-get update -q >/dev/null
 chroot "$MNT" apt-get clean
-chroot "$MNT" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --download-only --no-install-recommends mpv >/dev/null
+chroot "$MNT" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --download-only --no-install-recommends mpv libx11-6 libxrandr2 libxinerama1 libxcursor1 libxext6 libgl1 >/dev/null
 if [ -n "${KS_DEBS_OUT:-}" ]; then
     mkdir -p "$KS_DEBS_OUT"
     cp "$MNT"/var/cache/apt/archives/*.deb "$KS_DEBS_OUT"/
     echo "$(ls "$KS_DEBS_OUT" | wc -l) packages for the video player, $(du -sh "$KS_DEBS_OUT" | cut -f1)"
 fi
+chroot "$MNT" env KS_NO_MPV=1 /bin/bash /tmp/keystone-pkg/keystone/pi/deps.sh
 chroot "$MNT" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends mpv >/dev/null
 chroot "$MNT" /bin/bash /tmp/keystone-pkg/keystone/pi/install.sh /tmp/keystone-pkg/keystone
 chroot "$MNT" apt-get clean
