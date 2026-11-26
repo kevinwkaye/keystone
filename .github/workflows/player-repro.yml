@@ -1,5 +1,7 @@
 name: Player repro (temporary)
-on: workflow_dispatch
+on:
+  push:
+    branches: [player-repro]
 permissions:
   contents: read
 jobs:
