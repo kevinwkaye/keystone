@@ -646,7 +646,9 @@ void Engine::process (const float* in, float* out, int numSamples)
                 (void) hi;
                 const float full = d.subCut2.process (d.subCut1.process (s));
                 d.highBuf[(size_t) i] = full;
-                d.fullBuf[(size_t) i] = full;
+                // Speckle's input: the bass exactly as the interface gives it, as Kaleidoscope
+                // hands it to the Speckle plugin (no DC blocker, no sub cut)
+                d.fullBuf[(size_t) i] = x[i] * d.ksIn.current();
                 d.droneBuf[(size_t) i] = d.drone.process (s);
                 d.feedTuner (raw);
             }
@@ -817,7 +819,8 @@ void Engine::process (const float* in, float* out, int numSamples)
                 h *= d.highLevel.next() * vg;
 
                 // ---- ambient ----
-                // Speckle always takes the clean full sound, so its pitch effects never shift the dirt
+                // Speckle takes the clean bass exactly as it comes in (no sub cut), the same
+                // signal Kaleidoscope gives the Speckle plugin, so the two sound the same (0.6.4)
                 const float grainSrc = d.fullBuf[(size_t) i] * vg;
                 const float gr = d.grains.process (grainSrc, playLevel);
                 const float dr = d.droneBuf[(size_t) i];
@@ -839,8 +842,12 @@ void Engine::process (const float* in, float* out, int numSamples)
                     const float wg = d.filtOn.next();
                     if (wg > 1.0e-4f) core = core + (d.filter.process (core) - core) * wg;
                 }
-                float o = core + dr * wl + gr + dl + rv;
-                o = d.iron.process (o);
+                // Speckle's Mix works as on the plugin: past halfway it takes the dry down
+                core *= d.grains.dryGain();
+                // Speckle joins after Iron, as Kaleidoscope's pedal does, so the transformer
+                // never colours it
+                float o = core + dr * wl + dl + rv;
+                o = d.iron.process (o) + gr;
                 o *= d.outLevel.next();
                 if (pa) o = d.paLp.process (d.paHp.process (o));
                 o *= d.tunerGate.next();

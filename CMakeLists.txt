@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Keystone VERSION 0.6.4 LANGUAGES C CXX)
+project(Keystone VERSION 0.6.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -101,6 +101,10 @@ if(KEYSTONE_BUILD_TESTS)
     add_executable(keystone_tests core/tests/EngineTests.cpp)
     target_link_libraries(keystone_tests PRIVATE keystone_core)
     target_include_directories(keystone_tests PRIVATE core/src)
+    # Speckle in Keystone against the plugin as Kaleidoscope hosts it
+    add_executable(speckle_null tools/speckle_null.cpp)
+    target_link_libraries(speckle_null PRIVATE keystone_core)
+    target_include_directories(speckle_null PRIVATE core/src)
 endif()
 
 if(KEYSTONE_BUILD_APP)
