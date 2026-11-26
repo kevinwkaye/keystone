@@ -18,6 +18,24 @@ fi
 if [ -f "$CUR/pi/keystone.service" ] && ! cmp -s "$CUR/pi/keystone.service" /etc/systemd/system/keystone.service; then
     install -m 644 "$CUR/pi/keystone.service" /etc/systemd/system/keystone.service && systemctl daemon-reload && log "Updated Keystone's service settings"
 fi
+# the service button on the back (0.6.2): its shut down helper, and the gpio group so Keystone
+# can read pin 37. Keystone only picks up a new group when it starts, so it's restarted once
+# here, a moment after it started anyway (this runs each time Keystone starts)
+if [ -f "$CUR/pi/keystone-power.sh" ]; then
+    if ! cmp -s "$CUR/pi/keystone-power.sh" "$ROOT/keystone-power.sh" \
+       || ! cmp -s "$CUR/pi/keystone-power.path" /etc/systemd/system/keystone-power.path \
+       || ! cmp -s "$CUR/pi/keystone-power.service" /etc/systemd/system/keystone-power.service; then
+        install -m 755 "$CUR/pi/keystone-power.sh" "$ROOT/keystone-power.sh"
+        install -m 644 "$CUR/pi/keystone-power.path" /etc/systemd/system/keystone-power.path
+        install -m 644 "$CUR/pi/keystone-power.service" /etc/systemd/system/keystone-power.service
+        systemctl daemon-reload; systemctl enable --now keystone-power.path >/dev/null 2>&1
+        log "Set up the service button's shut down"
+    fi
+    if getent group gpio >/dev/null && ! id -nG keystone 2>/dev/null | grep -qw gpio; then
+        usermod -aG gpio keystone && log "Keystone can read the service button now (gpio group), restarting it once" \
+            && systemctl restart --no-block keystone
+    fi
+fi
 # the projector's video player, carried in the package (no internet on Keystone's Wi-Fi)
 if [ -d "$CUR/pi/debs" ]; then
     if ! command -v mpv >/dev/null 2>&1; then

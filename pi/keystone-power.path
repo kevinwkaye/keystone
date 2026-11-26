@@ -1,0 +1,10 @@
+# The service button's shut down: Keystone writes power.json, this runs keystone-power.sh.
+[Unit]
+Description=Watch for the service button's shut down
+
+[Path]
+PathChanged=/home/keystone/Documents/Keystone/power.json
+Unit=keystone-power.service
+
+[Install]
+WantedBy=multi-user.target

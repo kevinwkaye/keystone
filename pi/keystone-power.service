@@ -1,0 +1,6 @@
+[Unit]
+Description=Shut the Pi down for Keystone's service button
+
+[Service]
+Type=oneshot
+ExecStart=/opt/keystone/keystone-power.sh

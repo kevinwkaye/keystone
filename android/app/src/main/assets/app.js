@@ -786,6 +786,8 @@ var KS = (function () {
         if (sy.memTotal > 0) rows.push({ n: 'Memory', d: sy.memUsed.toLocaleString('en-GB') + ' MB of ' + (sy.memTotal >= 1024 ? Math.round(sy.memTotal / 1024) + ' GB' : sy.memTotal + ' MB') + ' in use',
           ok: sy.memUsed / sy.memTotal < 0.85, st: sy.memUsed / sy.memTotal < 0.85 ? 'OK' : 'HIGH' });
       }
+      // the service button on the back (0.6.2): not fitted yet is fine, a stuck one isn't
+      if (h.svc) rows.push({ n: 'Service button', d: h.svc.text, ok: h.svc.ok || !h.svc.fitted, st: h.svc.ok ? 'OK' : h.svc.fitted ? 'CHECK' : 'NONE' });
       rows.push({ n: 'Phone link', d: (S.linkDetail || '') + (S.rtt != null ? ', ' + S.rtt + ' ms round trip' : ''), ok: true });
     }
     var inDb = h ? h['in'].db : null;

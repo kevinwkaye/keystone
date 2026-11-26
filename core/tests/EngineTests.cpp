@@ -8,6 +8,7 @@
 #include "keystone/Controller.h"
 #include "keystone/Engine.h"
 #include "keystone/Visuals.h"
+#include "keystone/ServiceButton.h"
 
 #include "Analysis.h"
 #include "Drone.h"
@@ -984,6 +985,57 @@ static void testListener()
 // ---------------------------------------------------------------------------------------
 // The projector's reactive layer (0.6.1): the scene map, the families, and what the bass and
 // the feet do to the picture.
+// The service button on the back (0.6.2): jobs on letting go, never from a press that won't end
+static void testServiceButton()
+{
+    std::printf ("\nService button\n");
+    using SB = ks::ServiceButton;
+    // run a press of `hold` seconds from a released start, 20 reads a second
+    auto press = [] (double hold, SB::Action& got, SB::Stage& peak)
+    {
+        SB b;
+        double t = 0;
+        got = SB::Action::None; peak = SB::Stage::Idle;
+        auto feed = [&] (bool p, double until) { for (; t < until; t += 0.05) { auto a = b.update (p, t); if (a != SB::Action::None) got = a; if ((int) b.currentStage() > (int) peak) peak = b.currentStage(); } };
+        feed (false, 1.0);
+        feed (true, 1.0 + hold);
+        feed (false, 1.0 + hold + 1.0);
+        return b;
+    };
+    SB::Action a; SB::Stage st;
+    press (1.0, a, st);
+    CHECK (a == SB::Action::None, "a 1 s press does nothing");
+    press (4.0, a, st);
+    CHECK (a == SB::Action::Shutdown && st == SB::Stage::Shutdown, "hold 4 s and let go: shut down");
+    press (12.0, a, st);
+    CHECK (a == SB::Action::WifiReset && st == SB::Stage::WifiReset, "hold 12 s and let go: Wi-Fi reset");
+    auto b = press (25.0, a, st);
+    CHECK (a == SB::Action::None && st == SB::Stage::Stuck && b.faultCount() == 1, "held 25 s: treated as stuck, nothing happens");
+
+    // a broken wire mid-gig: pressed and never let go
+    {
+        SB s; SB::Action any = SB::Action::None;
+        for (double t = 0; t < 1; t += 0.05) s.update (false, t);
+        for (double t = 1; t < 600; t += 0.05) { auto x = s.update (true, t); if (x != SB::Action::None) any = x; }
+        CHECK (any == SB::Action::None && ! s.healthOk (600), "a wire that breaks mid-gig never shuts the rig down, and Health flags it");
+    }
+    // nothing fitted (pull-up, reads pressed from the start), or held through boot
+    {
+        SB s; SB::Action any = SB::Action::None;
+        for (double t = 0; t < 60; t += 0.05) { auto x = s.update (true, t); if (x != SB::Action::None) any = x; }
+        CHECK (any == SB::Action::None && s.fitted() == SB::Fitted::NotSeen, "nothing fitted reads as not fitted and does nothing");
+        for (double t = 60; t < 62; t += 0.05) { auto x = s.update (false, t); if (x != SB::Action::None) any = x; }
+        CHECK (any == SB::Action::None && s.fitted() == SB::Fitted::Fitted, "letting go of a press held since start does nothing, then counts as fitted");
+    }
+    // contact bounce: a flicker under 50 ms is ignored
+    {
+        SB s; SB::Action any = SB::Action::None;
+        for (double t = 0; t < 1; t += 0.01) s.update (false, t);
+        for (int i = 0; i < 200; ++i) { const double t = 1 + i * 0.02; auto x = s.update (i % 2 == 0, t); if (x != SB::Action::None) any = x; }
+        CHECK (any == SB::Action::None && ! s.down(), "a flickering contact doesn't count as a press");
+    }
+}
+
 static void testVisuals()
 {
     std::printf ("Reactive visuals\n");
@@ -2775,6 +2827,7 @@ int main (int argc, char** argv)
         testGloss();
         testListener();
         testVisuals();
+        testServiceButton();
         testBitrotLevel();
         testBitrotSteady();
     testOffMeansOff();

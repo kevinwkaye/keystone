@@ -14,7 +14,7 @@ USER_NAME=keystone
 
 # the user Keystone runs as (separate from whoever you sign in as)
 id "$USER_NAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USER_NAME"
-for g in audio plugdev; do getent group "$g" >/dev/null && usermod -aG "$g" "$USER_NAME"; done
+for g in audio plugdev gpio; do getent group "$g" >/dev/null && usermod -aG "$g" "$USER_NAME"; done
 install -d -o "$USER_NAME" -g "$USER_NAME" "/home/$USER_NAME/Documents" "/home/$USER_NAME/Documents/Keystone" "/home/$USER_NAME/Documents/Keystone/Updates"
 
 # Keystone in slot a, current pointing at it
@@ -35,6 +35,11 @@ install -m 755 "$PKG/pi/keystone-wifi.sh" "$ROOT/keystone-wifi.sh"
 install -m 644 "$PKG/pi/keystone-wifi.path" /etc/systemd/system/keystone-wifi.path
 install -m 644 "$PKG/pi/keystone-wifi.service" /etc/systemd/system/keystone-wifi.service
 
+# the service button on the back: hold 3 s and let go to shut down (0.6.2)
+install -m 755 "$PKG/pi/keystone-power.sh" "$ROOT/keystone-power.sh"
+install -m 644 "$PKG/pi/keystone-power.path" /etc/systemd/system/keystone-power.path
+install -m 644 "$PKG/pi/keystone-power.service" /etc/systemd/system/keystone-power.service
+
 # real-time audio, the processor at full speed, Wi-Fi at full power
 cat > /etc/security/limits.d/keystone.conf <<'EOF'
 @audio - rtprio 95
@@ -53,5 +58,5 @@ mkdir -p /etc/NetworkManager/conf.d
 printf '[connection]\nwifi.powersave = 2\n' > /etc/NetworkManager/conf.d/keystone-wifi.conf
 
 # enable works without a running systemd (inside the image build too)
-systemctl enable keystone-performance.service keystone-update.path keystone-wifi.path keystone.service
+systemctl enable keystone-performance.service keystone-update.path keystone-wifi.path keystone-power.path keystone.service
 echo "Keystone $(cat "$ROOT/a/VERSION" 2>/dev/null || echo) installed in $ROOT/a"

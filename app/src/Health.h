@@ -38,6 +38,8 @@ struct Health
     int memUsedMb = -1, memTotalMb = -1;
     int reconnects = 0;          // times the interface dropped and came back since start
     juce::String projJson;       // the projector (0.6.0)
+    bool svcOn = false, svcOk = false, svcFitted = false;   // the service button on the back (0.6.2), the Pi only
+    juce::String svcText;
 
     int phones = 0;
     juce::String phoneAddresses, laptopAddresses;
@@ -72,6 +74,7 @@ struct Health
                                       { "free", (juce::int64) freeMb }, { "memUsed", memUsedMb }, { "memTotal", memTotalMb },
                                       { "reconnects", reconnects } }));
         if (projJson.isNotEmpty()) o->setProperty ("proj", juce::JSON::parse (projJson));
+        if (svcOn) o->setProperty ("svc", obj ({ { "ok", svcOk }, { "fitted", svcFitted }, { "text", svcText } }));
         o->setProperty ("link", obj ({ { "phones", phones }, { "laptop", laptopAddresses } }));
         o->setProperty ("watch", obj ({ { "on", watchVersion.isNotEmpty() }, { "v", watchVersion }, { "ip", watchAddress } }));
         return juce::JSON::toString (juce::var (o), true);

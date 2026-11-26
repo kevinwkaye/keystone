@@ -82,6 +82,7 @@ test -x "$MNT/usr/bin/mpv"
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone.service"
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone-update.path"
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone-wifi.path"
+test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone-power.path"
 echo "Keystone $(cat "$MNT/opt/keystone/a/VERSION") is in the image and starts at boot"
 
 echo "== Packing"

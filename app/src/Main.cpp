@@ -22,6 +22,8 @@
 #endif
 #include "SystemHealth.h"
 #include "Projector.h"
+#include "ServicePin.h"
+#include "keystone/ServiceButton.h"
 #include <cstdlib>
 #include <deque>
 #include <string>
@@ -645,6 +647,13 @@ public:
         h.freeMb = sys.freeMb; h.memUsedMb = sys.memUsedMb; h.memTotalMb = sys.memTotalMb;
         h.reconnects = audio ? audio->reconnects() : 0;
         h.projJson = projector ? projector->statusJson() : String();
+        if (servicePin.here())
+        {
+            h.svcOn = true;
+            h.svcOk = servicePin.available() && serviceButton.healthOk (now);
+            h.svcFitted = servicePin.available() && serviceButton.fitted() == ks::ServiceButton::Fitted::Fitted;
+            h.svcText = servicePin.available() ? String (serviceButton.healthText (now)) : servicePin.problem;
+        }
         h.phones = link.clientCount();
         h.phoneAddresses = link.clientAddresses().joinIntoString (", ");
         h.laptopAddresses = link.addresses();
@@ -704,6 +713,8 @@ private:
                                 + String (audio ? audio->dropouts() : 0) + (engine.meters().light ? ". Effects in light mode" : ""));
         }
         controller->tick (now);
+        // the service button on the back, 20 times a second (0.6.2)
+        if (++serviceTick >= 5) { serviceTick = 0; tickServiceButton (now); }
         flush();
         // health once a second: the status window and the phone's Health page
         if (++healthTick >= 100)
@@ -728,6 +739,56 @@ private:
 #if JUCE_WINDOWS
             SetThreadExecutionState (ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
 #endif
+        }
+    }
+
+    // the service button: jobs happen on letting go (see keystone/ServiceButton.h)
+    void tickServiceButton (double now)
+    {
+        const int v = servicePin.read (now);
+        if (v < 0)
+        {
+            if (servicePin.problem != serviceProblemLogged && servicePin.here())
+            {
+                serviceProblemLogged = servicePin.problem;
+                Logger::writeToLog ("Service button: " + servicePin.problem);
+            }
+            return;
+        }
+        if (serviceProblemLogged.isNotEmpty() || ! serviceLoggedReady) { serviceProblemLogged = {}; serviceLoggedReady = true; Logger::writeToLog ("Service button: reading pin 37"); }
+        using SB = ks::ServiceButton;
+        const auto action = serviceButton.update (v == 1, now);
+        const auto stage = serviceButton.currentStage();
+        if (stage != serviceStage)
+        {
+            if (stage == SB::Stage::Shutdown) controller->notify ("LET GO TO SHUT DOWN");
+            else if (stage == SB::Stage::WifiReset) controller->notify ("LET GO TO RESET THE WI-FI");
+            else if (stage == SB::Stage::Stuck && serviceButton.fitted() == SB::Fitted::Fitted)
+            {
+                controller->notify ("SERVICE BUTTON STUCK: IGNORED");
+                Logger::writeToLog ("Service button: reads pressed for over 20 s, ignoring it until it lets go (check its wires)");
+            }
+            serviceStage = stage;
+        }
+        if (action == SB::Action::Shutdown)
+        {
+            Logger::writeToLog ("Service button: shutting the Pi down");
+            controller->notify ("SHUTTING DOWN");
+            flush();
+           #if JUCE_LINUX
+            // keystone-power.path sees this and powers the Pi off as root (pi/keystone-power.sh)
+            DynamicObject::Ptr p (new DynamicObject());
+            p->setProperty ("do", "off");
+            p->setProperty ("at", Time::currentTimeMillis());
+            home.getChildFile ("power.json").replaceWithText (JSON::toString (var (p.get())));
+           #endif
+        }
+        else if (action == SB::Action::WifiReset)
+        {
+            // Keystone's own network off: the Pi goes back onto the networks it knows, your hotspot
+            Logger::writeToLog ("Service button: Wi-Fi reset, Keystone's network off");
+            controller->handleMessage (R"({"t":"wifi","on":false})", [] (const std::string&) {});
+            controller->notify ("BACK ON YOUR HOTSPOT");
         }
     }
 
@@ -767,6 +828,12 @@ private:
 #endif
     Watchdog watchdog;
     Time lastPedalFileTime;
+    ServicePin servicePin;
+    ks::ServiceButton serviceButton;
+    ks::ServiceButton::Stage serviceStage = ks::ServiceButton::Stage::Idle;
+    int serviceTick = 0;
+    String serviceProblemLogged;
+    bool serviceLoggedReady = false;
 };
 
 static void midiSink (const MidiMessage& m)
