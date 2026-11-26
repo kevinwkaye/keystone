@@ -1,0 +1,27 @@
+name: Player repro (temporary)
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  repro:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Kevin's Pi (0.5.5 image) and the 0.6.3 packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -x
+          gh release download v0.5.5 -R "$GITHUB_REPOSITORY" -p "*pi.img.xz"
+          gh release download v0.6.3 -R "$GITHUB_REPOSITORY" -p "*linux-arm64.tar.gz"
+          xz -d -T0 Keystone-0.5.5-pi.img.xz
+          LOOP=$(sudo losetup -fP --show Keystone-0.5.5-pi.img)
+          sudo mkdir -p /mnt/pi && sudo mount ${LOOP}p2 /mnt/pi
+          tar -xzf Keystone-0.6.3-linux-arm64.tar.gz
+          sudo mkdir -p /mnt/pi/tmp/player && sudo cp keystone/pi/player/*.deb /mnt/pi/tmp/player/
+          sudo mount --bind /dev /mnt/pi/dev; sudo mount -t proc proc /mnt/pi/proc; sudo mount -t sysfs sys /mnt/pi/sys
+          echo "== installed already"; sudo chroot /mnt/pi dpkg-query -W libc6 libgl1 libdrm2 libstdc++6 mesa-libgallium libgbm1 libegl1 2>&1 || true
+          echo "== simulate"; sudo chroot /mnt/pi env DEBIAN_FRONTEND=noninteractive apt-get install -s --no-download --no-install-recommends /tmp/player/*.deb > sim.txt 2>&1 || true
+          tail -60 sim.txt
+          echo "== would fetch"; grep -E "^Inst" sim.txt | wc -l
+          echo "== real try"; sudo chroot /mnt/pi env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-download --no-install-recommends /tmp/player/*.deb 2>&1 | grep -iE "^E:|unable|missing|Err|Get:" | head -40 || true
+          echo "== print-uris of what it wants"; sudo chroot /mnt/pi apt-get install -y --print-uris --no-install-recommends /tmp/player/*.deb 2>&1 | grep "^'" | head -60 || true
