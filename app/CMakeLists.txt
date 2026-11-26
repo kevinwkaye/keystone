@@ -27,6 +27,7 @@ target_sources(Keystone PRIVATE
     src/AudioHost.cpp
     src/LinkServer.cpp
     src/PedalRack.cpp
+    src/Projector.cpp
     ${PROJECT_SOURCE_DIR}/shared/PedalControl.cpp
     ${PROJECT_SOURCE_DIR}/shared/Keeper.cpp)
 

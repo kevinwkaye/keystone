@@ -57,6 +57,7 @@ public:
     // the Pi's access point) and says how it's going
     std::function<void (bool on, const std::string& ssid, const std::string& pass)> onWifi;
     std::function<std::string()> wifiStatus;
+    std::function<void (const std::string& line)> onProjector;   // {"t":"proj",...} from the phone (0.6.0)
     void startWifi();   // after load(), with the saved setting
     std::function<bool()> keeperLiveTag;
     std::function<void (bool)> setKeeperLiveTag;

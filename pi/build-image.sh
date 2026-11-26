@@ -57,7 +57,17 @@ tar -xzf "$PACKAGE" -C "$MNT/tmp/keystone-pkg"
 # no services may start inside the build
 printf '#!/bin/sh\nexit 101\n' > "$MNT/usr/sbin/policy-rc.d"
 chmod 755 "$MNT/usr/sbin/policy-rc.d"
-chroot "$MNT" /bin/bash /tmp/keystone-pkg/keystone/pi/deps.sh
+chroot "$MNT" env KS_NO_MPV=1 /bin/bash /tmp/keystone-pkg/keystone/pi/deps.sh
+# The projector's video player. Its packages are kept as well: Pis already running Keystone
+# have no internet on Keystone's Wi-Fi, so Update firmware carries them in the package.
+chroot "$MNT" apt-get clean
+chroot "$MNT" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --download-only --no-install-recommends mpv >/dev/null
+if [ -n "${KS_DEBS_OUT:-}" ]; then
+    mkdir -p "$KS_DEBS_OUT"
+    cp "$MNT"/var/cache/apt/archives/*.deb "$KS_DEBS_OUT"/
+    echo "$(ls "$KS_DEBS_OUT" | wc -l) packages for the video player, $(du -sh "$KS_DEBS_OUT" | cut -f1)"
+fi
+chroot "$MNT" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends mpv >/dev/null
 chroot "$MNT" /bin/bash /tmp/keystone-pkg/keystone/pi/install.sh /tmp/keystone-pkg/keystone
 chroot "$MNT" apt-get clean
 rm -rf "$MNT/tmp/keystone-pkg" "$MNT/usr/sbin/policy-rc.d" "$MNT/etc/resolv.conf.keystone"
@@ -67,6 +77,7 @@ mv "$MNT/etc/resolv.conf.pi" "$MNT/etc/resolv.conf" 2>/dev/null || true
 # check what went in
 # (current points at /opt/keystone/a inside the Pi, so check it by name, not by following it)
 test -x "$MNT/opt/keystone/a/keystone"
+test -x "$MNT/usr/bin/mpv"
 [ "$(readlink "$MNT/opt/keystone/current")" = "/opt/keystone/a" ]
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone.service"
 test -L "$MNT/etc/systemd/system/multi-user.target.wants/keystone-update.path"

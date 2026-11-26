@@ -11,6 +11,9 @@ CON=keystone-ap
 say() { echo "$*" > "$STATUS"; chown keystone:keystone "$STATUS" 2>/dev/null; }
 field() { python3 -c 'import json,sys; v=json.load(open(sys.argv[1])).get(sys.argv[2]); print(str(v).lower() if isinstance(v,bool) else v)' "$REQ" "$1" 2>/dev/null; }
 
+# the Pi's other helpers and the projector's video player, kept in step (0.6.0)
+[ -f "${KS_ROOT:-/opt/keystone}/current/pi/keystone-maintain.sh" ] && [ -z "${KS_HOME:-}" ] && bash "${KS_ROOT:-/opt/keystone}/current/pi/keystone-maintain.sh"
+
 [ -f "$REQ" ] || exit 0
 ON="$(field on)"; SSID="$(field ssid)"; PASS="$(field pass)"
 command -v nmcli >/dev/null || { say "Off: NetworkManager isn't on this Pi"; exit 1; }

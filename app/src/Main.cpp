@@ -21,6 +21,7 @@
 #include "StatusWindow.h"
 #endif
 #include "SystemHealth.h"
+#include "Projector.h"
 #include <cstdlib>
 #include <deque>
 #include <string>
@@ -337,6 +338,7 @@ public:
         if (audio) audio->stop();
         if (rack) rack->shutdown();   // keeps the pedal's settings for next time
         if (housekeeping) housekeeping->stopThread (2000);
+        projector.reset();
         midi.reset();
 #if KEYSTONE_TRAY
         window.reset();
@@ -522,6 +524,21 @@ private:
         };
         controller->wifiStatus = [this] { return home.getChildFile ("wifi-status.txt").loadFileAsString().trim().toStdString(); };
 
+        // the projector (0.6.0): the loop on the amp, from Visuals, on the Pi's HDMI port
+        projector = std::make_unique<Projector> (home.getChildFile ("Visuals"),
+                                                 File::getSpecialLocation (File::currentExecutableFile).getSiblingFile ("Visuals"),
+                                                 home.getChildFile ("projector.json"));
+        projector->log = [] (const String& s) { Logger::writeToLog (s); };
+        projector->askForPlayer = [this]
+        {
+            // the Pi's Wi-Fi helper runs as root when wifi.json changes, and keeps the Pi's
+            // helpers up to date first: writing it again unchanged leaves the network alone
+            const auto f = home.getChildFile ("wifi.json");
+            if (f.existsAsFile()) f.replaceWithText (f.loadFileAsString());
+        };
+        controller->onProjector = [this] (const std::string& line) { projector->handleMessage (line); };
+        projector->start();
+
        #if JUCE_WINDOWS || JUCE_LINUX
         // Update firmware. Laptop: hand the installer to the "Keystone Update" task (Tools\Update.ps1),
         // which installs it with administrator rights and puts the old version back if the
@@ -605,6 +622,7 @@ public:
         h.throttledNow = sys.throttledNow; h.throttledEver = sys.throttledEver;
         h.freeMb = sys.freeMb; h.memUsedMb = sys.memUsedMb; h.memTotalMb = sys.memTotalMb;
         h.reconnects = audio ? audio->reconnects() : 0;
+        h.projJson = projector ? projector->statusJson() : String();
         h.phones = link.clientCount();
         h.phoneAddresses = link.clientAddresses().joinIntoString (", ");
         h.laptopAddresses = link.addresses();
@@ -716,6 +734,7 @@ private:
     double startedAt = Time::getMillisecondCounterHiRes() * 0.001;
     double lastFsTime = -1;
     SystemHealth sys;
+    std::unique_ptr<Projector> projector;
     double sysReadAt = -1;
     String lastFsName;
     std::atomic<double> lastExpTime { -1.0 };

@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  VERSION: "0.5.10"
+  VERSION: "0.6.0"
 
 jobs:
   # Make sure the release exists so every job can add its files to it.
@@ -237,6 +237,7 @@ jobs:
           cp installer/README.txt dist/keystone/
           echo "$VERSION" > dist/keystone/VERSION
           mkdir -p dist/keystone/pi && cp pi/* dist/keystone/pi/
+          mkdir -p dist/keystone/Visuals && cp app/visuals/*.png dist/keystone/Visuals/
           tar -C dist -czf "Keystone-$VERSION-linux-arm64.tar.gz" keystone
 
       - uses: actions/upload-artifact@v4
@@ -249,7 +250,8 @@ jobs:
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v$VERSION" "Keystone-$VERSION-linux-arm64.tar.gz" bench-linux-arm64.md bench-pedals-linux-arm64.md soak-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
+        # the package itself goes up from pi-image, with the projector's video player added
+        run: gh release upload "v$VERSION" bench-linux-arm64.md bench-pedals-linux-arm64.md soak-linux-arm64.md --clobber -R "$GITHUB_REPOSITORY"
 
   # The ready-made Pi image: Raspberry Pi OS Lite with Keystone already in it
   pi-image:
@@ -263,12 +265,20 @@ jobs:
       - name: Build the image
         run: |
           sudo apt-get install -y parted xz-utils >/dev/null
-          sudo pi/build-image.sh "Keystone-$VERSION-linux-arm64.tar.gz" "Keystone-$VERSION-pi.img.xz"
+          sudo KS_DEBS_OUT="$RUNNER_TEMP/debs" pi/build-image.sh "Keystone-$VERSION-linux-arm64.tar.gz" "Keystone-$VERSION-pi.img.xz"
+      # Update firmware's package carries the video player's packages, for Pis with no internet
+      - name: Video player into the package
+        run: |
+          mkdir -p repack && tar -xzf "Keystone-$VERSION-linux-arm64.tar.gz" -C repack
+          mkdir -p repack/keystone/pi/debs && cp "$RUNNER_TEMP"/debs/*.deb repack/keystone/pi/debs/
+          test "$(ls repack/keystone/pi/debs | wc -l)" -gt 0
+          tar -C repack -czf "Keystone-$VERSION-linux-arm64.tar.gz" keystone
+          ls -la "Keystone-$VERSION-linux-arm64.tar.gz"
       - name: Add to the release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v$VERSION" "Keystone-$VERSION-pi.img.xz" --clobber -R "$GITHUB_REPOSITORY"
+        run: gh release upload "v$VERSION" "Keystone-$VERSION-pi.img.xz" "Keystone-$VERSION-linux-arm64.tar.gz" --clobber -R "$GITHUB_REPOSITORY"
 
   android:
     needs: prepare
@@ -299,7 +309,7 @@ jobs:
 
   # Release notes, with the measured CPU from both machines.
   notes:
-    needs: [windows, linux-arm64, android]
+    needs: [windows, linux-arm64, pi-image, android]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

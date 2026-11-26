@@ -2189,6 +2189,7 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
     }
     else if (t == "fw") reply (firmwareMessage (line));
     else if (t == "file") reply (fileMessage (line));
+    else if (t == "proj") { if (onProjector) onProjector (line); }
     else if (t == "default") reply (defaultMessage (line));
     else if (t == "takeInfo" || t == "listenList" || t == "listenGet" || t == "listenUse") reply (listenMessage (line));
     else if (t == "listen")

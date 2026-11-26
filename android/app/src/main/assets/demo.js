@@ -52,8 +52,11 @@ window.KSDemo = (function () {
       audio: { ok: true, text: 'Demo: pretend audio, 48 kHz, 128' }, 'in': { db: -20, ch: 1, dead: false },
       fs: { ok: true, text: 'Demo: use the tiles on Play', ago: -1, last: '' }, exp: { pos: pedal, ago: -1, cal: true, rev: false },
       out: { db: -8, lim: 0 }, laptop: { cpu: 9, dropouts: 0, recent: 0, light: false }, link: { phones: 1, laptop: '' },
-      sys: { temp: 52, fan: 2100, power: true, uv: false, uvEver: false, thr: false, thrEver: false, free: 100352, memUsed: 640, memTotal: 2048, reconnects: 0 } };
+      sys: { temp: 52, fan: 2100, power: true, uv: false, uvEver: false, thr: false, thrEver: false, free: 100352, memUsed: 640, memTotal: 2048, reconnects: 0 },
+      proj: projState };
   }
+  var projState = { on: true, setting: 'auto', mode: 'loop', video: 'successpit_retro_loop_8min_v2.mp4', chosen: '', screen: true, player: true, problem: '',
+    videos: ['successpit_retro_loop_8min_badge.mp4', 'successpit_retro_loop_8min_v2.mp4'] };
 
   // the footswitch tiles, as Keystone's Stomp mode taps them
   function stomp(k) {
@@ -74,6 +77,11 @@ window.KSDemo = (function () {
       case 'hello': reply(state()); reply(health()); break;
       case 'ping': reply({ t: 'pong', ts: m.ts }); break;
       case 'set': set(m.id, m.v); break;
+      case 'proj':
+        if (m.op === 'mode') projState.mode = m.mode;
+        if (m.op === 'setting') { projState.setting = m.v; projState.on = m.v === 'auto'; }
+        if (m.op === 'video') { projState.video = m.file; projState.mode = 'loop'; }
+        reply(health()); break;
       case 'song': st.current = Math.max(0, Math.min(st.songs.length - 1, m.i)); st.edited = false; reply(state()); break;
       case 'songStep': st.current = Math.max(0, Math.min(st.songs.length - 1, st.current + m.d)); st.edited = false; reply(state()); break;
       case 'bank': st.bank = Math.max(0, Math.min(2, m.i)); reply(state()); toast(['GRIT', 'GROOVE', 'GLOW'][st.bank]); break;

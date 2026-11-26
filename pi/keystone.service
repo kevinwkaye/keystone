@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 User=keystone
 Group=keystone
-SupplementaryGroups=audio video
+SupplementaryGroups=audio video render
 WorkingDirectory=/home/keystone
 Environment=HOME=/home/keystone
 ExecStart=/opt/keystone/current/keystone --background

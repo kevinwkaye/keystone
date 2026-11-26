@@ -37,6 +37,7 @@ struct Health
     juce::int64 freeMb = -1;
     int memUsedMb = -1, memTotalMb = -1;
     int reconnects = 0;          // times the interface dropped and came back since start
+    juce::String projJson;       // the projector (0.6.0)
 
     int phones = 0;
     juce::String phoneAddresses, laptopAddresses;
@@ -70,6 +71,7 @@ struct Health
                                       { "thr", throttledNow }, { "thrEver", throttledEver },
                                       { "free", (juce::int64) freeMb }, { "memUsed", memUsedMb }, { "memTotal", memTotalMb },
                                       { "reconnects", reconnects } }));
+        if (projJson.isNotEmpty()) o->setProperty ("proj", juce::JSON::parse (projJson));
         o->setProperty ("link", obj ({ { "phones", phones }, { "laptop", laptopAddresses } }));
         o->setProperty ("watch", obj ({ { "on", watchVersion.isNotEmpty() }, { "v", watchVersion }, { "ip", watchAddress } }));
         return juce::JSON::toString (juce::var (o), true);

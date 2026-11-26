@@ -73,7 +73,8 @@ var KS = (function () {
         queueRender(true); break;
       case 'health':
         S.health = m; S.healthAt = Date.now();
-        if (S.screen === 'health') queueRender(true); else strip();
+        var pk = JSON.stringify(m.proj || null), pch = pk !== S.projKey; S.projKey = pk;
+        if (S.screen === 'health' || (pch && (S.screen === 'visuals' || S.screen === 'play'))) queueRender(true); else strip();
         break;
       case 'pong':
         if (m.ts) S.rtt = Date.now() - m.ts;
@@ -628,6 +629,50 @@ var KS = (function () {
     if (was && was.busy && !m.busy) send({ t: 'hello', client: 'android', v: 1 });
   }
 
+  // ---------------------------------------------------------------- the projector (0.6.0: the loop on the amp, from the Pi)
+  var PMODES = [['loop', 'Loop'], ['black', 'Blackout'], ['align', 'Align']];
+  function proj() { return S.health && S.health.proj; }
+  function nowShowing() {
+    var p = proj() || {};
+    if (!p.on) {
+      var why = p.problem || (p.setting === 'off' ? 'Switched off on the Visuals page' : !p.screen ? 'Plug the projector into the Pi\'s HDMI port' : 'Starting');
+      return { num: '--', name: 'Projector off', sub: why };
+    }
+    if (p.mode === 'black') return { num: '--', name: 'Blackout', sub: 'Tap Loop to bring the visuals back' };
+    if (p.mode === 'align') return { num: '--', name: 'Alignment card', sub: 'Green edge on the grille\'s edge, dotted box on the badge' };
+    if (!p.video) return { num: '--', name: 'No video yet', sub: p.problem || 'Send one from Rig, Send files' };
+    return { num: 'ON', name: p.video.replace(/\.[^.]+$/, ''), sub: 'Looping on the amp' };
+  }
+  function visualCard() {
+    if (!proj()) return '';
+    var w = nowShowing();
+    return '<button type="button" class="card viscard" data-go="visuals" aria-label="Open Visuals">' +
+      '<span class="label" style="display:flex;justify-content:space-between;width:100%"><span>Visuals</span></span>' +
+      '<span style="display:flex;align-items:center;gap:10px;width:100%">' + flip(w.num) +
+      '<span style="display:flex;flex-direction:column;min-width:0;flex:1;text-align:left"><span class="vname">' + esc(w.name) + '</span><span class="small">' + esc(w.sub) + '</span></span>' + ICON.right + '</span></button>';
+  }
+  function visualsScreen() {
+    var p = proj() || { on: false, mode: 'loop', setting: 'auto', videos: [] }, w = nowShowing();
+    var dotCol = p.on ? (p.mode === 'black' ? '#F0997B' : '#5DCAA5') : '#8A847A';
+    var modes = PMODES.map(function (m) { return '<button type="button" data-act="projMode" data-mode="' + m[0] + '" class="' + (p.on && p.mode === m[0] ? 'on' : '') + '">' + m[1] + '</button>'; }).join('');
+    var vids = (p.videos || []).map(function (f) {
+      var cur = f === p.video;
+      return '<button type="button" class="row" data-act="projVideo" data-file="' + esc(f) + '" style="min-height:48px;background:#262626"><span class="t" style="font-size:16px">' + esc(f.replace(/\.[^.]+$/, '')) + '</span><span class="r" style="color:#5DCAA5">' + (cur ? (p.on && p.mode === 'loop' ? 'LOOPING' : 'PICKED') : '') + '</span></button>';
+    }).join('');
+    var sets = [['auto', 'On'], ['off', 'Off']].map(function (x) { return '<button type="button" data-act="projSetting" data-v="' + x[0] + '" class="' + (p.setting === x[0] ? 'on' : '') + '">' + x[1] + '</button>'; }).join('');
+    return '<section class="screen" style="gap:14px">' + header('Visuals', { id: 'play', label: 'Play' },
+        '<span class="pill" style="border:none"><span class="dot" style="background:' + dotCol + '"></span>' + (p.on ? 'Projector on' : 'Projector off') + '</span>') +
+      '<div class="card" style="flex-direction:row;align-items:center;gap:12px"><span class="flip visnum">' + esc(w.num) + '</span>' +
+      '<span style="display:flex;flex-direction:column;gap:2px;min-width:0"><span class="label">Now showing</span><span class="vname" style="font-size:20px">' + esc(w.name) + '</span><span class="small">' + esc(w.sub) + '</span></span></div>' +
+      '<div class="seg" style="grid-template-columns:repeat(3,minmax(0,1fr))">' + modes + '</div>' +
+      '<span class="label">Video</span>' +
+      '<div class="group">' + (vids || '<span class="small">No videos on Keystone yet. Send one from Rig, Send files.</span>') + '</div>' +
+      '<span class="label">Projector</span>' +
+      '<div class="seg" style="grid-template-columns:repeat(2,minmax(0,1fr))">' + sets + '</div>' +
+      '<span class="small">On plays the loop whenever a projector is plugged into the Pi\'s HDMI port. Align shows Hev\'s card for lining the picture up with the Max 115\'s grille, badge and hypervent.</span>' +
+      '</section>';
+  }
+
   function updateCard() {
     var u = S.upd, h = S.health, rigV = h ? h.version : '', phoneV = phoneVersion();
     if (!window.KeystoneNative || !KeystoneNative.updateCheck) return '';
@@ -904,6 +949,7 @@ var KS = (function () {
       '<button type="button" class="arrow" data-act="next" aria-label="Next song">' + ICON.right + '</button></div>' +
       saveBar() +
       (K ? '' : modePanel()) +
+      (K ? '' : visualCard()) +
       '<div class="card meter">' + meterSvg() + '<div class="label">Output</div></div>' +
       (K ? '' : S.footMode === 1 ? '<span class="label">Effects in this song (phone only)</span>' : bankBar()) +
       '<div class="stomps' + (!K && S.footMode === 1 ? ' phoneonly' : '') + '">' + stomps + '</div>' + note +
@@ -1550,6 +1596,7 @@ var KS = (function () {
       case 'module': html = kalOn() ? kalToneScreen() : S.schema ? moduleScreen() : playScreen(); break;
       case 'setlist': html = setlistScreen(); break;
       case 'health': html = healthScreen(); break;
+      case 'visuals': html = visualsScreen(); break;
       case 'pairWatch': html = pairWatchScreen(); break;
       case 'recorder': html = recorderScreen(); break;
       case 'take': html = takeScreen(); break;
@@ -1749,6 +1796,9 @@ var KS = (function () {
         send({ t: 'setlist', op: S.save.kind === 'part' ? 'saveNewPart' : 'saveNewSong', i: S.current, name: nm.trim() }); saveClose(); break;
       case 'keep': send({ t: 'keep' }); break;
       case 'updateCheck': updateCheck(true); render(true); break;
+      case 'projMode': send({ t: 'proj', op: 'mode', mode: d.mode }); if (S.health && S.health.proj) { S.health.proj.mode = d.mode; render(true); } break;
+      case 'projSetting': send({ t: 'proj', op: 'setting', v: d.v }); if (S.health && S.health.proj) { S.health.proj.setting = d.v; render(true); } break;
+      case 'projVideo': send({ t: 'proj', op: 'video', file: d.file }); toast('LOOPING'); break;
       case 'filesPick': if (window.KeystoneNative && KeystoneNative.filesPick) KeystoneNative.filesPick(); break;
       case 'filesCancel': if (window.KeystoneNative && KeystoneNative.filesCancel) KeystoneNative.filesCancel(); break;
       case 'filesClear': if (window.KeystoneNative && KeystoneNative.filesClear) KeystoneNative.filesClear(); break;
