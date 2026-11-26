@@ -46,22 +46,25 @@ if [ -d "$PLAYER" ] && ls "$PLAYER"/*.deb >/dev/null 2>&1; then
     if ! [ -x /usr/bin/mpv ]; then
         state "installing"
         export DEBIAN_FRONTEND=noninteractive
-        # a half-finished install from before (a power cut, say) stops apt until it's finished off
+        # a half-finished install from before (a power cut, say) has to be finished off first
         dpkg --configure -a >> "$LOG" 2>&1
-        OUT="$(apt-get install -y -q --no-download --no-install-recommends -o DPkg::Lock::Timeout=180 "$PLAYER"/*.deb 2>&1)"
-        echo "$OUT" >> "$LOG"
+        # 0.6.4: dpkg straight from the carried files. apt (0.6.0 to 0.6.3) saw the same versions
+        # in its own lists and insisted on downloading them, which can't work on Keystone's
+        # Wi-Fi. The set is complete for any Keystone Pi (checked on the 0.5.5 image).
+        # If something else holds the package lock, wait for it, up to three minutes.
+        OUT=""
+        for i in $(seq 1 18); do
+            OUT="$(dpkg -i --skip-same-version "$PLAYER"/*.deb 2>&1)"
+            echo "$OUT" >> "$LOG"
+            echo "$OUT" | grep -qi "lock" || break
+            sleep 10
+        done
+        OUT2=""
         if [ -x /usr/bin/mpv ]; then
             log "Installed the video player for the projector"
         else
-            # once more, letting apt sort out anything half there
-            OUT2="$(apt-get install -y -q --no-download --no-install-recommends --fix-broken -o DPkg::Lock::Timeout=180 "$PLAYER"/*.deb 2>&1)"
-            echo "$OUT2" >> "$LOG"
-        fi
-        if [ -x /usr/bin/mpv ]; then
-            log "Installed the video player for the projector"
-        else
-            WHY="$(printf '%s\n%s\n' "$OUT" "$OUT2" | grep -E '^(E:|dpkg: error| [a-z0-9.+-]+ : Depends)' | head -3 | tr '\n' ' ' | cut -c1-300)"
-            state "failed: ${WHY:-apt gave no reason, see Updates/update.log}"
+            WHY="$(printf '%s\n%s\n' "$OUT" "$OUT2" | grep -E '^(E:|dpkg: error|dpkg: dependency problems| [a-z0-9.+-]+ depends on)' | head -3 | tr '\n' ' ' | cut -c1-300)"
+            state "failed: ${WHY:-dpkg gave no reason, see Updates/update.log}"
             log "Couldn't install the video player: ${WHY:-no reason given}"
             exit 0
         fi
