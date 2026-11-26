@@ -1,7 +1,8 @@
 #pragma once
 // Speckle in Keystone: the whole Speckle engine from Kevin's Speckle plugin (core/src/spk),
-// eleven effects with its filter, pitch mod and space, on the full sound path. Mono in,
-// mono out (the engine's stereo is summed). An octave pitch-up before it is optional.
+// eleven effects with its filter, pitch mod and space, fed the clean bass. Mono in, mono out
+// (the engine's stereo is summed, as Kaleidoscope does). An octave pitch-up before it is
+// optional. With Pitch off it nulls against the plugin (tools/speckle_null.cpp).
 //
 // It only runs while it's switched on (plus a short fade), so it is never heard when off.
 
@@ -87,11 +88,13 @@ public:
         eng.prepare (sr);
         shifter.prepare (sr);
         mixS.setTime (0.05f, sr);
+        dryS.setTime (0.05f, sr);
         reset();
     }
     void reset()
     {
         mixS.reset (0);
+        dryS.reset (1);
         std::fill (std::begin (inL), std::end (inL), 0.0f);
         std::fill (std::begin (outM), std::end (outM), 0.0f);
         idx = 0; activity = 0; running = false;
@@ -104,7 +107,10 @@ public:
         float m = on ? mix : 0.0f;
         // the expression pedal pushes Speckle further in when it's on; it never brings it in
         if (on && bloomActive) m = mix + (1.0f - mix) * bloomZone2 * V (v, P::BloomGrains);
-        mixS.set (m);
+        // Mix as on the Speckle plugin: the wet is full from halfway up, and the dry only
+        // goes down past halfway. Bloom only pushes the wet, never takes the dry away.
+        mixS.set (std::min (1.0f, 2.0f * m));
+        dryS.set (on ? std::min (1.0f, 2.0f * (1.0f - mix)) : 1.0f);
 
         p.effect = std::max (0, std::min ((int) spk::kNumEffects - 1, Vi (v, P::GrEffect)));
         p.variant = Vi (v, P::GrVariant);
@@ -121,13 +127,16 @@ public:
         p.modDepth = V (v, P::GrModDepth);
         p.modRateHz = 0.05f * std::pow (2.0f, V (v, P::GrModRate) * 7.3f);
         p.space = V (v, P::GrSpace);
-        p.echoOnly = light;   // Keystone's own reverb is still there
+        // Speckle keeps its own Space in light mode too, so it always sounds like the plugin
+        (void) light;
+        p.echoOnly = false;
         p.reverbMode = std::max (0, std::min (3, Vi (v, P::GrSpaceType)));
         p.volumeDb = V (v, P::GrVolume);
         p.hold = Vb (v, P::GrHold);
         p.mix = 1.0f;   // all wet: Keystone keeps the dry itself
-        p.inputMode = spk::InputGuitar;   // the full path already has its sub cut
-        p.detectorMode = spk::InputBass;
+        // as the plugin's Input at its default (Guitar), so notes are heard the same way
+        p.inputMode = spk::InputGuitar;
+        p.detectorMode = -1;
         p.bypass = false; p.trails = true;
         p.loopPre = false; p.loopOnly = false;
         p.loopLevel = 0.0f;
@@ -142,6 +151,8 @@ public:
         }
     }
 
+    // what the dry is multiplied by, one sample at a time
+    float dryGain() { return dryS.next(); }
     bool active() const { return mixS.value > 1.0e-4f || mixS.target > 0; }
     float activityLevel() const { return activity; }
 
@@ -176,7 +187,7 @@ private:
     spk::SpeckleEngine eng;
     spk::EngineParams p;
     UpShifter shifter;
-    Smoothed mixS;
+    Smoothed mixS, dryS;
     Rng rng;
     float inL[kBlock] = {}, outM[kBlock] = {};
     int idx = 0, pitchMode = 0, scatterTick = 0;

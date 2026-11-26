@@ -179,7 +179,7 @@ struct ParamInfo
     P(DimPath,        "dim.path",        "Works on",      "dim",     "Path",           Choice, 0,    1,    0,    "",   "Bottom end|Full sound", None) \
     P(GrOn,           "grains.on",       "On",            "grains",  "",               Toggle, 0,    1,    0,    "",   "",   None) \
     P(GrEffect,       "grains.effect",   "Effect",        "grains",  "Effect",         Choice, 0,    10,   3,    "",   "Mosaic|Seq|Glide|Haze|Tunnel|Strum|Blocks|Interrupt|Arp|Pattern|Warp", None) \
-    P(GrVariant,      "grains.variant",  "Variation",     "grains",  "Effect",         Choice, 0,    3,    0,    "",   "A|B|C|D", None) \
+    P(GrVariant,      "grains.variant",  "Variation",     "grains",  "Effect",         Choice, 0,    3,    1,    "",   "A|B|C|D", None) \
     P(GrActivity,     "grains.activity", "Activity",      "grains",  "Movement",       Flip,   0,    1,    0.55f,"%",  "",   None) \
     P(GrRepeats,      "grains.repeats",  "Repeats",       "grains",  "Movement",       Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(GrContour,      "grains.contour",  "Shape",         "grains",  "Movement",       Flip,   0,    1,    0.5f, "%",  "",   None) \
@@ -188,10 +188,10 @@ struct ParamInfo
     P(GrHold,         "grains.hold",     "Hold",          "grains",  "Time",           Toggle, 0,    1,    0,    "",   "",   None) \
     P(GrFilter,       "grains.filter",   "Filter",        "grains",  "Filter and mod", Flip,   0,    1,    1,    "%",  "",   None) \
     P(GrRes,          "grains.res",      "Resonance",     "grains",  "Filter and mod", Flip,   0,    1,    0.2f, "%",  "",   None) \
-    P(GrModDepth,     "grains.modDepth", "Mod depth",     "grains",  "Filter and mod", Flip,   0,    1,    0,    "%",  "",   None) \
-    P(GrModRate,      "grains.modRate",  "Mod rate",      "grains",  "Filter and mod", Flip,   0,    1,    0.4f, "%",  "",   None) \
+    P(GrModDepth,     "grains.modDepth", "Mod depth",     "grains",  "Filter and mod", Flip,   0,    1,    0.12f,"%",  "",   None) \
+    P(GrModRate,      "grains.modRate",  "Mod rate",      "grains",  "Filter and mod", Flip,   0,    1,    0.45f, "%",  "",   None) \
     P(GrSpace,        "grains.space",    "Space",         "grains",  "Space",          Flip,   0,    1,    0.4f, "%",  "",   None) \
-    P(GrSpaceType,    "grains.spaceType","Space type",    "grains",  "Space",          Choice, 0,    3,    2,    "",   "Bright room|Dark medium|Large hall|Ambient", None) \
+    P(GrSpaceType,    "grains.spaceType","Space type",    "grains",  "Space",          Choice, 0,    3,    3,    "",   "Bright room|Dark medium|Large hall|Ambient", None) \
     P(GrPitch,        "grains.pitch",    "Pitch",         "grains",  "Pitch",          Choice, 0,    4,    0,    "",   "Off|Octave|Oct + 5th|2 octaves|Scatter", None) \
     P(GrScatter,      "grains.scatter",  "Movement",      "grains",  "Pitch",          Slider, 0,    1,    0.4f, "%",  "Steady|Scattered", None) \
     P(GrVolume,       "grains.volume",   "Volume",        "grains",  "Output",         Flip,   -12,  12,   0,    "dB", "",   None) \
