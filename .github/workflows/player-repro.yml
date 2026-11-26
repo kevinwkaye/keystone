@@ -26,5 +26,6 @@ jobs:
           echo "== simulate"; sudo chroot /mnt/pi bash -c "DEBIAN_FRONTEND=noninteractive apt-get install -s --no-download --no-install-recommends /tmp/player/*.deb" > sim.txt 2>&1 || true
           grep -vE "^(Inst|Conf) " sim.txt | tail -40; echo "-- Inst lines:"; grep -E "^Inst" sim.txt | head -200
           echo "== would fetch"; grep -E "^Inst" sim.txt | wc -l
-          echo "== real try"; sudo chroot /mnt/pi bash -c "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-download --no-install-recommends /tmp/player/*.deb" 2>&1 | grep -iE "^E:|unable|missing|Err|Get:" | head -40 || true
-          echo "== print-uris of what it wants"; sudo chroot /mnt/pi bash -c "apt-get install -y --print-uris --no-install-recommends /tmp/player/*.deb" 2>&1 | grep "^'" | head -60 || true
+          echo "== sim without no-download"; sudo chroot /mnt/pi bash -c "apt-get install -s --no-install-recommends /tmp/player/*.deb" 2>&1 | grep -E "^Inst|^E:" | head -80
+          echo "== print-uris"; sudo chroot /mnt/pi bash -c "apt-get install -y --print-uris --no-install-recommends /tmp/player/*.deb" 2>&1 | grep -vE "already the newest|set to manually" | tail -40
+          echo "== apt sources and lists"; sudo ls /mnt/pi/var/lib/apt/lists | head; sudo cat /mnt/pi/etc/apt/sources.list.d/* 2>/dev/null | head
