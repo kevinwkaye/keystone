@@ -25,7 +25,7 @@ jobs:
           echo "== in our set"; ls keystone/pi/player | wc -l; ls keystone/pi/player | grep -E "placebo|sdl2|mysofa|libxi6|x11-common|libepoxy|libva-wayland|mujs" || echo none-of-those
           echo "== installed already"; sudo chroot /mnt/pi dpkg-query -W libc6 libgl1 libdrm2 libstdc++6 mesa-libgallium libgbm1 libegl1 2>&1 || true
           echo "== apt with only the local packages"
-          sudo chroot /mnt/pi bash -c 'E=$(mktemp -d); mkdir -p $E/lists/partial; DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-download --no-install-recommends -o Dir::State::Lists=$E/lists -o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts=$E -o Dir::Cache::pkgcache= -o Dir::Cache::srcpkgcache= /tmp/player/*.deb' > real.txt 2>&1; echo "exit $?"
-          grep -E "^E:|newly installed|Setting up mpv" real.txt
-          sudo chroot /mnt/pi mpv --version | head -2
-          sudo chroot /mnt/pi apt-get check && echo APT-CHECK-OK
+          sudo chroot /mnt/pi bash -c 'E=$(mktemp -d); mkdir -p $E/lists/partial; DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-download --no-install-recommends -o Dir::State::Lists=$E/lists -o Dir::Etc::SourceList=/dev/null -o Dir::Etc::SourceParts=$E -o Dir::Cache::pkgcache= -o Dir::Cache::srcpkgcache= /tmp/player/*.deb' > real.txt 2>&1 || echo "apt failed"
+          grep -E "^E:|^W:|newly installed|Setting up mpv|dpkg: error|Depends" real.txt | head -30 || true
+          sudo chroot /mnt/pi mpv --version | head -2 || true
+          sudo chroot /mnt/pi apt-get check && echo APT-CHECK-OK || true
