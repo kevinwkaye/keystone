@@ -80,7 +80,7 @@ struct Engine::Impl
     // Gloss (0.6.1): its voice, and after the preamp its gain and how much clean it keeps
     Gloss gloss;
     Smoothed glossOn, glossClean;
-    std::vector<float> glossBuf, glossG, glossKeep, bitKeep;
+    std::vector<float> glossBuf, glossG, glossKeep, glossSend, bitKeep;
     bool glossWasOn = false;
     DelayLine bitLow;   // the bottom end, lined up with the drive for Bitrot's reference
     bool bitFresh = true;
@@ -266,6 +266,7 @@ void Engine::prepare (double sampleRate, int maxBlockSize)
     d.glossBuf.assign ((size_t) d.maxBlock, 0.0f);
     d.glossG.assign ((size_t) d.maxBlock, 0.0f);
     d.glossKeep.assign ((size_t) d.maxBlock, 1.0f);
+    d.glossSend.assign ((size_t) d.maxBlock, 0.0f);
     d.bitKeep.assign ((size_t) d.maxBlock, 1.0f);
     d.gloss.prepare ((float) s);
     d.glossOn.setTime (0.015f, (float) s); d.glossOn.reset (0);
@@ -750,6 +751,8 @@ void Engine::process (const float* in, float* out, int numSamples)
             const int glossPlace = Vi (v, P::GlossPlace);
             float* gg = d.glossG.data();
             std::fill (gg, gg + n, 0.0f);
+            float* gs = d.glossSend.data();
+            std::fill (gs, gs + n, 0.0f);
             auto runGloss = [&]()
             {
                 const bool active = Vb (v, P::GlossOn) || d.glossOn.current() > 1.0e-4f;
@@ -767,6 +770,7 @@ void Engine::process (const float* in, float* out, int numSamples)
                     const float g = d.glossOn.next();
                     const float keep = 1.0f - g * (1.0f - d.glossClean.next());
                     lm[i] *= keep;
+                    gs[i] = gy[i] * g;   // the pad on its own, for To reverb
                     if (glossPlace == 2) { gg[i] = g; d.glossKeep[(size_t) i] = keep; continue; }
                     hb[i] = hb[i] * keep + gy[i] * g;
                 }
@@ -825,9 +829,11 @@ void Engine::process (const float* in, float* out, int numSamples)
                 const float gr = d.grains.process (grainSrc, playLevel);
                 const float dr = d.droneBuf[(size_t) i];
                 const float droneSend = dr * V (v, P::DroneSend);
+                // To reverb (0.6.9): the pad goes into the reverb wetter than the bass
+                const float padSend = d.glossSend[(size_t) i] * V (v, P::GlossSend) * vg;
                 float dl = 0, rv = 0;
                 if (d.delay.active()) dl = d.delay.process (h + gr);
-                if (d.reverb.active() || droneSend != 0.0f) rv = d.reverb.process (h + gr + dl + droneSend);
+                if (d.reverb.active() || droneSend != 0.0f) rv = d.reverb.process (h + gr + dl + droneSend + padSend);
 
                 // ---- sum, mono out ----
                 // bottom end dry, bottom end wet (Dimension), full sound

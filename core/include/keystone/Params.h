@@ -112,19 +112,27 @@ struct ParamInfo
     P(BitrotPeak,     "bitrot.peak",     "Peak",          "bitrot",  "Pedal (Grit)",   Flip,   0,    1,    0.5f, "%",  "",   None) \
     /* Gloss (0.6.1): the clean synth voice on hold B in Grit, Bitrot's well-behaved sibling */ \
     P(GlossOn,        "gloss.on",        "On",            "gloss",   "",               Toggle, 0,    1,    0,    "",   "",   None) \
-    P(GlossVoice,     "gloss.voice",     "Voice",         "gloss",   "Pad",            Choice, 0,    2,    0,    "",   "Warm|Hollow|Soft", None) \
-    P(GlossPlays,     "gloss.plays",     "Plays",         "gloss",   "Pad",            Choice, 0,    4,    1,    "",   "Octave up|Octave and fifth|Unison|Fifth up|Two octaves", None) \
-    P(GlossSpread,    "gloss.spread",    "Spread",        "gloss",   "Pad",            Flip,   0,    1,    0.5f, "%",  "",   None) \
-    P(GlossWeight,    "gloss.weight",    "Weight",        "gloss",   "Pad",            Flip,   0,    1,    0.2f, "%",  "",   None) \
+    P(GlossVoice,     "gloss.voice",     "Voice",         "gloss",   "Layers",         Choice, 0,    2,    0,    "",   "Warm|Hollow|Soft", None) \
+    P(GlossPlays,     "gloss.plays",     "Plays",         "gloss",   "Layers",         Choice, 0,    5,    1,    "",   "Octave up|Octave and fifth|Open sus2|Unison|Fifth up|Two octaves", None) \
+    P(GlossSpread,    "gloss.spread",    "Spread",        "gloss",   "Layers",         Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(GlossShine,     "gloss.shine",     "Shine",         "gloss",   "Layers",         Flip,   0,    1,    0.2f, "%",  "",   None) \
+    P(GlossAir,       "gloss.air",       "Air",           "gloss",   "Layers",         Flip,   0,    1,    0.15f,"%",  "",   None) \
+    P(GlossWeight,    "gloss.weight",    "Weight",        "gloss",   "Layers",         Flip,   0,    1,    0.2f, "%",  "",   None) \
     P(GlossSettle,    "gloss.settle",    "Settle",        "gloss",   "Following",      Flip,   40,   600,  180,  "ms", "",   Log) \
     P(GlossMove,      "gloss.move",      "Moves by",      "gloss",   "Following",      Choice, 0,    1,    0,    "",   "Fading across|Gliding", None) \
     P(GlossChange,    "gloss.change",    "Change time",   "gloss",   "Following",      Flip,   50,   3000, 450,  "ms", "",   Log) \
     P(GlossRing,      "gloss.ring",      "When you stop", "gloss",   "Following",      Choice, 0,    1,    0,    "",   "Fades away|Rings on", None) \
     P(GlossSwell,     "gloss.swell",     "Swell",         "gloss",   "Envelope",       Flip,   20,   4000, 700,  "ms", "",   Log) \
-    P(GlossFade,      "gloss.fade",      "Fade",          "gloss",   "Envelope",       Flip,   100,  8000, 2500, "ms", "",   Log) \
+    P(GlossFade,      "gloss.fade",      "Fade",          "gloss",   "Envelope",       Flip,   100,  8000, 3000, "ms", "",   Log) \
+    P(GlossBloom,     "gloss.bloom",     "Bloom",         "gloss",   "Envelope",       Flip,   100,  6000, 2000, "ms", "",   Log) \
     P(GlossSens,      "gloss.sens",      "Sensitivity",   "gloss",   "Envelope",       Flip,   0,    1,    0.6f, "%",  "",   None) \
     P(GlossBright,    "gloss.bright",    "Brightness",    "gloss",   "Tone",           Flip,   200,  8000, 1800, "Hz", "",   Log) \
     P(GlossBreathe,   "gloss.breathe",   "Breathe",       "gloss",   "Tone",           Flip,   0,    1,    0.35f,"%",  "",   None) \
+    P(GlossWander,    "gloss.wander",    "Wander",        "gloss",   "Tone",           Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(GlossTouch,     "gloss.touch",     "Touch",         "gloss",   "Tone",           Flip,   0,    1,    0.4f, "%",  "",   None) \
+    P(GlossWarmth,    "gloss.warmth",    "Warmth",        "gloss",   "Tone",           Flip,   0,    1,    0.3f, "%",  "",   None) \
+    P(GlossChorus,    "gloss.chorus",    "Chorus",        "gloss",   "Space",          Flip,   0,    1,    0.5f, "%",  "",   None) \
+    P(GlossSend,      "gloss.send",      "To reverb",     "gloss",   "Space",          Flip,   0,    1,    0.3f, "%",  "",   None) \
     P(GlossClean,     "gloss.clean",     "Clean bass",    "gloss",   "Mix",            Flip,   0,    1,    0.5f, "%",  "",   None) \
     P(GlossLevel,     "gloss.level",     "Level",         "gloss",   "Mix",            Flip,   0,    1,    0.7f, "%",  "",   None) \
     P(GlossPlace,     "gloss.place",     "Goes",          "gloss",   "Mix",            Choice, 0,    2,    2,    "",   "Into drive|After drive|After preamp", None) \

@@ -1,5 +1,5 @@
 #pragma once
-// Gloss (0.6.7): a lush pad under the bass, on hold B in Grit.
+// Gloss (0.6.7, fuller in 0.6.9): a lush pad under the bass, on hold B in Grit.
 //
 // 0.6.1's Gloss was a synth that followed every cycle and fired on every pluck: too close
 // to Bitrot. Now it's a pad that only follows whole notes. It listens to the bass's own
@@ -7,12 +7,23 @@
 // then moves, fading across (or gliding) to the new note. Passing notes, slides, bends and
 // replucks of the same note leave it where it is.
 //
-//  - Voice: five detuned oscillators per layer, saw (Warm), square (Hollow) or triangle
-//    (Soft), each drifting a few cents on its own, so it shimmers like an analogue string
-//    machine. Plays: octave up, octave and fifth, unison, fifth up or two octaves.
-//  - Weight: a sine at the note you play, for body.
-//  - Swell and Fade: it blooms in when you start and trails off when you stop (or Rings on).
-//  - A soft 24 dB low-pass that opens as it swells and slowly breathes.
+// Built the way high-end pads are:
+//  - Thick oscillators: five detuned per layer, saw (Warm), pulse with moving width
+//    (Hollow) or triangle (Soft). Plays: octave up, octave and fifth, open sus2 (octave,
+//    fifth, ninth), unison, fifth up or two octaves.
+//  - Layers with a job each: body (the oscillators), shine (a sine an octave over the top),
+//    air (breathy band-passed noise) and weight (a sine at your note).
+//  - Slow shapes: it swells in, trails off (or rings on), and each new note sweeps the
+//    filter up over the Bloom time.
+//  - Constant movement: slow LFOs on cutoff, pulse width and layer balance, each at its own
+//    rate between 0.1 and 0.5 Hz, plus a pitch drift of its own for every oscillator.
+//  - Wander, the unpredictable bit: slow random walks on brightness, level, layer balance,
+//    shine and every oscillator's pitch, and each note comes out a little different.
+//  - A warm low-pass with a little resonance that opens when you dig in (Touch).
+//  - Saturation for glue (Warmth), then a Juno-style chorus. Space comes from Keystone's
+//    own reverb: To reverb sends the pad in wetter than the bass.
+// Keystone is mono into one amp, so the chorus and drift give the width a stereo spread
+// would.
 #include "Modules.h"
 #include <array>
 
@@ -74,31 +85,46 @@ public:
         dc.prepare (sr);
         detEnv.set (0.001f, 0.03f, sr);
         inEnv.set (0.002f, 0.08f, sr);
+        pickEnv.set (0.0005f, 0.3f, sr);
         onset.prepare (sr);
         playFall = onePoleCoef (4.0f, sr);
-        lvlCoef = onePoleCoef (0.6f, sr / kCtl);
+        const float cr = sr / kCtl;
+        lvlCoef = onePoleCoef (0.6f, cr);
+        easeCoef = onePoleCoef (0.5f, cr);
+        touchCoef = onePoleCoef (1.2f, cr);
+        wanderCoef = onePoleCoef (1.8f, cr);    // the random walks: a couple of seconds to turn
         hpCoef = std::exp (-kTwoPi * 45.0f / sr);
-        easeCoef = onePoleCoef (0.5f, sr / kCtl);
+        bbdCoef = std::exp (-kTwoPi * 7000.0f / sr);
+        chorusLen = (int) chorusBuf.size();
+        // every slow movement gets its own rate between 0.1 and 0.5 Hz, so they never line up
+        for (auto& r : lfoRate) r = 0.1f + 0.4f * rnd();
+        for (int o = 0; o < kOsc; ++o) { driftRate[o] = 0.1f + 0.4f * rnd(); driftPh[o] = rnd(); }
         reset();
     }
 
     void reset()
     {
         det1.reset(); det2.reset(); dc.reset();
-        detEnv.reset(); inEnv.reset(); onset.reset();
-        f1.reset(); f2.reset();
+        detEnv.reset(); inEnv.reset(); pickEnv.reset(); onset.reset();
+        f1.reset(); f2.reset(); airF.reset();
         high = false; dPrev = 0; sincePrev = 0; sinceAny = 0; lastRaw = 0; smoothPeriod = 0;
-        playLvl = 0.05f; padLvl = 0; gateOpen = false;
+        playLvl = 0.05f; padLvl = 0; gateOpen = false; touch = 1;
         cand = kNone; stable = 0; cur = kNone; tuneOff = 0; tuned = false; devSum = 0; devCount = 0;
-        amp = 0; ampTarget = 0; ctl = 0; breathPh = 0; hpX = hpY = 0;
+        amp = 0; ampTarget = 0; bloomLvl = 1; ctl = 0; hpX = hpY = 0; bbd = 0;
+        chorusBuf.fill (0.0f); chorusPos = 0; chorusPh = 0;
+        for (auto& w : walk) w = 0;
+        for (auto& w : walkTarget) w = 0;
+        walkCount = 0;
         for (auto& vc : voices) vc.gain = vc.target = 0, vc.note = kNone;
     }
 
     void update (const Vals& v)
     {
         voiceType = std::clamp (Vi (v, P::GlossVoice), 0, 2);
-        plays = std::clamp (Vi (v, P::GlossPlays), 0, 4);
+        plays = std::clamp (Vi (v, P::GlossPlays), 0, 5);
         spread = clampf (V (v, P::GlossSpread), 0.0f, 1.0f);
+        shine = V (v, P::GlossShine);
+        air = V (v, P::GlossAir);
         weight = V (v, P::GlossWeight);
         settle = V (v, P::GlossSettle) * 0.001f * sr;
         glide = Vi (v, P::GlossMove) == 1;
@@ -106,9 +132,14 @@ public:
         ringOn = Vi (v, P::GlossRing) == 1;
         swellCoef = onePoleCoef (V (v, P::GlossSwell) * 0.001f / 3.0f, sr / kCtl);
         fadeCoef = onePoleCoef (V (v, P::GlossFade) * 0.001f / 4.0f, sr / kCtl);
+        bloomCoef = onePoleCoef (V (v, P::GlossBloom) * 0.001f / 3.0f, sr / kCtl);
         sens = V (v, P::GlossSens);
         bright = V (v, P::GlossBright);
         breathe = V (v, P::GlossBreathe);
+        wander = V (v, P::GlossWander);
+        touchAmt = V (v, P::GlossTouch);
+        warmth = V (v, P::GlossWarmth);
+        chorus = V (v, P::GlossChorus);
         level = V (v, P::GlossLevel);
     }
 
@@ -121,20 +152,26 @@ public:
     bool sounding() const { return amp > 1.0e-5f || ampTarget > 0; }
     // the note the pad is on (MIDI number), or -1
     int note() const { return cur == kNone ? -1 : cur; }
+    // where the filter sits (Hz), for the tests
+    float cutoff() const { return fcNow; }
 
 private:
     static constexpr int kNone = -1000;
     static constexpr int kCtl = 16;    // control rate: pitch, drift, envelopes, filter
     static constexpr int kOsc = 5;     // detuned oscillators per layer
+    static constexpr int kLayers = 3;
     static constexpr int kVoices = 3;  // one sounding, up to two fading out
+    static constexpr int kWalks = 4;   // Wander: brightness, level, layer balance, shine
 
     struct Voice
     {
         int note = -1000;
         float gain = 0, target = 0, step = 0;
         float hz = 0, wantHz = 0;   // the played note (glide moves hz to wantHz)
-        float ph[2][kOsc] {}, inc[2][kOsc] {};
-        float subPh = 0, subInc = 0;
+        float ph[kLayers][kOsc] {}, inc[kLayers][kOsc] {};
+        float subPh = 0, subInc = 0, shinePh = 0, shineInc = 0;
+        // Wander: each note comes out a little different
+        float detuneScale = 1, oscCents[kOsc] {}, oscWalk[kOsc] {}, oscWalkTarget[kOsc] {};
     };
 
     static float blep (float t, float dt)
@@ -144,7 +181,8 @@ private:
         return 0.0f;
     }
 
-    // one detuned oscillator: saw (Warm), square (Hollow) or triangle (Soft)
+    // one detuned oscillator: saw (Warm), pulse with slow width movement (Hollow) or
+    // triangle (Soft)
     float wave (float t, float dt) const
     {
         switch (voiceType)
@@ -152,9 +190,9 @@ private:
             case 0: return 2.0f * t - 1.0f - blep (t, dt);
             case 1:
             {
-                float y = t < 0.5f ? 1.0f : -1.0f;
+                float y = t < pw ? 1.0f : -1.0f;
                 y += blep (t, dt);
-                float t2 = t + 0.5f; if (t2 >= 1.0f) t2 -= 1.0f;
+                float t2 = t + 1.0f - pw; if (t2 >= 1.0f) t2 -= 1.0f;
                 return y - blep (t2, dt);
             }
             default: return 1.0f - 4.0f * std::fabs (t - 0.5f);
@@ -162,12 +200,14 @@ private:
     }
 
     float rnd() { seed = seed * 1664525u + 1013904223u; return (float) (seed >> 8) * (1.0f / 16777216.0f); }
+    float rnd2() { return 2.0f * rnd() - 1.0f; }
 
     static float noteHz (float note) { return 440.0f * std::pow (2.0f, (note - 69.0f) / 12.0f); }
 
     void startVoice (int note)
     {
         const float hz = noteHz ((float) note + tuneOff);
+        bloomLvl = 0;   // each new note sweeps the filter up again
         if (glide && amp > 0.02f && voices[0].gain > 0)
         {
             // one voice that slides to the new note
@@ -193,36 +233,55 @@ private:
         vc.step = 1.0f / changeSamples;
         if (fresh) vc.gain = 1;
         for (auto& row : vc.ph) for (auto& p : row) p = rnd();   // free phases: no hard attack
-        vc.subPh = 0;
+        vc.subPh = 0; vc.shinePh = rnd();
+        // Wander: a slightly different spread and a few cents of its own for each oscillator
+        vc.detuneScale = 1.0f + 0.3f * wander * rnd2();
+        for (int o = 0; o < kOsc; ++o) { vc.oscCents[o] = 4.0f * wander * rnd2(); vc.oscWalk[o] = vc.oscWalkTarget[o] = 0; }
     }
 
     // the layers each "Plays" choice sounds, as ratios of the played note, and their levels
-    void layers (float (&r)[2], float (&g)[2]) const
+    void layers (float (&r)[kLayers], float (&g)[kLayers]) const
     {
+        for (int l = 0; l < kLayers; ++l) r[l] = 1.0f, g[l] = 0.0f;
         switch (plays)
         {
-            case 0: r[0] = 2.0f; g[0] = 1.0f; r[1] = 0; g[1] = 0; break;     // Octave up
-            case 1: r[0] = 2.0f; g[0] = 1.0f; r[1] = 3.0f; g[1] = 0.6f; break;  // Octave and fifth
-            case 2: r[0] = 1.0f; g[0] = 1.0f; r[1] = 0; g[1] = 0; break;     // Unison
-            case 3: r[0] = 1.5f; g[0] = 1.0f; r[1] = 0; g[1] = 0; break;     // Fifth up
-            default: r[0] = 2.0f; g[0] = 1.0f; r[1] = 4.0f; g[1] = 0.55f; break; // Two octaves
+            case 0: r[0] = 2.0f; g[0] = 1.0f; break;                                             // Octave up
+            case 1: r[0] = 2.0f; g[0] = 1.0f; r[1] = 3.0f; g[1] = 0.6f; break;                     // Octave and fifth
+            case 2: r[0] = 2.0f; g[0] = 1.0f; r[1] = 3.0f; g[1] = 0.55f; r[2] = 4.5f; g[2] = 0.4f; break; // Open sus2: octave, fifth, ninth
+            case 3: r[0] = 1.0f; g[0] = 1.0f; break;                                             // Unison
+            case 4: r[0] = 1.5f; g[0] = 1.0f; break;                                             // Fifth up
+            default: r[0] = 2.0f; g[0] = 1.0f; r[1] = 4.0f; g[1] = 0.55f; break;                   // Two octaves
         }
     }
 
     void control()
     {
-        // pitch, detune and drift for every voice that's sounding
-        float r[2], g[2];
+        float r[kLayers], g[kLayers];
         layers (r, g);
+        float top = 1.0f;
+        for (int l = 0; l < kLayers; ++l) if (g[l] > 0) top = std::max (top, r[l]);
+        const float dtc = (float) kCtl / sr;
         static const float spreadCents[kOsc] = { 0.0f, -11.0f, 11.0f, -23.0f, 23.0f };
-        breathPh += 0.11f * kCtl / sr;
-        if (breathPh >= 1.0f) breathPh -= 1.0f;
+
+        // the slow LFOs: filter, pulse width, layer balance, each at its own rate
+        for (int k = 0; k < 3; ++k) { lfoPh[k] += lfoRate[k] * dtc; if (lfoPh[k] >= 1.0f) lfoPh[k] -= 1.0f; }
+        const float lfoCut = std::sin (kTwoPi * lfoPh[0]);
+        pw = 0.5f - 0.2f * (0.5f + 0.5f * breathe) * (0.5f + 0.5f * std::sin (kTwoPi * lfoPh[1]));
+        const float lfoBal = std::sin (kTwoPi * lfoPh[2]);
+
+        // Wander: slow random walks that pick a new place every few seconds and drift to it
+        if (--walkCount <= 0)
+        {
+            walkCount = (int) ((2.5f + 4.0f * rnd()) / dtc);
+            for (auto& t : walkTarget) t = rnd2();
+        }
+        for (int k = 0; k < kWalks; ++k) walk[k] = walkTarget[k] + (walk[k] - walkTarget[k]) * wanderCoef;
+
         for (int o = 0; o < kOsc; ++o)
         {
-            // each oscillator wanders a few cents on its own slow path
-            driftPh[o] += driftRate[o] * kCtl / sr;
+            driftPh[o] += driftRate[o] * dtc;
             if (driftPh[o] >= 1.0f) driftPh[o] -= 1.0f;
-            drift[o] = std::sin (kTwoPi * driftPh[o]) * 3.5f * spread;
+            drift[o] = std::sin (kTwoPi * driftPh[o]) * 3.0f * spread;
         }
         for (auto& vc : voices)
         {
@@ -231,27 +290,51 @@ private:
             // the pad eases into tune over half a second
             if (vc.note != kNone) vc.wantHz = noteHz ((float) vc.note + tuneOff);
             vc.hz = vc.wantHz + (vc.hz - vc.wantHz) * (glide ? glideCoef() : easeCoef);
-            for (int l = 0; l < 2; ++l)
+            for (int o = 0; o < kOsc; ++o)
+            {
+                // each oscillator's own random pitch walk, like old analogue gear
+                if (rnd() < dtc * 0.4f) vc.oscWalkTarget[o] = rnd2();
+                vc.oscWalk[o] = vc.oscWalkTarget[o] + (vc.oscWalk[o] - vc.oscWalkTarget[o]) * wanderCoef;
+            }
+            for (int l = 0; l < kLayers; ++l)
+            {
+                if (g[l] <= 0) continue;
                 for (int o = 0; o < kOsc; ++o)
                 {
-                    const float cents = spreadCents[o] * spread + drift[o];
+                    const float cents = spreadCents[o] * spread * vc.detuneScale + drift[o]
+                                      + (vc.oscCents[o] + 5.0f * vc.oscWalk[o]) * wander;
                     vc.inc[l][o] = clampf (vc.hz * r[l] * std::pow (2.0f, cents / 1200.0f) / sr, 0.0f, 0.45f);
                 }
+            }
             vc.subInc = vc.hz / sr;
+            vc.shineInc = clampf (vc.hz * top * 2.0f / sr, 0.0f, 0.45f);
         }
-        layerGain[0] = g[0]; layerGain[1] = g[1];
+        // the layers above the first breathe against each other a little
+        for (int l = 0; l < kLayers; ++l)
+            layerGain[l] = g[l] * (l == 0 ? 1.0f : 1.0f + 0.25f * breathe * lfoBal + 0.3f * wander * walk[2]);
+        shineNow = shine * (1.0f + 0.6f * wander * walk[3]);
 
-        // the swell and the fade
+        // the swell, the fade and the bloom
         amp = ampTarget + (amp - ampTarget) * (ampTarget > amp ? swellCoef : fadeCoef);
         if (amp < 1.0e-5f && ampTarget <= 0) amp = 0;
+        bloomLvl = 1.0f + (bloomLvl - 1.0f) * bloomCoef;
         padLvl = playLvl + (padLvl - playLvl) * lvlCoef;
+        levelWander = 1.0f + 0.12f * wander * walk[1];   // about 1 dB at full Wander
 
-        // the filter blooms open as the pad swells in, and breathes
-        const float open = std::pow (2.0f, -1.3f * (1.0f - amp));
-        const float br = std::pow (2.0f, 0.7f * breathe * std::sin (kTwoPi * breathPh));
-        const float fc = clampf (bright * open * br, 60.0f, sr * 0.45f);
-        f1.set (fc, 0.15f, sr);
+        // dig in and it opens up: how hard you're playing against your usual level
+        const float hard = clampf (pickEnv.env / std::max (playLvl, 1.0e-4f), 0.3f, 1.5f);
+        touch = hard + (touch - hard) * touchCoef;
+
+        // the filter: opens as the pad swells, sweeps up on each new note, breathes,
+        // wanders and follows how hard you play
+        const float oct = -1.3f * (1.0f - amp) - 1.0f * (1.0f - bloomLvl)
+                        + 0.7f * breathe * lfoCut + 0.45f * wander * walk[0]
+                        + 1.2f * touchAmt * (touch - 0.8f);
+        const float fc = clampf (bright * std::pow (2.0f, oct), 60.0f, sr * 0.45f);
+        fcNow = fc;
+        f1.set (fc, 0.3f, sr);
         f2.set (fc, 0.0f, sr);
+        airF.set (clampf (fc * 1.6f, 300.0f, sr * 0.4f), 0.25f, sr);
     }
 
     float glideCoef() const { return std::exp (-3.0f * kCtl / changeSamples); }
@@ -259,6 +342,7 @@ private:
     void listen (float x)
     {
         const float e = inEnv.process (x);
+        pickEnv.process (x);
         playLvl = std::max (playLvl * playFall, e);
         playLvl = std::max (playLvl, 1.0e-3f);
         const float thr = playLvl * (0.25f - 0.22f * sens);
@@ -306,7 +390,7 @@ private:
     // pad moves once the same note has held for the settle time, so quick passing notes,
     // slides, bends, ghost notes and the wobble of a fresh pluck never move it, and plucking
     // the same note again never restarts it. Notes snap to the semitone, offset by how your
-    // bass is tuned (learnt slowly from settled notes), so the pad sits in tune with you.
+    // bass is tuned (learnt from settled notes), so the pad sits in tune with you.
     void cycle (float len, float e)
     {
         if (! gateOpen) return;
@@ -333,10 +417,12 @@ private:
         if (ctl-- <= 0) { ctl = kCtl - 1; control(); }
         if (amp <= 0 && ampTarget <= 0)
         {
-            if (quiet < (int) (0.25f * sr)) ++quiet; else return 0.0f;
+            if (quiet < (int) (0.5f * sr)) ++quiet; else return 0.0f;   // lets the chorus empty
         }
         else quiet = 0;
 
+        // ---- the layers: body (the detuned oscillators), shine (a sine an octave over the
+        // top) and weight (a sine at your note) ----
         float sum = 0;
         for (auto& vc : voices)
         {
@@ -344,7 +430,7 @@ private:
                 vc.gain = vc.target > vc.gain ? std::min (vc.target, vc.gain + vc.step) : std::max (vc.target, vc.gain - vc.step);
             if (vc.gain <= 0) continue;
             float v = 0;
-            for (int l = 0; l < 2; ++l)
+            for (int l = 0; l < kLayers; ++l)
             {
                 if (layerGain[l] <= 0) continue;
                 float lv = 0;
@@ -360,26 +446,71 @@ private:
             }
             vc.subPh += vc.subInc;
             if (vc.subPh >= 1.0f) vc.subPh -= 1.0f;
-            v = v * 0.28f + std::sin (kTwoPi * vc.subPh) * weight * 0.9f;
+            vc.shinePh += vc.shineInc;
+            if (vc.shinePh >= 1.0f) vc.shinePh -= 1.0f;
+            v = v * 0.28f + std::sin (kTwoPi * vc.subPh) * weight * 0.9f + std::sin (kTwoPi * vc.shinePh) * shineNow * 0.5f;
             // equal power across a fade: the voices are unrelated, so their powers add
             sum += v * std::sin (vc.gain * kPi * 0.5f);
         }
 
-        // gentle 24 dB low-pass, then a little low cut so the pad stays off the bass's toes
+        // warm 24 dB low-pass with a little resonance
         float lp, bp, y;
         f1.process (sum, lp, bp);
         f2.process (lp, y, bp);
+
+        // air: breathy noise, band-passed just above the filter
+        if (air > 0)
+        {
+            float alp, abp;
+            airF.process (rnd2(), alp, abp);
+            y += abp * air * 0.7f;
+        }
+
+        // saturation for glue: a soft tape-like curve, a touch lopsided for warmth
+        if (warmth > 0)
+        {
+            const float k = 0.5f + 1.5f * warmth;
+            const float sat = std::tanh (k * (y + 0.08f * warmth * y * y)) / k;
+            y += (sat - y) * warmth;
+        }
+
+        // Juno-style chorus: a short delay swept by a slow triangle, two taps in opposite
+        // directions, a little darker like a bucket brigade
+        if (chorus > 0)
+        {
+            chorusBuf[(size_t) chorusPos] = y;
+            chorusPh += 0.48f / sr;
+            if (chorusPh >= 1.0f) chorusPh -= 1.0f;
+            const float tri = 1.0f - 4.0f * std::fabs (chorusPh - 0.5f);   // -1..1
+            const float base = 0.0055f * sr, depth = 0.0022f * sr;
+            const float wet = 0.5f * (readChorus (base + depth * tri) + readChorus (base - depth * tri));
+            bbd = undenorm (wet + (bbd - wet) * bbdCoef);
+            y = y * (1.0f - 0.35f * chorus) + bbd * 0.75f * chorus;
+            chorusPos = (chorusPos + 1) % chorusLen;
+        }
+
+        // a little low cut so the pad stays off the bass's toes
         hpY = undenorm (hpCoef * (hpY + y - hpX));
         hpX = y;
-        return undenorm (hpY * amp * padLvl * level * 2.6f);
+        return undenorm (hpY * amp * padLvl * level * levelWander * 2.6f);
+    }
+
+    float readChorus (float delay) const
+    {
+        float pos = (float) chorusPos - delay;
+        while (pos < 0) pos += (float) chorusLen;
+        const int i0 = (int) pos;
+        const float f = pos - (float) i0;
+        const float a = chorusBuf[(size_t) i0], b = chorusBuf[(size_t) ((i0 + 1) % chorusLen)];
+        return a + (b - a) * f;
     }
 
     float sr = 48000;
     Biquad det1, det2;
     DcBlock dc;
-    Follower detEnv, inEnv;
+    Follower detEnv, inEnv, pickEnv;
     OnsetDetector onset;
-    Svf f1, f2;
+    Svf f1, f2, airF;
     Voice voices[kVoices];
     bool high = false, gateOpen = false, glide = false, ringOn = false;
     float sinceAny = 0, lastRaw = 0, dPrev = 0, sincePrev = 0, smoothPeriod = 0;
@@ -388,14 +519,20 @@ private:
     float stable = 0, tuneOff = 0, devSum = 0, easeCoef = 0.99f;
     int devCount = 0;
     bool tuned = false;
-    float amp = 0, ampTarget = 0, swellCoef = 0.99f, fadeCoef = 0.99f;
-    float breathPh = 0, hpCoef = 0.99f, hpX = 0, hpY = 0;
-    float drift[kOsc] {}, driftPh[kOsc] { 0.0f, 0.31f, 0.57f, 0.12f, 0.84f };
-    const float driftRate[kOsc] { 0.13f, 0.21f, 0.17f, 0.27f, 0.09f };
-    float layerGain[2] { 1.0f, 0.0f };
+    float amp = 0, ampTarget = 0, swellCoef = 0.99f, fadeCoef = 0.99f, bloomLvl = 1, bloomCoef = 0.99f;
+    float hpCoef = 0.99f, hpX = 0, hpY = 0, fcNow = 0;
+    float touch = 1, touchCoef = 0.99f, wanderCoef = 0.99f, levelWander = 1;
+    float lfoPh[3] { 0.0f, 0.33f, 0.66f }, lfoRate[3] { 0.11f, 0.23f, 0.37f };
+    float drift[kOsc] {}, driftPh[kOsc] {}, driftRate[kOsc] {};
+    float walk[kWalks] {}, walkTarget[kWalks] {};
+    int walkCount = 0;
+    float layerGain[kLayers] { 1.0f, 0.0f, 0.0f }, shineNow = 0, pw = 0.5f;
+    std::array<float, 1024> chorusBuf {};
+    int chorusPos = 0, chorusLen = 1024;
+    float chorusPh = 0, bbd = 0, bbdCoef = 0.5f;
     uint32_t seed = 0x6c6f7373u;
     int voiceType = 0, plays = 1;
-    float spread = 0.5f, weight = 0.2f, settle = 8000, changeSamples = 20000;
-    float sens = 0.6f, bright = 1800, breathe = 0.35f, level = 0.7f;
+    float spread = 0.5f, shine = 0.2f, air = 0.15f, weight = 0.2f, settle = 8000, changeSamples = 20000;
+    float sens = 0.6f, bright = 1800, breathe = 0.35f, wander = 0.3f, touchAmt = 0.4f, warmth = 0.3f, chorus = 0.5f, level = 0.7f;
 };
 } // namespace ks
