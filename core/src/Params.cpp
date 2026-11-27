@@ -46,9 +46,6 @@ const char* showIf (P p)
         case P::BitrotFmDepth: return "bitrot.fm=1";
         case P::BitrotPeak: return "bitrot.pedal=2|3";
         case P::WatchReverse: return "watch.motion=1";
-        case P::GlossPw: return "gloss.wave=0";
-        case P::GlossInterval: case P::GlossGlide: return "gloss.track=1";
-        case P::GlossA: case P::GlossD: case P::GlossS: case P::GlossR: case P::GlossVel: return "gloss.env=1";
         default: return "";
     }
 }
@@ -62,7 +59,7 @@ const ModuleInfo* moduleTable (int& count)
         { "drone", "Drone", "Bottom wet", "Capture, duck, octave, dimension" },
         { "drive", "Drive", "Full sound", "Edge and Drive voices" },
         { "bitrot", "Bitrot", "Full sound", "Tracking synth: square, sub, oscillator" },
-        { "gloss", "Gloss", "Full sound", "Clean synth: waves, ADSR, filter. Hold B in Grit" },
+        { "gloss", "Gloss", "Full sound", "Lush pad on the notes you hold. Hold B in Grit" },
         { "preamp", "Preamp", "Full sound", "Valve, tone stack, Cut and tape" },
         { "filter", "Filter", "Full sound", "Envelope or manual" },
         { "wah", "Wah", "Full sound", "Pedal wah, tap C in Groove" },

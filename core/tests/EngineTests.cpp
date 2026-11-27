@@ -865,9 +865,9 @@ static void testBitrotSynth()
 }
 
 // ---------------------------------------------------------------------------------------
-// Gloss (0.6.1): the clean synth. It rides the bass's crossings, so it plays the note you
-// play at once, its sub sits an octave down, Tracked plays the interval, it lands near your
-// playing level and it falls silent after the note.
+// Gloss (0.6.7): the pad. It only follows whole notes: a held note moves it, a quick passing
+// note, vibrato or a repluck of the same note doesn't. It plays the octave (and fifth) of the
+// note you hold, lands near your playing level, fades when you stop or rings on.
 static void testGloss()
 {
     std::printf ("Gloss\n");
@@ -877,57 +877,91 @@ static void testGloss()
         neutral (e);
         e.setParam (P::GlossOn, 1);
         e.setParam (P::GlossClean, 0);
-        e.setParam (P::GlossSub, 0);
-        e.setParam (P::GlossCutoff, 8000);
-        e.setParam (P::GlossEnvAmt, 0);
+        e.setParam (P::GlossWeight, 0);
+        e.setParam (P::GlossSpread, 0);
+        e.setParam (P::GlossBreathe, 0);
+        e.setParam (P::GlossPlays, 0);   // octave up: one line to look for
     };
-    auto in = pluck (55.0, 1.5, 0.4, 3.0);   // A on the E string
-    in.resize (in.size() + (size_t) (1.5 * kSr), 0.0f);
-    const size_t a = (size_t) (0.4 * kSr), n = (size_t) (0.5 * kSr);
+    auto cat = [] (std::vector<float> a, const std::vector<float>& b) { a.insert (a.end(), b.begin(), b.end()); return a; };
+    auto at = [] (double s) { return (size_t) (s * kSr); };
+    const size_t w = at (0.4);
     {
+        // a held A: the pad comes in an octave up, in tune, near your playing level
         Engine e; make (e);
+        auto in = pluck (55.0, 3.0, 0.4, 4.0);
+        in.resize (in.size() + at (6.0), 0.0f);
         const auto out = render (e, in);
-        const double f1 = toneAt (out, a, n, 55.0), sub = toneAt (out, a, n, 27.5);
-        double clarity = 0;
-        const double heard = yinPitch (out.data() + a, 4096, kSr, 30.0, 400.0, clarity);
         bool finite = true;
         for (float y : out) finite = finite && std::isfinite (y);
         CHECK (finite, "Gloss never makes a NaN or an infinity");
-        CHECK (f1 > 0.01 && f1 > 4 * sub && std::fabs (1200.0 * std::log2 (heard / 55.0)) < 15.0, "Instant square plays the note (%.2f Hz, level %.3f)", heard, f1);
-        const double tail = rms (out.data() + (size_t) (2.4 * kSr), (size_t) (0.4 * kSr));
-        CHECK (tail < 1.0e-4, "after the note it falls silent (%.6f)", tail);
+        double clarity = 0;
+        const double heard = yinPitch (out.data() + at (2.0), 4096, kSr, 60.0, 400.0, clarity);
+        CHECK (std::fabs (1200.0 * std::log2 (heard / 110.0)) < 10.0, "a held A: the pad plays the octave (%.2f Hz)", heard);
         Engine dry; dry.prepare (kSr, 128); neutral (dry);
         const auto ref = render (dry, in);
-        const double ratio = rms (out.data() + a, n) / std::max (1.0e-9, rms (ref.data() + a, n));
+        const double ratio = rms (out.data() + at (1.6), w) / std::max (1.0e-9, rms (ref.data() + at (1.6), w));
         CHECK (ratio > 0.25 && ratio < 4.0, "it lands near your playing level (%.2f times the clean bass)", ratio);
+        const double early = rms (out.data() + at (0.05), at (0.1));
+        CHECK (early < 0.3 * rms (out.data() + at (1.6), w), "it swells in rather than hitting with the pluck (%.4f)", early);
+        const double tail = rms (out.data() + out.size() - at (0.5), at (0.5));
+        CHECK (tail < 1.0e-4, "after you stop it fades to silence (%.6f)", tail);
     }
     {
+        // a quick passing note between two held As never moves it
         Engine e; make (e);
-        e.setParam (P::GlossWaveLvl, 0); e.setParam (P::GlossSub, 1);
+        auto in = cat (cat (pluck (55.0, 1.5, 0.4, 4.0), pluck (65.41, 0.09, 0.4, 4.0)), pluck (55.0, 1.5, 0.4, 4.0));
         const auto out = render (e, in);
-        const double sub = toneAt (out, a, n, 27.5), f1 = toneAt (out, a, n, 55.0);
-        CHECK (sub > 0.005 && sub > 2 * f1, "the sub sits an octave down (27.5 Hz %.3f, 55 Hz %.3f)", sub, f1);
+        const double wrong = toneAt (out, at (1.55), w, 130.81), right = toneAt (out, at (1.55), w, 110.0);
+        CHECK (right > 0.005 && wrong < 0.1 * right, "a 90 ms passing C leaves it on A (A %.4f, C %.4f)", right, wrong);
     }
     {
+        // a held new note moves it, fading across
         Engine e; make (e);
-        e.setParam (P::GlossTrack, 1); e.setParam (P::GlossInterval, 1); e.setParam (P::GlossWave, 1);
+        auto in = cat (pluck (55.0, 1.5, 0.4, 4.0), pluck (73.42, 2.0, 0.4, 4.0));
         const auto out = render (e, in);
-        const double up = toneAt (out, a, n, 110.0), root = toneAt (out, a, n, 55.0);
-        CHECK (up > 0.01 && up > 3 * root, "Tracked, octave up: plays 110 Hz (%.3f) over 55 Hz (%.3f)", up, root);
-    }
-    {
-        // a change of note: it follows straight away
-        Engine e; make (e);
-        auto line = pluck (41.2, 0.6, 0.4, 3.0);
-        const auto g = pluck (98.0, 0.8, 0.4, 3.0);
-        line.insert (line.end(), g.begin(), g.end());
-        const auto out = render (e, line);
         double clarity = 0;
-        const double heard = yinPitch (out.data() + (size_t) (0.68 * kSr), 4096, kSr, 30.0, 400.0, clarity);
-        CHECK (std::fabs (1200.0 * std::log2 (heard / 98.0)) < 15.0, "a new note: it plays G within 80 ms (%.2f Hz)", heard);
+        const double heard = yinPitch (out.data() + at (2.9), 4096, kSr, 60.0, 400.0, clarity);
+        CHECK (std::fabs (1200.0 * std::log2 (heard / 146.83)) < 10.0, "a held D moves it to D (%.2f Hz)", heard);
+        const double early = toneAt (out, at (1.52), at (0.1), 146.83), old = toneAt (out, at (1.52), at (0.1), 110.0);
+        CHECK (early < old, "and it waits for the note to settle first (D %.4f, A %.4f)", early, old);
+    }
+    {
+        // vibrato around A (20 cents either way) stays on A, rock steady
+        Engine e; make (e);
+        std::vector<float> in (at (3.0));
+        double ph = 0;
+        for (size_t i = 0; i < in.size(); ++i)
+        {
+            const double t = i / kSr;
+            ph += 55.0 * std::pow (2.0, 0.2 / 12.0 * std::sin (2 * M_PI * 5.5 * t)) / kSr;
+            in[i] = (float) (0.4 * std::min (1.0, t / 0.005) * (std::sin (2 * M_PI * ph) + 0.3 * std::sin (4 * M_PI * ph)));
+        }
+        const auto out = render (e, in);
+        double clarity = 0;
+        const double heard = yinPitch (out.data() + at (2.2), 8192, kSr, 60.0, 400.0, clarity);
+        CHECK (std::fabs (1200.0 * std::log2 (heard / 110.0)) < 6.0 && clarity > 0.8, "vibrato doesn't wobble it (%.2f Hz, clarity %.2f)", heard, clarity);
+    }
+    {
+        // replucking the same note doesn't restart it: no dip, no new swell
+        Engine e; make (e);
+        std::vector<float> in;
+        for (int k = 0; k < 6; ++k) in = cat (in, pluck (55.0, 0.5, 0.4, 2.0));
+        const auto out = render (e, in);
+        double lo = 1e9, hi = 0;
+        for (double t = 1.5; t < 2.9; t += 0.05) { const double r = rms (out.data() + at (t), at (0.05)); lo = std::min (lo, r); hi = std::max (hi, r); }
+        CHECK (hi > 0 && lo > 0.6 * hi, "replucks of the same note keep it steady (%.2f)", lo / std::max (hi, 1e-9));
+    }
+    {
+        // Rings on: it holds after you stop
+        Engine e; make (e); e.setParam (P::GlossRing, 1);
+        auto in = pluck (55.0, 1.5, 0.4, 3.0);
+        in.resize (in.size() + at (4.0), 0.0f);
+        const auto out = render (e, in);
+        CHECK (rms (out.data() + at (5.0), w) > 0.3 * rms (out.data() + at (1.2), w), "Rings on: it holds after you stop");
     }
     {
         // Gloss off costs nothing and changes nothing
+        auto in = pluck (55.0, 1.5, 0.4, 3.0);
         Engine e; make (e); e.setParam (P::GlossOn, 0);
         Engine dry; dry.prepare (kSr, 128); neutral (dry);
         const auto out = render (e, in), ref = render (dry, in);

@@ -9,7 +9,7 @@
 | Measure | Result | Mark |
 |---|---|---|
 | Noise floor, song default | -240.0 dBFS | under -120 |
-| Noise floor, everything on | -240.0 dBFS | under -120 |
+| Noise floor, everything on | -145.8 dBFS | under -120 |
 | Aliasing, Clean path (reference) | -122.3 dB | under -110 |
 | Aliasing, Drive, model, 2.1 kHz hard | -89.8 dB | under -80 |
 | Aliasing, Drive, model, 330 Hz hard | -83.5 dB | under -78 |
@@ -19,29 +19,31 @@
 | Aliasing, Preamp flipped to Cut, 2.1 kHz | -73.2 dB | under -70 |
 | Aliasing, Output iron at full, 110 Hz | -83.0 dB | under -80 |
 | Aliasing, Limiter working hard, 2.1 kHz | -77.5 dB | under -74 |
+| Aliasing, Gloss pad saw, 220 Hz, bright | -68.2 dB | under -64 |
+| Aliasing, Gloss pad square, 330 Hz, bright | -69.2 dB | under -64 |
 | Level jump, Drive on | +0.5 dB | within 1.5 |
 | Level jump, Valve preamp on | +1.3 dB | within 2.0 |
 | Level jump, Dimension on | +0.0 dB | within 1.0 |
 | Level jump, Low compressor on | +1.5 dB | within 2.0 |
 | Level jump, Envelope filter on | -1.1 dB | within 2.0 |
 | Level jump, Wah on | -1.7 dB | within 2.5 |
-| Level jump, Grains on | +0.1 dB | within 1.0 |
+| Level jump, Grains on | +0.4 dB | within 1.0 |
 | Level jump, Delay on | +0.0 dB | within 1.0 |
 | Level jump, Reverb on | +0.0 dB | within 1.0 |
-| Clicks, worst switch (Reverb off) | 1.04x steady | 1.6x or 3 |
-| Tail block cost against playing | 0.90x | under 1.5x |
+| Clicks, worst switch (Reverb off) | 1.14x steady | 1.6x or 3 |
+| Tail block cost against playing | 0.88x | under 1.5x |
 
 | Case | 64 samples | 128 samples |
 |---|---|---|
-| Song default, modelled drive | 3.7% | 4.4% |
-| Everything on, Bloom at 80% | 11.1% | 9.5% |
-| Everything on, light effects | 9.1% | 9.8% |
-| Everything on, tape delay and Haze grains | 12.7% | 12.7% |
-| Everything on, Cloud reverb | 11.4% | 11.5% |
-| Everything on, Impulse reverb (2 s) | 10.1% | 13.4% |
-| Everything on, Galaxy delay and Arp grains | 17.2% | 15.1% |
-| Groove: wah, auto filter and Dimension | 4.4% | 4.6% |
-| Kuddle, Voodoo (Keystone asleep) | 2.2% | 1.6% |
-| Kuddle with the room on | 1.7% | 1.7% |
+| Song default, modelled drive | 4.6% | 4.4% |
+| Everything on, Bloom at 80% | 17.3% | 16.4% |
+| Everything on, light effects | 15.1% | 17.2% |
+| Everything on, tape delay and Haze grains | 17.8% | 16.0% |
+| Everything on, Cloud reverb | 19.1% | 17.5% |
+| Everything on, Impulse reverb (2 s) | 16.7% | 15.3% |
+| Everything on, Galaxy delay and Arp grains | 18.4% | 18.3% |
+| Groove: wah, auto filter and Dimension | 5.4% | 5.1% |
+| Kuddle, Voodoo (Keystone asleep) | 3.0% | 2.5% |
+| Kuddle with the room on | 3.3% | 3.4% |
 
 CPU is the share of one core for one Keystone at 48 kHz, measured on the build machine.

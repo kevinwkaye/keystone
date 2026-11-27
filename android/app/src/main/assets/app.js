@@ -1250,9 +1250,11 @@ var KS = (function () {
       return name + ' ' + 'ABCD'[v] + ': ' + (GRAIN_FX[e] || [])[v] + '.';
     }
     if (id === 'tempo.key') return 'For the projector: when you hit this note, the grille flashes Successpit green, then purple.';
-    if (id === 'gloss.track') return 'Instant rides your own notes, so it never lags or picks the wrong one. Tracked plays any interval with glide, best for pads and leads; low notes come in a touch late.';
-    if (id === 'gloss.env') return 'Follow copies how you play. ADSR fires on every new note; pick strength sets how loud it comes in. Slides and soft legato glide on without retriggering.';
-    if (id === 'gloss.place') return 'Into drive is the big one: the synth goes through your capture with the bass. It always listens to the clean bass, so the drive and Bitrot never confuse it.';
+    if (id === 'gloss.settle') return 'How long a note has to hold steady before the pad moves to it. Quick passing notes, slides and ghost notes shorter than this never move it, and plucking the same note again never restarts it.';
+    if (id === 'gloss.plays') return 'What the pad plays over the note you hold. Octave and fifth sits above the bass without picking major or minor.';
+    if (id === 'gloss.ring') return 'Fades away trails off when you stop playing. Rings on holds the pad until your next note, like a drone that follows you.';
+    if (id === 'gloss.spread') return 'How far apart the five oscillators in each layer are tuned. Each one also drifts a little on its own, which is where the shimmer comes from.';
+    if (id === 'gloss.place') return 'After preamp keeps the pad clean and lush. Into drive sends it through your capture with the bass. It always listens to the clean bass, so the drive and Bitrot never confuse it.';
     if (id === 'gloss.clean') return 'How much of your clean bass stays under Gloss, lows included.';
     if (id === 'bitrot.subInt') return 'The sub plays the note divided by this: 2 is an octave down, 3 an octave and a fifth, 4 two octaves.';
     if (id === 'bitrot.oscInt') return 'The oscillator locks onto this harmonic of the note: x2 an octave up, x3 an octave and a fifth, x4 two octaves.';
