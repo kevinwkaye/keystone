@@ -151,7 +151,7 @@ public:
 
     bool sounding() const { return amp > 1.0e-5f || ampTarget > 0; }
     // Switched off, the pad stops taking new notes and fades out over its Fade time, so it
-    // leaves a tail instead of cutting (0.6.10). Switched back on mid-tail, it carries on.
+    // leaves a tail instead of cutting (0.6.11). Switched back on mid-tail, it carries on.
     void setEnabled (bool on) { enabled = on; if (! on) ampTarget = 0; }
     // the note the pad is on (MIDI number), or -1
     int note() const { return cur == kNone ? -1 : cur; }

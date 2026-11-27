@@ -756,7 +756,7 @@ void Engine::process (const float* in, float* out, int numSamples)
             auto runGloss = [&]()
             {
                 // switched off, the pad keeps playing until its own fade has finished, so it
-                // leaves a tail; the clean bass comes back at once (0.6.10)
+                // leaves a tail; the clean bass comes back at once (0.6.11)
                 const bool on = Vb (v, P::GlossOn);
                 d.gloss.setEnabled (on);
                 const bool active = on || d.glossOn.current() > 1.0e-4f || (d.glossWasOn && d.gloss.sounding());

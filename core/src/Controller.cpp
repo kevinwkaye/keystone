@@ -85,7 +85,7 @@ struct Controller::State
     std::string captureFile, spaceFile;
     double lastDTap = -10;
     int bank = 0;
-    bool speckleHeld = false;   // hold B in Glow: Speckle's Hold only while B is down (0.6.10)
+    bool speckleHeld = false;   // hold B in Glow: Speckle's Hold only while B is down (0.6.11)
     // the two rigs: songs and current are the playing rig's list, other the resting one's
     int rig = 0;
     std::unique_ptr<Recorder> recorder;     // rehearsal takes, in Recordings beside the setlist
@@ -1296,7 +1296,7 @@ void Controller::onFootswitch (int sw, int ev)
                 }
                 else if (s->bank == 2)
                 {
-                    // momentary (0.6.10): it holds while B is down and lets go with it
+                    // momentary (0.6.11): it holds while B is down and lets go with it
                     s->speckleHeld = true;
                     setValue (P::GrHold, 1);
                     queueToast ("SPECKLE HOLD");

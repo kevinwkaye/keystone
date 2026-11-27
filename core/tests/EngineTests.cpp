@@ -1897,7 +1897,7 @@ static void testController()
     }
     hold (0);
     {
-        // Speckle's Hold is momentary (0.6.10): on while B is down, off when you let go
+        // Speckle's Hold is momentary (0.6.11): on while B is down, off when you let go
         const bool wasEdited = c.edited();
         c.footswitchPress (1, t);
         for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); }
