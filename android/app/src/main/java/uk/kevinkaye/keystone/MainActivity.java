@@ -3,6 +3,8 @@ package uk.kevinkaye.keystone;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Bundle;
@@ -37,6 +39,7 @@ public class MainActivity extends Activity {
     private RoomRecorder room;
     private Updater updater;
     private FileSender files;
+    private ReportFetcher reports;
     private static final int PICK_FILES = 4711;
 
     @SuppressLint({ "SetJavaScriptEnabled", "AddJavascriptInterface" })
@@ -85,6 +88,11 @@ public class MainActivity extends Activity {
                 json -> ui.post(() -> { if (pageReady) web.evaluateJavascript("KS.onFiles && KS.onFiles(" + json + ")", null); }),
                 line -> { if (!linked) return false; link.send(line); return true; });
 
+        reports = new ReportFetcher(this,
+                json -> ui.post(() -> { if (pageReady) web.evaluateJavascript("KS.onReport && KS.onReport(" + json + ")", null); }),
+                line -> { if (!linked) return false; link.send(line); return true; },
+                this::shareReport);
+
         link = new Link(this, new Link.Listener() {
             @Override
             public void onLine(String line) {
@@ -94,6 +102,10 @@ public class MainActivity extends Activity {
                 }
                 if (line.contains("\"t\":\"fileAck\"")) {
                     try { files.onAck(new JSONObject(line)); } catch (Exception ignored) { }
+                    return;
+                }
+                if (line.contains("\"t\":\"reportChunk\"") || line.contains("\"t\":\"reportAck\"") || line.contains("\"t\":\"reportReady\"")) {
+                    reports.onLine(line);
                     return;
                 }
                 if (line.contains("\"t\":\"roomAck\"")) {
@@ -191,6 +203,26 @@ public class MainActivity extends Activity {
         if (!got.isEmpty()) files.add(got);
     }
 
+    // Send report: Android's share sheet, so it can go to Drive, email or a chat
+    private void shareReport(java.io.File zip, String note) {
+        ui.post(() -> {
+            try {
+                android.net.Uri u = ReportProvider.uriFor(this, zip);
+                Intent i = new Intent(Intent.ACTION_SEND);
+                i.setType("application/zip");
+                i.putExtra(Intent.EXTRA_STREAM, u);
+                i.putExtra(Intent.EXTRA_SUBJECT, "Keystone report " + zip.getName());
+                i.putExtra(Intent.EXTRA_TEXT, note == null || note.isEmpty() ? "Keystone report" : note);
+                i.setClipData(ClipData.newRawUri(zip.getName(), u));
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(Intent.createChooser(i, "Send the Keystone report to"));
+            } catch (Exception e) {
+                // nothing took it: the report is still on the phone, Share again tries once more
+                if (pageReady) web.evaluateJavascript("KS.onReport && KS.onReport({state:'ready',pct:100,canShare:true,why:'Nothing on this phone could take it. Tap Share again'})", null);
+            }
+        });
+    }
+
     final class Bridge {
         @JavascriptInterface
         public void send(String line) { link.send(line); }
@@ -265,6 +297,15 @@ public class MainActivity extends Activity {
                 try { startActivityForResult(i, PICK_FILES); } catch (Exception ignored) { }
             });
         }
+
+        @JavascriptInterface
+        public void reportSend(String note) { reports.start(note); }
+
+        @JavascriptInterface
+        public void reportShare() { reports.shareAgain(); }
+
+        @JavascriptInterface
+        public String reportStatus() { return reports.statusJson(); }
 
         @JavascriptInterface
         public void filesCancel() { files.cancel(); }

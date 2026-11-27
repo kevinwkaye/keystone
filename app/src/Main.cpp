@@ -24,6 +24,7 @@
 #include "SystemHealth.h"
 #include "Projector.h"
 #include "ServicePin.h"
+#include "Report.h"
 #include "keystone/ServiceButton.h"
 #include <cstdlib>
 #include <deque>
@@ -304,6 +305,12 @@ public:
         {
             try
             {
+                if (line.contains ("\"t\":\"report\""))
+                {
+                    if (line.contains ("\"op\":\"make\"")) Logger::writeToLog ("Report: phone " + String (client) + " asked for one");
+                    link.send (client, reports.handle (line));
+                    return;
+                }
                 if (line.contains ("\"watchHello\""))
                 {
                     const auto wv = JSON::parse (line).getProperty ("v", var()).toString();
@@ -323,6 +330,14 @@ public:
         link.onConnect = [] (int client) { Logger::writeToLog ("Link: phone " + String (client) + " ready"); };
         link.onDisconnect = [] (int client) { Logger::writeToLog ("Link: phone " + String (client) + " left"); };
         watchApk.log = [] (const String& s) { Logger::writeToLog (s); };
+        // Send report: a black box for fault finding, shared from the phone
+        history.file = home.getChildFile ("Reports").getChildFile ("health-history.jsonl");
+        reports.home = home;
+        reports.history = &history;
+        reports.extraFiles.add (PedalSettings::file());
+        reports.healthNow = [this] { const ScopedLock sl (healthLock); return healthJsonCopy; };
+        reports.log = [] (const String& s) { Logger::writeToLog (s); };
+        reports.onDone = [this] (const String& json) { MessageManager::callAsync ([this, json] { link.broadcast (json); }); };
         link.start();
 
 #if KEYSTONE_TRAY
@@ -363,6 +378,7 @@ public:
         rack.reset();
         controller.reset();
         theApp = nullptr;
+        history.flush();
         Logger::writeToLog ("Keystone stopped");
         Logger::setCurrentLogger (nullptr);
         logger.reset();
@@ -787,7 +803,10 @@ private:
         {
             healthTick = 0;
             cachedHealth = health();
-            if (link.clientCount() > 0) link.broadcast (cachedHealth.toJson(), true);
+            const auto healthJson = cachedHealth.toJson();
+            if (link.clientCount() > 0) link.broadcast (healthJson, true);
+            { const ScopedLock sl (healthLock); healthJsonCopy = healthJson; }
+            if (++historyTick >= 5) { historyTick = 0; history.add (healthJson); }   // the report's black box
         }
         // meters about 25 times a second
         if (++meterTick >= 4)
@@ -902,6 +921,12 @@ private:
     int serviceTick = 0;
     String serviceProblemLogged;
     bool serviceLoggedReady = false;
+    // Send report: the health black box and the report maker (last, so it stops first)
+    HealthHistory history;
+    CriticalSection healthLock;
+    String healthJsonCopy;
+    int historyTick = 0;
+    ReportMaker reports;
 };
 
 static void midiSink (const MidiMessage& m)

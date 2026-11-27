@@ -36,6 +36,11 @@ if [ -f "$CUR/pi/keystone-power.sh" ]; then
             && systemctl restart --no-block keystone
     fi
 fi
+# Send report: the systemd-journal group lets Keystone put the system journal and the kernel
+# log in a report. No restart for this one: it applies from the next time Keystone starts.
+if getent group systemd-journal >/dev/null && ! id -nG keystone 2>/dev/null | grep -qw systemd-journal; then
+    usermod -aG systemd-journal keystone && log "Keystone can read the system journal for reports from its next start"
+fi
 # the projector's video player, carried in the package (no internet on Keystone's Wi-Fi).
 # 0.6.3: it lives in pi/player, and stays there until it's in, so a failed try is tried
 # again at the next start. Keystone shows what happened from player.txt.

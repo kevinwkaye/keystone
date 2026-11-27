@@ -31,6 +31,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <provider android:name=".ReportProvider" android:authorities="${applicationId}.reports" android:exported="false" android:grantUriPermissions="true" />
         <receiver android:name=".Updater$InstallResult" android:exported="false" />
         <service android:name=".RoomService" android:exported="false" android:foregroundServiceType="microphone" />
         <receiver android:name=".Widgets$WhatsOnWidget" android:exported="false" android:label="Keystone: what's on">

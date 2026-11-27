@@ -14,7 +14,7 @@ USER_NAME=keystone
 
 # the user Keystone runs as (separate from whoever you sign in as)
 id "$USER_NAME" >/dev/null 2>&1 || useradd -m -s /bin/bash "$USER_NAME"
-for g in audio plugdev gpio; do getent group "$g" >/dev/null && usermod -aG "$g" "$USER_NAME"; done
+for g in audio plugdev gpio systemd-journal; do getent group "$g" >/dev/null && usermod -aG "$g" "$USER_NAME"; done
 install -d -o "$USER_NAME" -g "$USER_NAME" "/home/$USER_NAME/Documents" "/home/$USER_NAME/Documents/Keystone" "/home/$USER_NAME/Documents/Keystone/Updates"
 
 # Keystone in slot a, current pointing at it

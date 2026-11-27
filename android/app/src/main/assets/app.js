@@ -628,6 +628,26 @@ var KS = (function () {
       (f.files.some(function (x) { return fileKind(x.name)[0] === 'Video'; }) ? '<span class="small">A big video takes a minute or two over Keystone\'s Wi-Fi. Carry on playing: sending never touches the sound.</span>' : '') +
       '</section>';
   }
+  // Send report: the Pi's black box (logs, health history, settings, journal), shared from this phone
+  function reportCard() {
+    if (!window.KeystoneNative || !KeystoneNative.reportSend) return '';
+    var r = S.report || { state: 'idle' }, busy = !!r.busy;
+    var line = r.state === 'making' ? '<span class="small" style="color:#F0C27B">Hev is packing up the logs. Carry on playing: it never touches the sound.</span>'
+      : r.state === 'fetching' ? '<div class="bar" style="height:6px"><div style="width:' + (r.pct || 0) + '%;background:#F0C27B;height:6px"></div></div><span class="small">Bringing it to the phone, ' + (r.pct || 0) + '%</span>'
+      : r.state === 'ready' ? '<span class="small" style="color:' + (r.why ? '#F0997B' : '#5DCAA5') + '">' + esc(r.why || 'Report ready' + (r.bytes ? ', ' + sizeText(r.bytes) : '') + '. Pick Drive (or anywhere) and tell Claude it\'s there.') + '</span>'
+      : r.state === 'failed' ? '<span class="small" style="color:#F0997B">' + esc(r.why) + '</span>' : '';
+    return '<section class="card" style="gap:8px"><h2 class="label">Send a report</h2>' +
+      '<span class="small">Something odd? Say what happened and send a report. It holds the last few hours of logs and health from the ' + hostName(false) + ', so Claude can see what went wrong. Passwords stay out.</span>' +
+      '<input type="text" id="reportNote" maxlength="500" placeholder="What happened? Crackle in song 2, say" value="' + esc(S.reportNote || '') + '" style="font-size:16px;padding:12px;border-radius:10px;border:1px solid #333;background:#161616;color:inherit">' +
+      '<div style="display:flex;gap:8px"><button type="button" class="wide" data-act="reportSend"' + (connected() && !busy ? '' : ' disabled') + ' style="flex:1">' + (busy ? 'Making the report' : 'Make and send') + '</button>' +
+      (r.canShare && !busy ? '<button type="button" class="back" data-act="reportShare" style="flex:none">Share again</button>' : '') + '</div>' +
+      (connected() ? '' : '<span class="small" style="color:#F0997B">Join Keystone Wi-Fi first.</span>') +
+      line + '</section>';
+  }
+  function onReport(m) {
+    S.report = m;
+    if (S.screen === 'health') queueRender(true);
+  }
   function onFiles(m) {
     var was = S.files;
     S.files = m;
@@ -816,7 +836,7 @@ var KS = (function () {
       '<div class="pair"><button type="button" class="wide" data-act="restartAudio">Restart audio</button><button type="button" class="wide" data-act="light">' + (Math.round(val('output.quality')) === 2 ? 'Effects full' : 'Effects light') + '</button></div>' +
       '<section class="card"><h2 class="label">Kaleidoscope</h2>' + gigLockRow() + '<span class="small">Fourteen pedal plugins to mess about with, one at a time. Tap the name on Play to get there. Gig lock keeps it shut and never costs the band rig anything.</span></section>' +
       wifiCard() +
-      filesCard() + updateCard() + watchCards() +
+      filesCard() + reportCard() + updateCard() + watchCards() +
       '<button type="button" class="wide" data-go="recorder">Recorder' + (rec().on ? ': recording ' + clock(rec().s) : on('rec.on') ? ': ready' : ': off') + '</button>' +
       '<div class="small">If something goes wrong on stage, a warning strip appears across the top of Play. Tap it to come here.</div>' +
       nav('health') + '</section>';
@@ -1868,6 +1888,8 @@ var KS = (function () {
         if (send({ t: 'proj', op: 'scene', i: si, v: nv })) { if (nv === 'auto') delete pj.scenes[si]; else pj.scenes[si] = nv; render(true); }
         break;
       }
+      case 'reportSend': if (window.KeystoneNative && KeystoneNative.reportSend) { KeystoneNative.reportSend(S.reportNote || ''); S.report = { busy: true, state: 'making' }; render(true); } break;
+      case 'reportShare': if (window.KeystoneNative && KeystoneNative.reportShare) KeystoneNative.reportShare(); break;
       case 'filesPick': if (window.KeystoneNative && KeystoneNative.filesPick) KeystoneNative.filesPick(); break;
       case 'filesCancel': if (window.KeystoneNative && KeystoneNative.filesCancel) KeystoneNative.filesCancel(); break;
       case 'filesClear': if (window.KeystoneNative && KeystoneNative.filesClear) KeystoneNative.filesClear(); break;
@@ -1954,6 +1976,7 @@ var KS = (function () {
 
   document.addEventListener('input', function (e) {
     var t = e.target;
+    if (t.id === 'reportNote') { S.reportNote = t.value; return; }
     if (t.id === 'pairCode') {
       S.pairCode = t.value.replace(/\D/g, '').slice(0, 6);
       var tl = t.parentNode.querySelectorAll('.flip');
@@ -2111,5 +2134,5 @@ var KS = (function () {
   loadOffline();
   setInterval(function () { if (connected()) strip(); }, 1000);
   render();
-  return { onMessage: onMessage, onLink: onLink, back: back, state: S, refresh: function () { render(true); }, onUpdate: onUpdate, onFiles: onFiles };
+  return { onMessage: onMessage, onLink: onLink, back: back, state: S, refresh: function () { render(true); }, onUpdate: onUpdate, onFiles: onFiles, onReport: onReport };
 })();
