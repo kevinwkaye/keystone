@@ -17,6 +17,11 @@ void PedalSettings::load()
         fsChannel[(size_t) i] = jlimit (1, 16, xml->getIntAttribute ("fsChannel" + String (i), fsChannel[(size_t) i]));
         fsCC[(size_t) i] = jlimit (0, 255, xml->getIntAttribute ("fsCC" + String (i), fsCC[(size_t) i]));
     }
+    for (int i = 0; i < 2; ++i)
+    {
+        comboChannel[(size_t) i] = jlimit (0, 16, xml->getIntAttribute ("comboChannel" + String (i), comboChannel[(size_t) i]));
+        comboCC[(size_t) i] = jlimit (-1, 255, xml->getIntAttribute ("comboCC" + String (i), comboCC[(size_t) i]));
+    }
     fsToggle = jlimit (0, 15, xml->getIntAttribute ("fsToggle", fsToggle));
     expChannel = jlimit (1, 16, xml->getIntAttribute ("expChannel", expChannel));
     expCC = jlimit (0, 127, xml->getIntAttribute ("expCC", expCC));
@@ -44,6 +49,11 @@ void PedalSettings::save() const
         xml.setAttribute ("fsChannel" + String (i), fsChannel[(size_t) i]);
         xml.setAttribute ("fsCC" + String (i), fsCC[(size_t) i]);
     }
+    for (int i = 0; i < 2; ++i)
+    {
+        xml.setAttribute ("comboChannel" + String (i), comboChannel[(size_t) i]);
+        xml.setAttribute ("comboCC" + String (i), comboCC[(size_t) i]);
+    }
     xml.setAttribute ("fsToggle", fsToggle);
     xml.setAttribute ("expChannel", expChannel);
     xml.setAttribute ("expCC", expCC);
@@ -64,6 +74,8 @@ void PedalSettings::resetFootswitches()
 {
     fsChannel = { 16, 16, 16, 16 };
     fsCC = { 20, 21, 22, 23 };
+    comboChannel = { 0, 0 };
+    comboCC = { -1, -1 };
 }
 
 float PedalSettings::expressionValue (int cc) const

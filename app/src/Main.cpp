@@ -383,15 +383,32 @@ public:
 
         // Learn: the next controller moved takes the job
         const int learning = learnTarget.load();
-        if (learning >= 0 && ((learning == 4 && cc < 128) || (learning < 4 && val >= 64)))
+        // learning a combo: a single switch going out first (some footswitches send it before
+        // they decide it's a combo) is skipped, and Learn waits for the combo's own message
+        bool singleSwitch = cc == pedals.expCC;
+        for (int sw = 0; sw < 4; ++sw) singleSwitch = singleSwitch || cc == pedals.fsCC[(size_t) sw];
+        if (learning >= 0 && ((learning == 4 && cc < 128) || (learning < 4 && val >= 64) || (learning >= 5 && val >= 64 && ! singleSwitch)))
         {
             learnTarget.store (-1);
             MessageManager::callAsync ([this, learning, ch, cc]
             {
-                if (learning == 4) { pedals.expChannel = ch; pedals.expCC = cc; }
-                else { pedals.fsChannel[(size_t) learning] = ch; pedals.fsCC[(size_t) learning] = cc; pedals.fsToggle &= ~(1 << learning); }
+                String said;
+                if (learning == 4) { pedals.expChannel = ch; pedals.expCC = cc; said = "EXPRESSION LEARNT"; }
+                else if (learning >= 5)
+                {
+                    const int p = learning - 5;
+                    pedals.comboChannel[(size_t) p] = ch; pedals.comboCC[(size_t) p] = cc;
+                    if (pedals.comboCC[(size_t) (1 - p)] == cc) pedals.comboCC[(size_t) (1 - p)] = -1;
+                    said = p == 0 ? "A+B LEARNT" : "C+D LEARNT";
+                }
+                else
+                {
+                    pedals.fsChannel[(size_t) learning] = ch; pedals.fsCC[(size_t) learning] = cc; pedals.fsToggle &= ~(1 << learning);
+                    for (int p = 0; p < 2; ++p) if (pedals.comboCC[(size_t) p] == cc) pedals.comboCC[(size_t) p] = -1;
+                    said = String ("FOOTSWITCH ") + String::charToString ((juce_wchar) ('A' + learning)) + " LEARNT";
+                }
                 pedals.save();
-                controller->notify ((learning == 4 ? String ("EXPRESSION LEARNT") : String ("FOOTSWITCH ") + String::charToString ((juce_wchar) ('A' + learning)) + " LEARNT").toStdString());
+                controller->notify (said.toStdString());
                 flush();
             });
             return;
@@ -405,6 +422,21 @@ public:
             // of the box) while the Chocolate always sends on 1. Keystone already knows which
             // switch this is, so it hands it over on the channel the pedal listens on. A pedal
             // that reads the footswitch device itself ignores this copy, so nothing happens twice.
+            // a learnt combo message goes over as both of its switches, so the pedal's own
+            // two-switch combos work as they would with the switches themselves
+            for (int p = 0; p < 2; ++p)
+            {
+                if (pedals.comboCC[(size_t) p] < 0 || cc != pedals.comboCC[(size_t) p]) continue;
+                const bool on = (m.isController() && val >= 64) || m.isNoteOn();
+                for (int sw = p * 2; sw < p * 2 + 2; ++sw)
+                {
+                    const int fc = jlimit (1, 16, pedals.fsChannel[(size_t) sw]), num = pedals.fsCC[(size_t) sw];
+                    if (num < 128) rack->pushMidi (MidiMessage::controllerEvent (fc, num, on ? 127 : 0));
+                    else if (on) rack->pushMidi (MidiMessage::noteOn (fc, num - 128, (uint8) 127));
+                    else rack->pushMidi (MidiMessage::noteOff (fc, num - 128));
+                }
+                return;
+            }
             int fwdCh = ch;
             for (int sw = 0; sw < 4; ++sw)
                 if (cc == pedals.fsCC[(size_t) sw]) { fwdCh = pedals.fsChannel[(size_t) sw]; break; }
@@ -423,6 +455,20 @@ public:
             lastExpRaw.store (val);
             lastExpTime.store (Time::getMillisecondCounterHiRes() * 0.001);
             engine.setPedal (pedals.expressionValue (val));
+            return;
+        }
+        // The footswitch's own combos (Chocolate Plus E and F), once learnt: both switches at once
+        for (int p = 0; p < 2; ++p)
+        {
+            if (pedals.comboCC[(size_t) p] < 0 || cc != pedals.comboCC[(size_t) p]) continue;
+            const double now = Time::getMillisecondCounterHiRes() * 0.001;
+            const bool down = val >= 64;
+            MessageManager::callAsync ([this, p, down, now]
+            {
+                if (down) { lastFsTime = now; lastFsName = p == 0 ? "A+B press" : "C+D press"; }
+                controller->footswitchCombo (p, down, now);
+                flush();
+            });
             return;
         }
         // Footswitches: plain press and release. Read directly, any channel counts.
@@ -479,8 +525,10 @@ private:
         controller->setKeeperLiveTag = [this] (bool live) { pedals.keeperLive = live; pedals.save(); };
         controller->onLearnFootswitch = [this] (int sw)
         {
-            learnTarget.store (juce::jlimit (0, 4, sw));
-            controller->notify ((sw == 4 ? String ("MOVE THE PEDAL") : String ("PRESS FOOTSWITCH ") + String::charToString ((juce_wchar) ('A' + sw))).toStdString());
+            sw = juce::jlimit (0, 6, sw);
+            learnTarget.store (sw);
+            controller->notify ((sw == 4 ? String ("MOVE THE PEDAL") : sw == 5 ? String ("PRESS A AND B TOGETHER") : sw == 6 ? String ("PRESS C AND D TOGETHER")
+                                 : String ("PRESS FOOTSWITCH ") + String::charToString ((juce_wchar) ('A' + sw))).toStdString());
         };
         controller->onCalibrate = [this] (int step)
         {
