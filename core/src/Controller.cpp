@@ -791,6 +791,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
 // ---------------------------------------------------------------------------------------
 void Controller::footswitchPress (int sw, double now) { s->logic.press (sw, now); }
 void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, now); }
+void Controller::footswitchCombo (int pair, bool down, double now) { if (down) s->logic.comboPress (pair, now); else s->logic.comboRelease (pair, now); }
 void Controller::tick (double now)
 {
     s->logic.tick (now);

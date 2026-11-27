@@ -1393,6 +1393,8 @@ var KS = (function () {
           '<span style="flex:1"><span style="display:block;font-size:16px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span>' +
           '<button type="button" class="wide" style="height:44px;padding:0 14px;font-size:14px" data-learn="' + i + '">Learn</button></div>';
       }).join('') + '<div class="small">Press C and D together to swap Stomp and Song mode. In Stomp mode, press A and B together for tap tempo, then tap B on the beat; hold them for a second for Kuddle. Songs and parts move in Song mode. Keep is the button on the phone.</div></section>' +
+        '<section class="card"><h2 class="label">Two switches together</h2><div class="small">Some footswitches, like the Chocolate Plus, send a message of their own when you press two switches together (E for A and B, F for C and D) and swallow the two presses. If pressing two together does nothing, tap Learn A+B, then press A and B together on the footswitch, and the same for C and D.</div>' +
+        '<div class="pair"><button type="button" class="wide" data-learn="5">Learn A+B</button><button type="button" class="wide" data-learn="6">Learn C+D</button></div></section>' +
         '<section class="card"><h2 class="label">Expression</h2><div class="small">Rock the pedal to heel and press Heel, then to toe and press Toe. If heel and toe still work the wrong way round, press Reverse.</div>' +
         '<div class="pair"><button type="button" class="wide" data-cal="0">Heel</button><button type="button" class="wide" data-cal="1">Toe</button></div>' +
         '<div class="pair"><button type="button" class="wide" data-cal="3">' + (S.health && S.health.exp && S.health.exp.rev ? 'Reversed: on' : 'Reverse') + '</button></div>' +

@@ -1891,6 +1891,35 @@ static void testController()
     c.footswitchRelease (0, t); c.footswitchRelease (1, t); t += 0.5;
     CHECK (c.rig() == 0 && c.footMode() == 0, "hold A and B again: back to Keystone in Stomp mode");
 
+    // the footswitch's own combo messages (Chocolate Plus E and F): both switches at once (0.6.8)
+    {
+        c.footswitchCombo (1, true, t); t += 0.1; c.tick (t); c.footswitchCombo (1, false, t); t += 0.5;
+        CHECK (c.footMode() == 1, "F (C+D) message: Song mode");
+        const int song = c.currentSong();
+        c.footswitchCombo (1, true, t); t += 0.1; c.footswitchCombo (1, false, t); t += 0.5;
+        CHECK (c.footMode() == 0 && c.currentSong() == song, "F again: back to Stomp, no song step");
+        c.footswitchCombo (0, true, t); t += 0.1; c.footswitchCombo (0, false, t); t += 0.3;
+        CHECK (c.lastToast() == "TAP TEMPO", "E (A+B) message: tap tempo armed");
+        c.footswitchPress (2, t); t += 0.1; c.footswitchRelease (2, t); t += 0.5;   // ends tapping
+        c.footswitchCombo (0, true, t);
+        for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
+        c.footswitchCombo (0, false, t); t += 0.5;
+        CHECK (c.rig() == 1, "E held for a second: Kuddle");
+        c.footswitchCombo (0, true, t);
+        for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
+        c.footswitchCombo (0, false, t); t += 0.5;
+        CHECK (c.rig() == 0, "E held again: back to Keystone");
+        // a combo whose release never comes doesn't jam the switches
+        c.footswitchCombo (1, true, t); t += 0.2; c.tick (t); t += 0.5;
+        CHECK (c.footMode() == 1, "F with no release: Song mode");
+        const int before = c.currentSong();
+        c.footswitchPress (2, t); t += 0.05; c.tick (t); c.footswitchRelease (2, t); t += 0.5;
+        CHECK (c.currentSong() != before || c.lastToast() == "LAST SONG", "then a plain C still works (next song)");
+        c.footswitchCombo (1, true, t); t += 0.1; c.footswitchCombo (1, false, t); t += 0.5;
+        CHECK (c.footMode() == 0, "and F works again");
+        c.selectSong (0);
+    }
+
     // setlist
     auto msg = [&] (const std::string& m) { c.handleMessage (m, [] (const std::string&) {}); };
     msg (R"({"t":"setlist","op":"save"})");

@@ -35,6 +35,8 @@ public:
     // ---- footswitches: raw presses from any source, plus tick() regularly ----
     void footswitchPress (int sw, double nowSeconds);
     void footswitchRelease (int sw, double nowSeconds);
+    // a footswitch's own combo message (pair 0 is A+B, 1 is C+D), down or up
+    void footswitchCombo (int pair, bool down, double nowSeconds);
     void tick (double nowSeconds);
 
     // ---- the phone link (JSON lines) ----
@@ -49,7 +51,7 @@ public:
     // ---- host hooks ----
     std::function<void (const std::string& entryJson)> onKeep;      // host writes the Keeper entry
     std::function<void (int number, const std::string& note)> onKeepNote;
-    std::function<void (int sw)> onLearnFootswitch;                   // 0..3, or 4 for expression
+    std::function<void (int sw)> onLearnFootswitch;                   // 0..3, 4 expression, 5 A+B combo, 6 C+D combo
     std::function<void (int step)> onCalibrate;                       // 0 heel, 1 toe, 2 reset, 3 reverse
     std::function<std::string()> footswitchStatus;                   // device status line
     std::function<std::string()> audioStatus;                        // device status line

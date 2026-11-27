@@ -24,7 +24,11 @@ public:
 
     void press (int sw, double now)
     {
-        if (sw < 0 || sw > 3 || down[(size_t) sw]) return;
+        if (sw < 0 || sw > 3) return;
+        // a combo switch whose release never came (one sent in a one-message mode): a real
+        // press on either of its switches means the feet have moved on, so let it go quietly
+        if (ext[(size_t) (sw / 2)]) clearPair (sw / 2);
+        if (down[(size_t) sw]) return;
         down[(size_t) sw] = true;
         held[(size_t) sw] = false;
         combo[(size_t) sw] = false;
@@ -41,6 +45,37 @@ public:
             return;
         }
         if (onEvent) onEvent (sw, Down);
+    }
+
+    // A footswitch with its own two-switch combos (the Chocolate Plus's E is A+B, F is C+D)
+    // grabs a two-switch press and sends its own message in place of the two switches, so
+    // the pair never arrives down together. A learnt combo message stands in for both: down
+    // is both switches pressed at once, up is both let go, and holding it a second is the
+    // combo hold, exactly as if the two switches had come through (0.6.8).
+    void comboPress (int pair, double now)
+    {
+        if (pair < 0 || pair > 1 || ! pairEnabled[(size_t) pair]) return;
+        const int a = pair * 2, b = a + 1;
+        if (ext[(size_t) pair]) clearPair (pair);   // pressed again with no release in between
+        // a switch already held for its own hold job stays that job
+        if ((down[(size_t) a] && held[(size_t) a]) || (down[(size_t) b] && held[(size_t) b])) return;
+        // one switch may have gone out on its own first: it joins the combo, as a real
+        // two-switch press a touch apart would (its Down already went, its Tap won't)
+        for (int sw : { a, b })
+        {
+            down[(size_t) sw] = true; held[(size_t) sw] = false; combo[(size_t) sw] = true; downAt[(size_t) sw] = now;
+        }
+        ext[(size_t) pair] = true;
+        comboAt[(size_t) pair] = now;
+        comboHeld[(size_t) pair] = false;
+        if (onEvent) onEvent (a, pair == 0 ? ComboAB : ComboCD);
+    }
+
+    void comboRelease (int pair, double now)
+    {
+        if (pair < 0 || pair > 1 || ! ext[(size_t) pair]) return;
+        tick (now);
+        clearPair (pair);
     }
 
     void release (int sw, double now)
@@ -72,11 +107,18 @@ public:
             }
     }
 
-    void reset() { down = {}; held = {}; combo = {}; comboHeld = {}; }
+    void reset() { down = {}; held = {}; combo = {}; comboHeld = {}; ext = {}; }
     bool isDown (int sw) const { return down[(size_t) sw]; }
 
 private:
+    void clearPair (int pair)
+    {
+        for (int sw = pair * 2; sw < pair * 2 + 2; ++sw) { down[(size_t) sw] = false; held[(size_t) sw] = false; }
+        ext[(size_t) pair] = false;
+    }
+
     std::array<bool, 4> down {}, held {}, combo {};
+    std::array<bool, 2> ext {};   // the pair is down through a learnt combo message
     std::array<double, 4> downAt {};
     std::array<double, 2> comboAt {};
     std::array<bool, 2> comboHeld {};

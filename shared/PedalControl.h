@@ -21,6 +21,10 @@ struct PedalSettings
 {
     std::array<int, 4> fsChannel { 16, 16, 16, 16 };
     std::array<int, 4> fsCC { 20, 21, 22, 23 };   // 128 + note number for a switch that sends notes
+    // a footswitch's own two-switch combos, learnt (the Chocolate Plus's E for A+B, F for C+D):
+    // off until learnt. 128 + note number for one that sends notes
+    std::array<int, 2> comboChannel { 0, 0 };
+    std::array<int, 2> comboCC { -1, -1 };
     int fsToggle = 0;            // bit per switch: sends one message per press (latching), so it can only tap
     int expChannel = 16, expCC = 11;
     int heel = 0, toe = 127;     // calibrated ends of the expression pedal; toe may be lower than heel
