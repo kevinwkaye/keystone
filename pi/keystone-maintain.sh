@@ -44,7 +44,7 @@ fi
 # the projector's video player, carried in the package (no internet on Keystone's Wi-Fi).
 # 0.6.3: it lives in pi/player, and stays there until it's in, so a failed try is tried
 # again at the next start. Keystone shows what happened from player.txt.
-PLAYER="$CUR/pi/player"; [ -d "$PLAYER" ] || PLAYER="$CUR/pi/debs"
+PLAYER="$CUR/pi/player"
 STATE="$(dirname "$LOG")/player.txt"
 state() { mkdir -p "$(dirname "$STATE")"; echo "$*" > "$STATE"; chown keystone:keystone "$STATE" 2>/dev/null; }
 if [ -d "$PLAYER" ] && ls "$PLAYER"/*.deb >/dev/null 2>&1; then

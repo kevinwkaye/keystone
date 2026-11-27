@@ -30,12 +30,20 @@ static std::string toUpper (std::string t)
     for (auto& c : t) c = (char) std::toupper ((unsigned char) c);
     return t;
 }
+static std::string lowerCase (std::string t)
+{
+    for (auto& c : t) c = (char) std::tolower ((unsigned char) c);
+    return t;
+}
 
 namespace ks
 {
 // Never throw on odd characters: a device or file name that isn't valid UTF-8 is replaced,
 // not allowed to take the link down.
 static std::string dumps (const json& j) { return j.dump (-1, ' ', false, json::error_handler_t::replace); }
+
+// seconds on a clock that never jumps (the watch, tap tempo, the Song mode undo)
+static double steadyNow() { return std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 // Paths travel as UTF-8 everywhere; Windows' narrow paths would use the ANSI code page.
 static fs::path toPath (const std::string& utf8) { return fs::path (std::u8string (utf8.begin(), utf8.end())); }
@@ -476,12 +484,17 @@ int Controller::songCount() const { return (int) s->songs.size(); }
 int Controller::currentSong() const { return s->current; }
 std::string Controller::songName (int i) const { return i >= 0 && i < songCount() ? s->songs[(size_t) i].name : std::string(); }
 
+// the song an entry belongs to: itself, or for a part the song above it
+int Controller::headOf (int i) const
+{
+    while (i > 0 && isPart (i)) --i;
+    return i;
+}
+
 // "Circus, Verse" for a part, "Circus" for a song
 std::string Controller::songLabel (int i) const
 {
-    int head = i;
-    while (head > 0 && isPart (head)) --head;
-    return isPart (i) ? songName (head) + ", " + songName (i) : songName (i);
+    return isPart (i) ? songName (headOf (i)) + ", " + songName (i) : songName (i);
 }
 
 bool Controller::isPart (int i) const { return i > 0 && i < songCount() && s->songs[(size_t) i].part; }
@@ -567,8 +580,7 @@ void Controller::jumpSong (int dir)
 {
     const int n = songCount();
     if (n == 0) return;
-    int i = s->current;
-    while (i > 0 && isPart (i)) --i;                 // the head of this song
+    int i = headOf (s->current);
     if (dir > 0) { do ++i; while (i < n && isPart (i)); }
     else { --i; while (i > 0 && isPart (i)) --i; }
     if (i < 0 || i >= n) { queueToast (dir > 0 ? "LAST SONG" : "FIRST SONG"); return; }
@@ -655,11 +667,7 @@ std::map<std::string, float> Controller::soundNow (std::map<std::string, float> 
     return into;
 }
 
-bool Controller::sameSong (int a, int b) const
-{
-    auto head = [&] (int k) { while (k > 0 && s->songs[(size_t) k].part) --k; return k; };
-    return head (a) == head (b);
-}
+bool Controller::sameSong (int a, int b) const { return headOf (a) == headOf (b); }
 
 void Controller::setlistOp (const std::string& op, int i, int to, const std::string& name)
 {
@@ -668,8 +676,8 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     auto valid = [&] (int k) { return k >= 0 && k < n; };
     auto full = [&] (bool newSong)
     {
-        if (n >= kMaxEntries) { queueToast ("40 songs and parts is the limit"); return true; }
-        if (newSong && songsOnly() >= kMaxSongs) { queueToast ("15 songs is the limit"); return true; }
+        if (n >= kMaxEntries) { queueToast (std::to_string (kMaxEntries) + " songs and parts is the limit"); return true; }
+        if (newSong && songsOnly() >= kMaxSongs) { queueToast (std::to_string (kMaxSongs) + " songs is the limit"); return true; }
         return false;
     };
     auto groupEnd = [&] (int k) { while (k + 1 < n && songs[(size_t) k + 1].part) ++k; return k; };
@@ -692,9 +700,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     {
         // a new part at the end of i's song, starting from i's saved settings
         if (full (false)) return;
-        const int end = groupEnd (i);
-        int head = i;
-        while (head > 0 && songs[(size_t) head].part) --head;
+        const int end = groupEnd (i), head = headOf (i);
         Song c = songs[(size_t) i];
         c.part = true;
         c.name = name.empty() ? "Part " + std::to_string (end - head + 2) : name;
@@ -705,7 +711,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     {
         // make a song a part of the one above, or a part its own song again
         if (! songs[(size_t) i].part) songs[(size_t) i].part = true;
-        else { if (songsOnly() >= kMaxSongs) { queueToast ("15 songs is the limit"); return; } songs[(size_t) i].part = false; }
+        else { if (songsOnly() >= kMaxSongs) { queueToast (std::to_string (kMaxSongs) + " songs is the limit"); return; } songs[(size_t) i].part = false; }
     }
     else if (op == "rename" && valid (i) && ! name.empty())
     {
@@ -768,9 +774,7 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
     else if (op == "saveNewPart" && valid (i) && s->rig == 0)
     {
         if (full (false)) return;
-        const int end = groupEnd (i);
-        int head = i;
-        while (head > 0 && songs[(size_t) head].part) --head;
+        const int end = groupEnd (i), head = headOf (i);
         const auto nm = name.empty() ? "Part " + std::to_string (end - head + 2) : name.substr (0, 48);
         songs.insert (songs.begin() + end + 1, Song { nm, true, soundNow ({}) });
         applySong (end + 1, true);
@@ -782,13 +786,19 @@ void Controller::setlistOp (const std::string& op, int i, int to, const std::str
 }
 
 // ---------------------------------------------------------------------------------------
-// Footswitches, in three banks. The bank sets what taps A to C and the pedal do:
-//   Grit:   A Edge/Drive, B Bitrot, C Growl/Cut flip; pedal: dirt blend, or Bitrot's own
-//           job when Bitrot is on and its Pedal does isn't Blend
-//   Groove: A auto filter, B Dimension, C wah; pedal: wah, or volume with the wah off
-//   Glow:   A Speckle, B delay, C reverb; pedal: Bloom
-// Every bank: tap D drone. Hold A next bank, B next song or part, C tuner, D slap.
-// Hold C and D together: Keep. Changing bank never changes the sound.
+// Footswitches. Keystone's Stomp mode has three banks; the bank sets what A to C and the
+// pedal do (changing bank never changes the sound):
+//   Grit:   tap A Edge/Drive, B Bitrot, C Growl/Cut flip. Hold B Gloss, hold C the tuner
+//           (the watch goes live instead when one is connected). Pedal: dirt blend, or
+//           Bitrot's own job when Bitrot is on and its Pedal does isn't Blend
+//   Groove: tap A auto filter, B Dimension, C wah. Hold C the vinyl brake. Pedal: wah, or
+//           volume with the wah off
+//   Glow:   tap A Speckle, B delay, C reverb. Hold B Speckle's Hold (only while held), hold C
+//           the runaway. Pedal: Bloom
+// Every bank: tap D drone, hold A next bank, hold D slap. A and B together arm tap tempo
+// (then tap B); held for a second they go round Keystone, Kuddle and Kaleidoscope. C and D
+// together swap Stomp and Song mode. Song mode, on press: A last song, B next part, C next
+// song, D as in Stomp. Kuddle and Kaleidoscope have their own maps, below.
 // ---------------------------------------------------------------------------------------
 void Controller::footswitchPress (int sw, double now) { s->logic.press (sw, now); }
 void Controller::footswitchRelease (int sw, double now) { s->logic.release (sw, now); }
@@ -796,7 +806,7 @@ void Controller::footswitchCombo (int pair, bool down, double now) { if (down) s
 void Controller::tick (double now)
 {
     s->logic.tick (now);
-    if (s->tapArmed && std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count() - s->tapArmedAt > 2.0)
+    if (s->tapArmed && steadyNow() - s->tapArmedAt > 2.0)
     {
         s->tapArmed = false;
         char t[32];
@@ -970,8 +980,6 @@ bool Controller::tunerOn() const { return engine.meters().tunerOn; }
 // away from there, in any direction, the further towards the toe, like a theremin. Twist:
 // turning the forearm, both ways. Let go of C and the job glides back to where it was.
 // ---------------------------------------------------------------------------------------
-static double steadyNow() { return std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count(); }
-
 bool Controller::watchConnected() const { return s->watchSeen > 0 && steadyNow() - s->watchSeen < 2.0; }
 bool Controller::watchLive() const { return s->watchLive; }
 
@@ -1103,7 +1111,7 @@ void Controller::onFootswitch (int sw, int ev)
     using E = FootswitchLogic::Event;
     const bool tuning = tunerOn();
     auto toggle = [&] (P p) { setValue (p, value (p) > 0.5f ? 0.0f : 1.0f); };
-    auto now = [] { return std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count(); };
+    auto now = steadyNow;
     if (s->kal)
     {
         // Kaleidoscope, picking a pedal (once one is loaded the host hands it the footswitches):
@@ -1373,41 +1381,22 @@ void Controller::keep()
 // ---------------------------------------------------------------------------------------
 // Captures
 // ---------------------------------------------------------------------------------------
-std::vector<std::string> Controller::listCaptures() const
+// the file names in a folder with one extension (any case), sorted
+static std::vector<std::string> filesWithExtension (const fs::path& dir, const std::string& ext)
 {
     std::vector<std::string> out;
     std::error_code ec;
-    const auto dir = toPath (capturesDir);
     if (! fs::is_directory (dir, ec)) return out;
     for (const auto& entry : fs::directory_iterator (dir, ec))
-    {
-        if (! entry.is_regular_file()) continue;
-        auto ext = fromPath (entry.path().extension());
-        std::transform (ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".nam") out.push_back (fromPath (entry.path().filename()));
-    }
+        if (entry.is_regular_file (ec) && lowerCase (fromPath (entry.path().extension())) == ext)
+            out.push_back (fromPath (entry.path().filename()));
     std::sort (out.begin(), out.end());
     return out;
 }
 
+std::vector<std::string> Controller::listCaptures() const { return filesWithExtension (toPath (capturesDir), ".nam"); }
 std::string Controller::spacesDir() const { return fromPath (toPath (capturesDir).parent_path() / "Spaces"); }
-
-std::vector<std::string> Controller::listSpaces() const
-{
-    std::vector<std::string> out;
-    std::error_code ec;
-    const auto dir = toPath (spacesDir());
-    if (! fs::is_directory (dir, ec)) return out;
-    for (const auto& entry : fs::directory_iterator (dir, ec))
-    {
-        if (! entry.is_regular_file()) continue;
-        auto ext = fromPath (entry.path().extension());
-        std::transform (ext.begin(), ext.end(), ext.begin(), ::tolower);
-        if (ext == ".wav") out.push_back (fromPath (entry.path().filename()));
-    }
-    std::sort (out.begin(), out.end());
-    return out;
-}
+std::vector<std::string> Controller::listSpaces() const { return filesWithExtension (toPath (spacesDir()), ".wav"); }
 
 bool Controller::useSpace (const std::string& file, std::string& error)
 {
@@ -1553,9 +1542,14 @@ std::string Controller::toBase64 (const std::vector<uint8_t>& in)
 
 std::vector<uint8_t> Controller::fromBase64 (const std::string& in)
 {
-    static const auto table = [] { std::array<int, 256> t {}; t.fill (-1);
+    static const auto table = []
+    {
+        std::array<int, 256> t {};
+        t.fill (-1);
         const char* a = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        for (int i = 0; i < 64; ++i) t[(size_t) (unsigned char) a[i]] = i; return t; }();
+        for (int i = 0; i < 64; ++i) t[(size_t) (unsigned char) a[i]] = i;
+        return t;
+    }();
     std::vector<uint8_t> out;
     out.reserve (in.size() * 3 / 4);
     uint32_t acc = 0; int bits = 0;
@@ -1638,7 +1632,7 @@ bool Controller::startListening (const std::string& take, double fromSeconds, do
     const auto recDir = toPath (s->recorder->folderPath());
     const auto wav = recDir / toPath (take + ".wav");
     if (s->recorder->recording() && s->recorder->takeName() == take) { error = "That take is still recording"; return false; }
-    // it works the laptop hard for a minute: never while you play
+    // it works the computer hard for a minute: never while you play
     if (s->recorder->quietSeconds() < 20.0) { error = "You're playing. Try again once the bass has been quiet for 20 seconds"; return false; }
 
     // everything the thread needs, copied now: it never touches the controller or the engine
@@ -1654,7 +1648,7 @@ bool Controller::startListening (const std::string& take, double fromSeconds, do
     std::map<std::string, float> globals;
     for (int p = 0; p < kNumParams; ++p)
         if (paramTable()[p].flags & Global) globals[paramTable()[p].id] = engine.getParam ((P) p);
-    globals["output.quality"] = 0;   // full effects, whatever the laptop is doing
+    globals["output.quality"] = 0;   // full effects, whatever the rig is doing now
     const std::string capture = s->captureFile.empty() ? std::string() : fromPath (toPath (capturesDir) / toPath (s->captureFile));
     const std::string space = s->spaceFile.empty() ? std::string() : fromPath (toPath (spacesDir()) / toPath (s->spaceFile));
     const auto folder = recDir / "Listening" / toPath (take);
@@ -1668,7 +1662,7 @@ bool Controller::startListening (const std::string& take, double fromSeconds, do
     pack["files"].push_back ({ { "file", "01 As you played it.wav" }, { "label", "As you played it" }, { "kind", "played" } });
     for (size_t j = 0; j < jobs.size(); ++j)
     {
-        char num[8];
+        char num[16];
         std::snprintf (num, sizeof (num), "%02d ", (int) j + 2);
         pack["files"].push_back ({ { "file", num + safeFileName (jobs[j].label) + ".wav" }, { "label", jobs[j].label }, { "kind", "song" } });
     }
@@ -1702,7 +1696,7 @@ bool Controller::startListening (const std::string& take, double fromSeconds, do
         bool stopped = false;
         for (size_t j = 0; j < jobs.size() && ok; ++j)
         {
-            if (rec->quietSeconds() < 1.0) { stopped = true; break; }   // you've started playing: stop and leave the laptop to you
+            if (rec->quietSeconds() < 1.0) { stopped = true; break; }   // you've started playing: stop and leave the processor to you
             Engine e;
             e.prepare (rate, block);
             applyValues (e, globals);
@@ -1720,7 +1714,7 @@ bool Controller::startListening (const std::string& take, double fromSeconds, do
             for (size_t i = 0; i < tail.size(); i += block) { const int n = (int) std::min<size_t> (block, tail.size() - i); e.process (silence.data() + i, tail.data() + i, n); }
             std::vector<float> whole (out);
             whole.insert (whole.end(), tail.begin(), tail.end());
-            char num[8];
+            char num[16];
             std::snprintf (num, sizeof (num), "%02d ", (int) j + 2);
             ok = writeWav16 (folder / toPath (num + safeFileName (jobs[j].label) + ".wav"), whole, rate);
             st->listenDone.store ((int) j + 1);
@@ -1985,22 +1979,26 @@ std::string Controller::fileMessage (const std::string& line)
         if (ok && op == "begin") a["kind"] = f.kind;
         return dumps (a);
     };
+    auto dropPart = [&] {
+        f.file.reset();
+        if (! f.part.empty()) { std::error_code ec; fs::remove (toPath (f.part), ec); }
+    };
     auto fail = [&] (const std::string& why) {
-        if (f.file) { f.file.reset(); std::error_code ec; fs::remove (toPath (f.part), ec); }
+        dropPart();
         if (onLog) onLog ("Send files: " + (f.name.empty() ? std::string() : f.name + ": ") + why);
         f = {};
         return answer (false, why);
     };
     if (op == "begin")
     {
-        if (f.file) { f.file.reset(); std::error_code ec; fs::remove (toPath (f.part), ec); f = {}; }   // a send that stopped half way
+        dropPart();   // a send that stopped half way
+        f = {};
         const auto name = m.value ("name", std::string());
         // a plain file name only: nothing that could reach outside the folder
         if (name.empty() || name.size() > 120 || name.find_first_of ("/\\:*?\"<>|") != std::string::npos
             || name[0] == '.' || name.find ("..") != std::string::npos)
             return fail ("That file name won't do: rename it and send it again");
-        std::string ext = fromPath (toPath (name).extension());
-        std::transform (ext.begin(), ext.end(), ext.begin(), [] (unsigned char c) { return (char) std::tolower (c); });
+        const auto ext = lowerCase (fromPath (toPath (name).extension()));
         std::string dir;
         int64_t most = 0;
         if (ext == ".nam") { f.kind = "capture"; dir = capturesDir; most = 50ll << 20; }
@@ -2048,12 +2046,11 @@ std::string Controller::fileMessage (const std::string& line)
         queueToast (kind == "capture" ? "CAPTURE RECEIVED" : kind == "space" ? "SPACE RECEIVED" : "VIDEO RECEIVED");
         queueState();   // the capture and space lists include it now
         f = {};
-        auto a = answer (true);
-        return a;
+        return answer (true);
     }
     if (op == "cancel")
     {
-        if (f.file) { f.file.reset(); std::error_code ec; fs::remove (toPath (f.part), ec); }
+        dropPart();
         f = {};
         return answer (true);
     }
@@ -2072,7 +2069,8 @@ std::string Controller::firmwareMessage (const std::string& line)
         return dumps (a);
     };
     auto fail = [&] (const std::string& why) {
-        if (fw.file) { fw.file.reset(); std::error_code ec; fs::remove (toPath (fw.path), ec); }
+        fw.file.reset();
+        if (! fw.path.empty()) { std::error_code ec; fs::remove (toPath (fw.path), ec); }
         fw = {};
         if (onLog) onLog ("Update firmware: " + why);
         return answer (false, why);
@@ -2245,7 +2243,7 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         if (onLog) onLog ("Watch: connected, app " + m.value ("v", std::string ("0.4.13 or older")) + ", " + m.value ("net", std::string ("network unknown"))
                           + ", dropped " + std::to_string (m.value ("drops", 0)) + " times since it opened");
         if (s->wifiOn && s->wifiPass.size() >= 8)
-            reply (json ({ { "t", "watchWifi" }, { "ssid", s->wifiSsid }, { "pass", s->wifiPass } }).dump());
+            reply (dumps (json { { "t", "watchWifi" }, { "ssid", s->wifiSsid }, { "pass", s->wifiPass } }));
     }
     else if (t == "wrist")   // the watch, about 50 times a second
     {
@@ -2340,7 +2338,7 @@ void Controller::handleMessageInner (const std::string& line, const std::functio
         const std::string op = m.value ("op", std::string());
         engine.action (op == "clear" ? Action::DroneClear : Action::DroneCapture);
     }
-    else if (t == "tap") tapTempo (std::chrono::duration<double> (std::chrono::steady_clock::now().time_since_epoch()).count());
+    else if (t == "tap") tapTempo (steadyNow());
     else if (t == "capture")
     {
         std::string err;

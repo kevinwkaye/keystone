@@ -402,7 +402,9 @@ void Projector::run()
 
             if (mpv && (! mpv->isRunning() || sock < 0))
             {
-                // gone straight away twice on the GPU: use the simple output instead
+                // gone straight away twice in a row on the GPU: use the simple output instead
+                // (one that ran for a while and then stopped doesn't count towards it)
+                if (now - launchedAt >= 8) quickExits = 0;
                 if (now - launchedAt < 8 && ++quickExits >= 2 && output < 2) { ++output; quickExits = 0; if (log) log ("Projector: falling back to " + String (output == 1 ? "gpu (no reaction)" : "the simple output")); }
                 if (log) log ("Projector: the video player stopped, starting it again");
                 quit();
@@ -410,10 +412,9 @@ void Projector::run()
             const bool wanted = set == "auto" && hasScreen && player;
             if (! player)
             {
-                // the package carries it (0.6.0, pi/player from 0.6.3): ask the Pi's helper once, a
-                // little after start, and show what it says in player.txt (0.6.3)
-                const auto pi = File::getSpecialLocation (File::currentExecutableFile).getSiblingFile ("pi");
-                const bool carried = pi.getChildFile ("player").isDirectory() || pi.getChildFile ("debs").isDirectory();
+                // the package carries it in pi/player: ask the Pi's helper once, a little after
+                // start, and show what it says in player.txt (0.6.3)
+                const bool carried = File::getSpecialLocation (File::currentExecutableFile).getSiblingFile ("pi").getChildFile ("player").isDirectory();
                 if (carried && ! asked && now - startedAt > 20 && askForPlayer) { asked = true; askForPlayer(); if (log) log ("Projector: asking the Pi to install the video player"); }
                 const auto said = folder.getParentDirectory().getChildFile ("Updates").getChildFile ("player.txt").loadFileAsString().trim();
                 if (said.startsWith ("failed")) setProblem ("The video player couldn't install (" + said.fromFirstOccurrenceOf ("failed:", false, false).trim().substring (0, 160) + "). Restart the Pi to try again");

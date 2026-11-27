@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <thread>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 
 #ifdef KEYSTONE_WITH_NAM
@@ -128,8 +129,21 @@ struct Engine::Impl
     }
     float lsE = 0, lsHi = 0;
 
-    // tails ring over a part change: a short window in which delay and reverb switched
-    // off keep their tails instead of fading them out
+    // the last n samples of the tuner's ring into buf (oldest first); returns their peak
+    double snapshot (std::vector<float>& buf, int n)
+    {
+        buf.resize ((size_t) n);
+        const int end = tunerPos.load (std::memory_order_acquire);
+        double peak = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            buf[(size_t) i] = tunerRing[(size_t) ((end - n + 1 + i) & 8191)];
+            peak = std::max (peak, (double) std::fabs (buf[(size_t) i]));
+        }
+        return peak;
+    }
+    std::vector<float> tunerBuf, listenBuf;   // the housekeeping thread's, kept between runs
+
     // Kuddle
     kud::Engine kuddle;
     std::vector<float> kudL, kudR;
@@ -151,6 +165,8 @@ struct Engine::Impl
     bool kuddleRunning = false;
     std::atomic<float> kudGr { 0 };
 
+    // tails ring over a part change: a short window in which delay and reverb switched
+    // off keep their tails instead of fading them out
     std::atomic<int> spillRequests { 0 };
     int spillSeen = 0;
     int64_t spillLeft = 0;
@@ -163,8 +179,6 @@ struct Engine::Impl
     // light mode in Auto: drop effects quality before adding latency
     float loadHigh = 0, loadLow = 0;
     bool autoLight = false;
-
-    // delay tap tempo
 
     std::string capName;
     mutable std::mutex capLock;
@@ -448,7 +462,7 @@ void Engine::process (const float* in, float* out, int numSamples)
         else if (load < 0.45f) { d.loadLow += blockSec; d.loadHigh = 0; }
         if (d.loadHigh > 2.0f) d.autoLight = true;
         if (d.loadLow > 10.0f) d.autoLight = false;
-        const bool light = q == 2 || (q == 0 && (d.autoLight || lightRequest.load()));
+        const bool light = q == 2 || (q == 0 && d.autoLight);
         d.light.store (light);
 
         // bloom zones: heel to halfway brings in grains, halfway to toe the wash.
@@ -460,8 +474,6 @@ void Engine::process (const float* in, float* out, int numSamples)
         const float z3 = clampf ((bl - 0.5f) * 2.0f, 0.0f, 1.0f);
         const bool heelBack = bloomOn && bl < 0.02f;
         const bool cutTails = Vi (v, P::BloomTails) == 0;
-
-        // tap tempo for the delay: time between two taps under 2 s
 
         // ---- the other pedal jobs ----
         // dirt blend: heel clean, the drive fully in by halfway, Bitrot from "joins at" to
@@ -595,12 +607,12 @@ void Engine::process (const float* in, float* out, int numSamples)
         d.highLevel.set (dbToGain (V (v, P::SplitHighLevel)));
         d.outLevel.set (dbToGain (V (v, P::OutLevel)));
         d.bitrotOn.set (Vb (v, P::BitrotOn) ? bitMix : 0.0f);
-        // with the watch on and the pedal Bitrot's own, Bitrot is all you hear
-        d.bitrotClean.set (Vi (v, P::BitrotPedal) > 0 && watchOn.load() ? 0.0f : V (v, P::BitrotClean));
         {
+            // with the watch on and the pedal Bitrot's own, Bitrot is all you hear
+            const float keep = Vi (v, P::BitrotPedal) > 0 && watchOn.load() ? 0.0f : V (v, P::BitrotClean);
+            d.bitrotClean.set (keep);
             // Level is a gain stage after the drive: at 40% the clean you keep plus the synth
             // come out +3 dB over the sound going in (2x the power), a standard step up
-            const float keep = Vi (v, P::BitrotPedal) > 0 && watchOn.load() ? 0.0f : V (v, P::BitrotClean);
             d.bitTrim = std::sqrt (std::max (kBitStep * kBitStep - keep * keep, 0.25f)) * V (v, P::BitrotVol) / 0.4f;
         }
         d.preOn.set (Vb (v, P::PreOn) ? 1.0f : 0.0f);
@@ -644,7 +656,6 @@ void Engine::process (const float* in, float* out, int numSamples)
                 d.split.split (s, lo, hi);
                 d.listen (raw, hi);
                 d.lowBuf[(size_t) i] = d.low.process (lo);
-                (void) hi;
                 const float full = d.subCut2.process (d.subCut1.process (s));
                 d.highBuf[(size_t) i] = full;
                 // Speckle's input: the bass exactly as the interface gives it, as Kaleidoscope
@@ -968,16 +979,9 @@ void Engine::idle()
     {
         d.lastListenRun = std::chrono::steady_clock::now();
         const int n = 1024;   // 85 ms at 12 kHz: over three cycles of low E
-        std::vector<float> buf ((size_t) n);
-        const int end = d.tunerPos.load (std::memory_order_acquire);
-        double peak = 0;
-        for (int i = 0; i < n; ++i)
-        {
-            buf[(size_t) i] = d.tunerRing[(size_t) ((end - n + 1 + i) & 8191)];
-            peak = std::max (peak, (double) std::fabs (buf[(size_t) i]));
-        }
+        const double peak = d.snapshot (d.listenBuf, n);
         double clarity = 0;
-        const double f = peak < 2.0e-3 ? 0.0 : yinPitch (buf.data(), n, d.sr / 4.0, 36.0, 1000.0, clarity);
+        const double f = peak < 2.0e-3 ? 0.0 : yinPitch (d.listenBuf.data(), n, d.sr / 4.0, 36.0, 1000.0, clarity);
         if (f > 0 && clarity > 0.6)
         {
             const int midi = (int) std::lround (69.0 + 12.0 * std::log2 (f / 440.0));
@@ -993,17 +997,10 @@ void Engine::idle()
     if (now - d.lastTunerRun < std::chrono::milliseconds (45)) return;
     d.lastTunerRun = now;
     const int n = 2048;   // 170 ms at 12 kHz: three cycles of low B at 31 Hz
-    std::vector<float> buf ((size_t) n);
-    const int end = d.tunerPos.load (std::memory_order_acquire);
-    double peak = 0;
-    for (int i = 0; i < n; ++i)
-    {
-        buf[(size_t) i] = d.tunerRing[(size_t) ((end - n + 1 + i) & 8191)];
-        peak = std::max (peak, (double) std::fabs (buf[(size_t) i]));
-    }
+    const double peak = d.snapshot (d.tunerBuf, n);
     if (peak < 2.0e-3) { d.tunerMidi.store (-1); d.tunerLastMidi = -1; return; }
     double clarity = 0;
-    const double f = yinPitch (buf.data(), n, d.sr / 4.0, 28.0, 1000.0, clarity);
+    const double f = yinPitch (d.tunerBuf.data(), n, d.sr / 4.0, 28.0, 1000.0, clarity);
     if (f <= 0 || clarity < 0.75) return;   // keep the last reading through a brief unclear patch
     const auto r = nameNote (f, getParam (P::TunerRef));
     if (r.midi != d.tunerLastMidi) { d.tunerSmoothCents = r.cents; d.tunerLastMidi = r.midi; }
@@ -1011,6 +1008,21 @@ void Engine::idle()
     d.tunerMidi.store (r.midi);
     d.tunerCents.store ((float) d.tunerSmoothCents);
     d.tunerFreq.store ((float) f);
+}
+
+// a file's name for the phone: no folder, and no extension when it's the expected one (any case)
+static std::string displayName (const std::string& path, const char* ext)
+{
+    const auto slash = path.find_last_of ("/\\");
+    std::string name = slash == std::string::npos ? path : path.substr (slash + 1);
+    const size_t e = std::strlen (ext);
+    if (name.size() > e)
+    {
+        std::string tail = name.substr (name.size() - e);
+        for (auto& c : tail) c = (char) std::tolower ((unsigned char) c);
+        if (tail == ext) name.resize (name.size() - e);
+    }
+    return name;
 }
 
 bool Engine::loadCapture (const std::string& path, std::string& error)
@@ -1030,10 +1042,7 @@ bool Engine::loadCapture (const std::string& path, std::string& error)
             if (impl->capture.offer (raw))
             {
                 std::lock_guard<std::mutex> l (impl->capLock);
-                const auto slash = path.find_last_of ("/\\");
-                std::string name = slash == std::string::npos ? path : path.substr (slash + 1);
-                if (name.size() > 4 && name.substr (name.size() - 4) == ".nam") name.resize (name.size() - 4);
-                impl->capName = name;
+                impl->capName = displayName (path, ".nam");
                 impl->haveCapture.store (true);
                 return true;
             }
@@ -1092,10 +1101,7 @@ bool Engine::loadSpace (const std::string& path, std::string& error)
         {
             std::lock_guard<std::mutex> l (d.spaceLock);
             d.spacePath = path;
-            const auto slash = path.find_last_of ("/\\");
-            std::string name = slash == std::string::npos ? path : path.substr (slash + 1);
-            if (name.size() > 4 && (name.substr (name.size() - 4) == ".wav" || name.substr (name.size() - 4) == ".WAV")) name.resize (name.size() - 4);
-            d.spaceName = name;
+            d.spaceName = displayName (path, ".wav");
             return true;
         }
         d.reverb.convolver().collect();

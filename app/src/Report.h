@@ -67,9 +67,10 @@ public:
     std::function<void (const juce::String&)> log;
 
     ReportMaker() : juce::Thread ("report") {}
-    ~ReportMaker() override { stopThread (20000); }
+    ~ReportMaker() override { stop(); }
 
     juce::File folder() const { return home.getChildFile ("Reports"); }
+    void stop() { stopThread (20000); }
 
     static bool validName (const juce::String& n)
     {
@@ -174,13 +175,15 @@ private:
                 if (f.hasFileExtension ("json")) addSettings (zip, started, f); else addFile (f, "settings/" + f.getFileName());
             addText ("folders.txt", folders());
            #if JUCE_LINUX
-            addText ("system.txt", systemFacts());
-            addText ("journal.txt", cmd ({ "journalctl", "-u", "keystone", "-u", "keystone-update", "-u", "keystone-wifi", "-u", "keystone-power",
+            // each of these can take a few seconds: Keystone stopping doesn't wait for them all
+            if (! threadShouldExit()) addText ("system.txt", systemFacts());
+            if (! threadShouldExit()) addText ("journal.txt", cmd ({ "journalctl", "-u", "keystone", "-u", "keystone-update", "-u", "keystone-wifi", "-u", "keystone-power",
                                            "-u", "keystone-performance", "--since", "-12h", "-n", "6000", "--no-pager", "-o", "short-iso" }, 15));
-            addText ("kernel.txt", cmd ({ "journalctl", "-k", "-b", "-n", "1500", "--no-pager", "-o", "short-iso" }, 15));
-            addText ("previous-boot.txt", cmd ({ "journalctl", "-b", "-1", "-n", "400", "--no-pager", "-o", "short-iso" }, 15));
+            if (! threadShouldExit()) addText ("kernel.txt", cmd ({ "journalctl", "-k", "-b", "-n", "1500", "--no-pager", "-o", "short-iso" }, 15));
+            if (! threadShouldExit()) addText ("previous-boot.txt", cmd ({ "journalctl", "-b", "-1", "-n", "400", "--no-pager", "-o", "short-iso" }, 15));
            #endif
 
+            if (threadShouldExit()) return;   // Keystone is stopping: no half-made report
             const auto tmp = folder().getChildFile (name + ".part");
             tmp.deleteFile();
             {

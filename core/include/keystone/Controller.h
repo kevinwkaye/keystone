@@ -1,7 +1,7 @@
 #pragma once
 // Keystone controller: everything between the engine and the outside world that isn't
 // audio or hardware. Song presets and the setlist, footswitch jobs, Keep, captures and
-// the link protocol the phone speaks. Portable: the Windows app uses it now, the Pi later.
+// the link protocol the phone speaks. Portable: the same code runs on the Pi and the laptop.
 //
 // Thread safety: call every method from one control thread (the host's message thread).
 
@@ -18,7 +18,6 @@ namespace ks
 class Controller
 {
 public:
-    void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
     static constexpr int kMaxSongs = 15;     // songs; their parts don't count
     static constexpr int kMaxEntries = 40;   // songs and parts together
 #ifndef KEYSTONE_VERSION
@@ -31,6 +30,7 @@ public:
     ~Controller();
 
     void load();   // setlist, settings and the saved capture
+    void saveGlobals() const { saveSettings(); }   // after the app changes a global setting itself
 
     // ---- footswitches: raw presses from any source, plus tick() regularly ----
     void footswitchPress (int sw, double nowSeconds);
@@ -144,9 +144,6 @@ public:
     // the rehearsal recorder: marks land in the take being recorded
     void mark (const std::string& what);
     class Recorder& recorder();
-private:
-    void syncPairs();
-public:
 
     // for tests
     void setValue (P p, float v, bool broadcast = true);
@@ -193,5 +190,7 @@ private:
     void setlistOp (const std::string& op, int i, int to, const std::string& name);
     std::map<std::string, float> soundNow (std::map<std::string, float> into) const;   // what you're playing, as a song's values
     bool sameSong (int a, int b) const;   // both in one song (it or its parts)
+    int headOf (int i) const;             // the song an entry belongs to (itself, or the song above a part)
+    void syncPairs();                     // which two-switch combos the footswitch logic listens for
 };
 } // namespace ks

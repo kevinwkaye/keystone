@@ -27,7 +27,7 @@ inline Typeface::Ptr bold()
 }
 inline Font font (float h, bool b = false) { return Font (FontOptions (b ? bold() : regular()).withHeight (h)); }
 
-inline void pebble (Graphics& g, Rectangle<float> r)
+inline void hev (Graphics& g, Rectangle<float> r)
 {
     const float s = r.getWidth() / 200.0f;
     auto blob = [&] (float dx, float dy)
@@ -87,10 +87,10 @@ public:
         const Health h = getHealth ? getHealth() : Health();
         auto r = getLocalBounds().reduced (24, 20).toFloat();
 
-        // header: Pebble, name, song on a flip card
+        // header: Hev, name, song on a flip card
         const float headTop = r.getY();
         auto head = r.removeFromTop (52);
-        pebble (g, head.removeFromLeft (48).withSizeKeepingCentre (48, 48));
+        hev (g, head.removeFromLeft (48).withSizeKeepingCentre (48, 48));
         head.removeFromLeft (12);
         g.setColour (text); g.setFont (font (24, true));
         g.drawText ("KEYSTONE", head.withHeight (30), Justification::topLeft);

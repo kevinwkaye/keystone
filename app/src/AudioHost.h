@@ -1,6 +1,6 @@
 #pragma once
-// Runs the engine on the audio interface. Windows: WASAPI exclusive (Windows' low-latency
-// mode), then the shared low-latency mode, then plain shared as fallbacks. Linux: ALSA.
+// Runs the engine on the audio interface. The Pi: ALSA. The laptop: WASAPI exclusive, then the
+// shared low-latency mode, then plain shared as fallbacks, or ASIO if picked on the phone.
 // Prefers the Behringer UM2 (it shows up as "USB Audio CODEC") but works with any
 // interface. Re-opens the device by itself if it's unplugged and plugged back in.
 
@@ -31,15 +31,15 @@ public:
     bool running() const { return isRunning.load(); }
     int dropouts() const;                      // the device's own count plus late callbacks
     int inputChannel() const { return chosenChannel.load(); }
-    juce::String deviceName() const;
     bool onAudioInterface() const { return onInterface.load(); }
     void restart() { needsReopen.store (true); }
     int reconnects() const { return reconnectCount.load(); }   // the interface dropped and came back
     void showDriverPanel();   // the ASIO driver's own settings window (message thread)
-    // Auto buffer: called when Keystone steps the buffer up after dropouts (0 = 3 ms ... 3 = 10 ms)
+    // Auto buffer: called when Keystone steps the buffer up after dropouts (step 0 is the smallest, 3 is 10 ms)
     std::function<void (int)> onBufferStepLearnt;
 
-    // Find the best buffer: tries 3, 4, 6 and 10 ms for 15 s each, smallest first, and keeps
+    // Find the best buffer: tries four sizes (2, 4, 6, 10 ms on the Pi, 3, 4, 6, 10 on the laptop)
+    // for 15 s each, smallest first, and keeps
     // the smallest that ran without dropouts (message thread)
     void findBestBuffer();
     void stopFindingBuffer();
@@ -78,12 +78,12 @@ private:
     std::atomic<int64_t> callbacks { 0 };   // the watchdog checks these keep coming
     int64_t lastCallbacks = -1;
     int stalledTicks = 0;
-    int openedBuffer = 0, lastDropCheck = 0, dropTicks = 0, lastLate = 0, lastXrun = 0;
+    int openedBuffer = 0, dropTicks = 0, lastLate = 0, lastXrun = 0;
     juce::String openedForSetting;
     // the buffer finder
     bool finding = false;
     int findStep = 0, findTicks = 0, findLate0 = 0, findXr0 = 0, findWasMs = 0, findResult[4] { -1, -1, -1, -1 };
-    float findCpu = 0, findCpuStep = 0, foundLat = 0;
+    float findCpu = 0, findCpuStep = 0;
     int foundMs = 0;
     double findDoneAt = 0;
     void findStartStep();

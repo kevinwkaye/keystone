@@ -181,7 +181,7 @@ bool AudioHost::tryOpen()
         }
         onInterface.store (found);
         if (! found)
-            Logger::writeToLog ("Audio: the audio interface isn't plugged in, so Keystone is using the laptop's own sound for now."
+            Logger::writeToLog ("Audio: the audio interface isn't plugged in, so Keystone is using the computer's own sound for now."
                                 " It switches over as soon as the interface appears.");
         Logger::writeToLog ("Audio: " + openType + ", " + openName + ", " + String (dev->getCurrentSampleRate()) + " Hz, "
                             + String (dev->getCurrentBufferSizeSamples()) + " samples, round trip about "
@@ -215,12 +215,6 @@ int AudioHost::dropouts() const
     if (auto* dev = const_cast<AudioDeviceManager&> (deviceManager).getCurrentAudioDevice())
         n += std::max (0, dev->getXRunCount());
     return n;
-}
-
-String AudioHost::deviceName() const
-{
-    const ScopedLock l (statusLock);
-    return openName;
 }
 
 void AudioHost::audioDeviceStopped() { isRunning.store (false); }
@@ -348,7 +342,6 @@ void AudioHost::findFinish (int step)
     if (onBufferFound) onBufferFound (step);   // Auto, with this step learnt
     openedForSetting = settingNow();
     tryOpen();
-    foundLat = (float) latency.load();
     Logger::writeToLog ("Audio: buffer finder chose " + String (foundMs) + " ms");
 }
 
@@ -460,14 +453,14 @@ void AudioHost::timerCallback()
         {
             Logger::writeToLog ("Audio: too many dropouts, moving the buffer up a step");
             if (onBufferStepLearnt) onBufferStepLearnt (step + 1);
-            openedForSetting = String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep)) + "/" + String (engine.getParam (ks::P::OutMode));
+            openedForSetting = settingNow();
             if (tryOpen()) Logger::writeToLog ("Audio: device open again");
             return;
         }
     }
     // the buffer setting was changed on the phone
     {
-        const String setting = String (engine.getParam (ks::P::OutBuffer)) + "/" + String (engine.getParam (ks::P::OutBufferStep)) + "/" + String (engine.getParam (ks::P::OutMode));
+        const auto setting = settingNow();
         if (openedForSetting.isEmpty()) openedForSetting = setting;
         else if (setting != openedForSetting)
         {
@@ -477,7 +470,7 @@ void AudioHost::timerCallback()
             return;
         }
     }
-    // running on the laptop's own sound: keep looking for the interface and move to it
+    // running on the computer's own sound: keep looking for the interface and move to it
     if (! onInterface.load() && interfacePresent())
     {
         Logger::writeToLog ("Audio: the audio interface has appeared, switching to it");
@@ -485,8 +478,6 @@ void AudioHost::timerCallback()
     }
 }
 
-// Auto: the buffer Keystone has learnt works on this computer (starts at 3 ms); or the
-// size chosen on the phone (Tone, Output, Setup).
 void AudioHost::showDriverPanel()
 {
     auto* dev = deviceManager.getCurrentAudioDevice();
@@ -496,6 +487,8 @@ void AudioHost::showDriverPanel()
     restart();   // reopen so a new buffer size takes effect
 }
 
+// Auto: the buffer Keystone has learnt works on this computer (starts at the smallest); or
+// the size chosen on the phone (Tone, Output, Setup).
 int AudioHost::targetBufferMs() const
 {
     if (finding) return kFindMs[findStep];

@@ -66,18 +66,7 @@ rm -rf "$TMP"
 chmod 755 "$ROOT/$NEXT/keystone"
 log "Unpacked $VERSION into slot $NEXT (slot $CUR keeps $FROM)"
 
-# the projector's video player (0.6.0): the package carries it, as the Pi has no internet
-# on Keystone's own Wi-Fi. Installed once; the packages aren't kept.
-if [ -d "$ROOT/$NEXT/pi/debs" ]; then
-    if ! command -v mpv >/dev/null 2>&1 && [ -z "${KS_NO_APT:-}" ]; then
-        if DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-download --no-install-recommends "$ROOT/$NEXT/pi/debs/"*.deb >> "$LOG" 2>&1; then
-            log "Installed the video player for the projector"
-        else
-            log "Couldn't install the video player (the rest of the update carries on)"
-        fi
-    fi
-    rm -rf "$ROOT/$NEXT/pi/debs"
-fi
+# (the projector's video player, carried in pi/player, goes in from keystone-maintain.sh)
 # Keystone's own service settings from the new version (0.6.0 adds the render group for the projector)
 if [ -f "$ROOT/$NEXT/pi/keystone.service" ] && ! cmp -s "$ROOT/$NEXT/pi/keystone.service" /etc/systemd/system/keystone.service; then
     install -m 644 "$ROOT/$NEXT/pi/keystone.service" /etc/systemd/system/keystone.service

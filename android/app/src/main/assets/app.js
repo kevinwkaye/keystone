@@ -242,14 +242,14 @@ var KS = (function () {
     grip: '<svg width="14" height="20" viewBox="0 0 14 20" aria-hidden="true"><circle cx="4" cy="4" r="2" fill="#8A847A"/><circle cx="10" cy="4" r="2" fill="#8A847A"/><circle cx="4" cy="10" r="2" fill="#8A847A"/><circle cx="10" cy="10" r="2" fill="#8A847A"/><circle cx="4" cy="16" r="2" fill="#8A847A"/><circle cx="10" cy="16" r="2" fill="#8A847A"/></svg>',
     dots: '<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="4" cy="10" r="2" fill="#F2EDE4"/><circle cx="10" cy="10" r="2" fill="#F2EDE4"/><circle cx="16" cy="10" r="2" fill="#F2EDE4"/></svg>'
   };
-  var PEBBLE = '<svg class="pebble" id="pebble" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Heavy for his Size">' +
+  var HEV_BADGE = '<svg class="hevbadge" id="hevbadge" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Heavy for his Size">' +
     '<path transform="translate(7 9)" d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#2329A8"/>' +
     '<path d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#4B57FF"/>' +
     '<g class="eye"><circle cx="78" cy="80" r="18" fill="#FFFFFF"/><circle cx="80" cy="82" r="9" fill="#0B0B12"/></g>' +
     '<g class="eye"><circle cx="122" cy="80" r="18" fill="#FFFFFF"/><circle cx="124" cy="82" r="9" fill="#0B0B12"/></g>' +
     '<path d="M88 116 Q 100 126, 112 116" fill="none" stroke="#0B0B12" stroke-width="6" stroke-linecap="round"/></svg>';
 
-  var PEBBLE_K = '<svg class="pebble" id="pebble" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Heavy for his Size in shades and a pork pie hat">' +
+  var HEV_BADGE_K = '<svg class="hevbadge" id="hevbadge" width="44" height="44" viewBox="0 0 200 200" role="img" aria-label="Heavy for his Size in shades and a pork pie hat">' +
     '<path transform="translate(7 9)" d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#B8661E"/>' +
     '<path d="M100 22 C 146 20, 176 54, 174 100 C 172 146, 140 176, 98 174 C 54 172, 24 142, 26 98 C 28 56, 58 24, 100 22 Z" fill="#F28C28"/>' +
     '<rect x="56" y="72" width="40" height="22" rx="8" fill="#141110"/><rect x="104" y="72" width="40" height="22" rx="8" fill="#141110"/><rect x="94" y="78" width="12" height="5" fill="#141110"/>' +
@@ -341,7 +341,7 @@ var KS = (function () {
   var player = new Audio(), cache = {}, cacheOrder = [], fetching = null, fetchQueue = [];
   function labelOf(i) { var h = headOf(i); return isPart(i) ? S.songs[h] + ', ' + S.songs[i] : S.songs[i]; }
   function songNoOf(label) { for (var i = 0; i < S.songs.length; i++) if (labelOf(i) === label) return songNo(i); return 0; }
-  // files come from the laptop in pieces over the link, then play from the phone's memory
+  // files come from Keystone in pieces over the link, then play from the phone's memory
   function fetchFile(file, then) {
     if (cache[file]) { if (then) then(cache[file]); return; }
     if (fetching && fetching.file === file) { if (then) fetching.then = then; return; }
@@ -561,7 +561,7 @@ var KS = (function () {
       '<span class="small">You only do this once. The phone finds the watch by itself, so normally there\'s nothing else to type.</span></section>';
   }
   function rigDevice() { return S.health && S.health.device === 'pi' ? 'pi' : 'laptop'; }
-  // Buffer: one tap finds the smallest size this laptop plays without dropouts
+  // Buffer: one tap finds the smallest size Keystone plays without dropouts
   function bufferCard() {
     var m = S.meter || {}, bf = m.bf, h = S.health;
     var ms = m.buf && m.sr ? Math.round(1000 * m.buf / m.sr * 10) / 10 : null;
@@ -918,13 +918,6 @@ var KS = (function () {
     var text = !m.jobOn && job !== 2 ? 'Saved sound, move the pedal' : m.wait ? 'Waiting: pedal at ' + Math.round((m.pedal || 0) * 100) + '%' : Math.round(v * 100) + '%';
     return { job: job, name: job === 4 ? 'Bitrot: ' + bitCfg.name : JOBS[job], zones: zones, v: v, text: text };
   }
-  // Stomp or Song mode, shown above the banks; tap to swap (C and D together on the floor)
-  function modeBar() {
-    var song = S.footMode === 1;
-    return '<button type="button" class="mode' + (song ? ' song' : '') + '" data-act="footMode">' +
-      '<span class="mlab">' + (song ? 'SONG MODE' : 'STOMP MODE') + '</span>' +
-      '<span class="small">' + (song ? 'A last song · B next part · C next song' : 'C and D together for Song mode') + '</span></button>';
-  }
   function bankBar() {
     return '<div class="banks">' + BANKS.map(function (b, i) {
       var cur = i === S.bank;
@@ -994,7 +987,7 @@ var KS = (function () {
       '<span class="small">Type Keystone\'s address, not the phone\'s. On Keystone\'s own Wi-Fi it\'s 10.42.0.1.</span></div>' : '';
     var note = Date.now() < S.noteUntil ? '<div class="note"><input id="noteText" maxlength="200" placeholder="Add a note to that Keep (optional)" aria-label="Note for the last Keep"><button type="button" data-act="note">Save</button></div>' : '';
     return '<section class="screen">' +
-      '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to ' + rigNext().name + '">' + (K ? PEBBLE_K : PEBBLE) +
+      '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to ' + rigNext().name + '">' + (K ? HEV_BADGE_K : HEV_BADGE) +
       '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">' + (K ? 'Kuddle' : 'Keystone') + '</span><span class="swap">TAP FOR ' + rigNext().name.toUpperCase() + '</span></span></button><span class="tops">' + recPill() + pill() + '</span></div>' +
       offline +
       '<div class="songbar"><button type="button" class="arrow" data-act="prev" aria-label="Previous song">' + ICON.left + '</button>' +
@@ -1053,7 +1046,7 @@ var KS = (function () {
       msg: !valid ? 'Play a string' : inTune ? 'In tune' : Math.abs(cents) < 10 ? 'Nearly there. Green when within 2 cents.' : cents < 0 ? 'Flat: tune up' : 'Sharp: tune down'
     };
   }
-  // Hev's eyes tune, as Pebble's LED eyes do on the pedal: left red when flat, right red when
+  // Hev's eyes tune, as his LED eyes do on the pedal: left red when flat, right red when
   // sharp, both green in tune (0.5.9)
   function hevEyes(t) {
     var valid = t && t.valid, c = valid ? t.cents : 0;
@@ -1518,7 +1511,7 @@ var KS = (function () {
       ? '<button type="button" class="wide" disabled>' + esc(sel.name) + ' is loaded</button>'
       : '<button type="button" class="wide" data-act="kalLoad" style="background:' + sel.colour + ';color:#111111">Load ' + esc(sel.name) + '</button>';
     return '<section class="screen">' +
-      '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to Keystone">' + PEBBLE +
+      '<div class="top"><button type="button" class="brand rig" data-act="rig" aria-label="Switch to Keystone">' + HEV_BADGE +
       '<span style="display:flex;flex-direction:column;align-items:flex-start;gap:3px"><span class="title">Kaleidoscope</span><span class="swap">TAP FOR KEYSTONE</span></span></button><span class="tops">' + pill() + '</span></div>' +
       (lm ? '<section class="card" style="flex-direction:row;align-items:center;gap:14px">' + kalFlip(lm.name.charAt(0), lm.colour) +
         '<span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span class="label">Loaded now</span><span style="font-size:22px;font-weight:700">' + esc(lm.name) + '</span><span class="small">' + esc(lm.from) + '</span>' + (S.kalId === loaded ? kalDots(loaded) : '') + '</span>' +
@@ -1794,7 +1787,7 @@ var KS = (function () {
     render(true); sheet();
   }
 
-  // ---------------------------------------------------------------- toast and Pebble
+  // ---------------------------------------------------------------- toast and Hev's nod
   var toastEl = document.getElementById('toast'), toastTimer = null;
   function toast(text) {
     toastEl.innerHTML = flip(text.toUpperCase(), 'flipping');
@@ -1803,7 +1796,7 @@ var KS = (function () {
     toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 1500);
   }
   function nod() {
-    var p = document.getElementById('pebble');
+    var p = document.getElementById('hevbadge');
     if (p) { p.classList.remove('nod'); void p.offsetWidth; p.classList.add('nod'); }
   }
 
@@ -2132,6 +2125,8 @@ var KS = (function () {
   }
 
   loadOffline();
+  // a report being made carries on in the phone app if the page reloads
+  try { if (window.KeystoneNative && KeystoneNative.reportStatus) S.report = JSON.parse(KeystoneNative.reportStatus()); } catch (e) {}
   setInterval(function () { if (connected()) strip(); }, 1000);
   render();
   return { onMessage: onMessage, onLink: onLink, back: back, state: S, refresh: function () { render(true); }, onUpdate: onUpdate, onFiles: onFiles, onReport: onReport };

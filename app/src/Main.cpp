@@ -1,8 +1,9 @@
 // Keystone headless app.
 //
-// No window: it starts with Windows, runs with the lid closed, plays the bass through the
-// audio interface, listens to the footswitches and expression pedal over USB MIDI, and
-// talks to the phone over the local network. On Windows a tray icon shows its status for
+// No window: on the Pi it runs as a service from boot (on the laptop it starts with Windows
+// and runs with the lid closed). It plays the bass through the audio interface, listens to
+// the footswitches and expression pedal over USB MIDI, drives the projector, and talks to
+// the phone and watch over the local network. On Windows a tray icon shows its status for
 // anyone with a screen. Logs go to Documents/Keystone/keystone.log.
 
 #include "AudioHost.h"
@@ -145,7 +146,7 @@ public:
 };
 
 #if KEYSTONE_TRAY
-// A small Pebble in the tray, with the status on hover and a menu.
+// A small Hev in the tray, with the status on hover and a menu.
 class Tray : public SystemTrayIconComponent
 {
 public:
@@ -238,9 +239,8 @@ public:
         watchdog.startThread();
 
 #if JUCE_WINDOWS
-        // keep the laptop awake with the lid closed and give audio priority
+        // keep the laptop awake with the lid closed (raiseProcessPriority has set the priority)
         SetThreadExecutionState (ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED);
-        SetPriorityClass (GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 #endif
 
         // command line: --device "part of a name" --buffer 128 --list-devices
@@ -292,7 +292,6 @@ public:
         housekeeping = std::make_unique<Housekeeping> (engine);
         housekeeping->startThread (Thread::Priority::low);
 
-        controller->onLog = [] (const std::string& msg) { Logger::writeToLog (String (msg)); };
         controller->onRestartAudio = [this] { Logger::writeToLog ("Audio: restart asked for"); audio->restart(); };
         controller->onBufferFind = [this] (bool start)
         {
@@ -361,6 +360,7 @@ public:
     void shutdown() override
     {
         stopTimer();
+        reports.stop();   // a report half made is thrown away
         stopWifi();
         watchdog.stopThread (2000);
         link.stop();
@@ -526,6 +526,8 @@ public:
 private:
     void wireController()
     {
+        // first, so anything load() finds (a damaged file restored from its backup) is logged
+        controller->onLog = [] (const std::string& msg) { Logger::writeToLog (String (msg)); };
         controller->onKeep = [this] (const std::string& entryJson)
         {
             auto v = JSON::parse (String (entryJson));

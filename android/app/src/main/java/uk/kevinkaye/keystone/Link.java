@@ -107,7 +107,7 @@ final class Link {
             InetSocketAddress target = null;
             String manual = prefs().getString("manual", null);
             if (manual != null && !manual.isEmpty() && isOwnAddress(manual)) {
-                listener.onStatus("searching", nets + " " + manual + " is this phone. Type the laptop's address instead.");
+                listener.onStatus("searching", nets + " " + manual + " is this phone. Type Keystone's address instead.");
                 manual = null;
             }
             if (manual != null && !manual.isEmpty()) {

@@ -2445,6 +2445,7 @@ static void testSendFiles()
     msg (R"({"t":"file","op":"begin","name":"short.nam","size":4})");
     msg (R"({"t":"file","op":"chunk","seq":0,"data":"YWJj"})");
     CHECK (msg (R"({"t":"file","op":"end"})").find ("didn't arrive whole") != std::string::npos && ! std::filesystem::exists (dir / "Captures" / "short.nam"), "a file that didn't arrive whole isn't kept");
+    CHECK (! std::filesystem::exists (dir / "Captures" / ".short.nam.part"), "nor is the half-sent piece left behind");
     { std::error_code wipeEc; std::filesystem::remove_all (dir, wipeEc); }
 }
 
@@ -2631,7 +2632,6 @@ static void testBandSetlist()
         CHECK (c.songCount() == 20 && c.songsOnly() == 10 && c.songName (0) == "The Comedian and the Boxer", "first run: ten songs, twenty songs and parts");
         CHECK (c.bank() == 1 && c.value (P::DriveOn) == 0, "The Comedian and the Boxer: clean, opens in Groove for the filter");
         double t = 0;
-        auto hold = [&] (int sw) { c.footswitchPress (sw, t); for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); } c.footswitchRelease (sw, t); t += 0.5; };
         auto tap = [&] (int sw) { c.footswitchPress (sw, t); t += 0.1; c.footswitchRelease (sw, t); t += 0.5; };
         c.stepSong (1);
         CHECK (c.songName (1) == "When the Circus Comes to Town" && c.value (P::DriveVoice) == 1 && c.value (P::PreGain) > 0.55f, "Circus starts heavy: the Blumes and the preamp pushed");

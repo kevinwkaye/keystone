@@ -76,21 +76,21 @@ public class MainActivity extends Activity {
 
         room = RoomRecorder.get(this);
         room.setSender(new RoomRecorder.Sender() {
-            @Override public boolean send(String line) { if (!linked) return false; link.send(line); return true; }
+            @Override public boolean send(String line) { return sendIfLinked(line); }
             @Override public boolean linked() { return linked; }
         });
 
         updater = new Updater(this,
-                json -> ui.post(() -> { if (pageReady) web.evaluateJavascript("KS.onUpdate(" + json + ")", null); }),
-                line -> { if (!linked) return false; link.send(line); return true; });
+                json -> toPage("onUpdate", json),
+                this::sendIfLinked);
 
         files = new FileSender(this,
-                json -> ui.post(() -> { if (pageReady) web.evaluateJavascript("KS.onFiles && KS.onFiles(" + json + ")", null); }),
-                line -> { if (!linked) return false; link.send(line); return true; });
+                json -> toPage("onFiles", json),
+                this::sendIfLinked);
 
         reports = new ReportFetcher(this,
-                json -> ui.post(() -> { if (pageReady) web.evaluateJavascript("KS.onReport && KS.onReport(" + json + ")", null); }),
-                line -> { if (!linked) return false; link.send(line); return true; },
+                json -> toPage("onReport", json),
+                this::sendIfLinked,
                 this::shareReport);
 
         link = new Link(this, new Link.Listener() {
@@ -134,6 +134,18 @@ public class MainActivity extends Activity {
             }
         });
         link.start();
+    }
+
+    // progress from the updater, Send files and Send report: KS.<fn>(json) on the page, if it has it
+    private void toPage(String fn, String json) {
+        ui.post(() -> { if (pageReady) web.evaluateJavascript("KS." + fn + " && KS." + fn + "(" + json + ")", null); });
+    }
+
+    // the room recorder, updater, Send files and Send report: false when there's no link
+    private boolean sendIfLinked(String line) {
+        if (!linked) return false;
+        link.send(line);
+        return true;
     }
 
     // Lines arrive in bursts (meters, state); hand them to the page in one go.
@@ -218,7 +230,7 @@ public class MainActivity extends Activity {
                 startActivity(Intent.createChooser(i, "Send the Keystone report to"));
             } catch (Exception e) {
                 // nothing took it: the report is still on the phone, Share again tries once more
-                if (pageReady) web.evaluateJavascript("KS.onReport && KS.onReport({state:'ready',pct:100,canShare:true,why:'Nothing on this phone could take it. Tap Share again'})", null);
+                toPage("onReport", "{\"state\":\"ready\",\"pct\":100,\"canShare\":true,\"why\":\"Nothing on this phone could take it. Tap Share again\"}");
             }
         });
     }

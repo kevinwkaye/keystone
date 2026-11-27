@@ -68,6 +68,8 @@ struct Health
         o->setProperty ("fs", obj ({ { "ok", fsOk }, { "text", fsText }, { "ago", fsAgoSec < 0 ? -1 : (int) fsAgoSec }, { "last", fsLast } }));
         o->setProperty ("exp", obj ({ { "pos", expPos }, { "ago", expAgoSec < 0 ? -1 : (int) expAgoSec }, { "cal", expCalibrated }, { "rev", expReversed } }));
         o->setProperty ("out", obj ({ { "db", juce::roundToInt (outDb) }, { "lim", limDb } }));
+        // "laptop" is the machine Keystone runs on (the Pi too): the name stays so older
+        // phone apps keep reading it
         o->setProperty ("laptop", obj ({ { "cpu", juce::roundToInt (cpu * 100) }, { "dropouts", dropouts }, { "recent", dropoutsRecent }, { "light", light } }));
         o->setProperty ("sys", obj ({ { "temp", std::round (tempC * 10.0f) / 10.0f }, { "fan", fanRpm },
                                       { "power", hasPower }, { "uv", underVoltNow }, { "uvEver", underVoltEver },

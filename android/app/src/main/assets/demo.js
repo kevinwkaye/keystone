@@ -48,7 +48,7 @@ window.KSDemo = (function () {
     if (Math.floor(t * 1000 / 60) % 16 === 0) reply(health());
   }
   function health() {
-    return { t: 'health', version: 'demo', device: 'demo', uptime: Math.round((Date.now() - t0) / 1000),
+    return { t: 'health', version: 'demo', device: 'pi', uptime: Math.round((Date.now() - t0) / 1000),
       audio: { ok: true, text: 'Demo: pretend audio, 48 kHz, 128' }, 'in': { db: -20, ch: 1, dead: false },
       fs: { ok: true, text: 'Demo: use the tiles on Play', ago: -1, last: '' }, exp: { pos: pedal, ago: -1, cal: true, rev: false },
       out: { db: -8, lim: 0 }, laptop: { cpu: 9, dropouts: 0, recent: 0, light: false }, link: { phones: 1, laptop: '' },

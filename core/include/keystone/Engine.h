@@ -129,9 +129,7 @@ public:
     // finished block itself with record(), so the take has what really went to the amp (0.5.3)
     void setHostRecords (bool on) { hostRecords.store (on); }
     void record (const float* dry, const float* out, int n);
-    float bloom() const { return job[3].value.load(); }
     void action (Action a);
-    void setLightMode (bool light) { lightRequest.store (light); }
     // the projector is reacting: work out the note you're on as well (housekeeping thread)
     void setListening (bool on) { listening.store (on); }
     Meters meters() const;
@@ -179,7 +177,6 @@ private:
     float runAmt = 0.0f;
     int pedalTarget() const;
     const JobState& job_ (PedalJob j) const { return job[(size_t) j]; }
-    std::atomic<bool> lightRequest { false };
     std::atomic<bool> listening { false };
 };
 
