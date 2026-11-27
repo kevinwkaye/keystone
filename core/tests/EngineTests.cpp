@@ -1960,7 +1960,25 @@ static void testController()
     c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02);
     for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
     c.footswitchRelease (0, t); c.footswitchRelease (1, t); t += 0.5;
-    CHECK (c.rig() == 0 && c.footMode() == 0, "hold A and B again: back to Keystone in Stomp mode");
+    CHECK (c.kaleidoscope() && c.lastToast() == "KALEIDOSCOPE", "hold A and B again: on to Kaleidoscope");
+    c.footswitchPress (0, t); c.footswitchPress (1, t + 0.02);
+    for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
+    c.footswitchRelease (0, t); c.footswitchRelease (1, t); t += 0.5;
+    CHECK (! c.kaleidoscope() && c.rig() == 0 && c.footMode() == 0, "and again: round to Keystone in Stomp mode");
+    {
+        // A and B sent once with no release (a combo set to send them on release): they never jam
+        auto once = [&] { c.footswitchPress (0, t); c.footswitchPress (1, t); for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); } t += 0.5; };
+        once();
+        CHECK (c.rig() == 1, "A and B with no release: Kuddle a second later");
+        once();
+        CHECK (c.kaleidoscope(), "and again, though the first release never came: Kaleidoscope");
+        once();
+        CHECK (! c.kaleidoscope() && c.rig() == 0, "and round to Keystone");
+        const float bit = c.value (P::BitrotOn);
+        c.footswitchPress (1, t); t += 0.1; c.footswitchRelease (1, t); t += 0.5;
+        CHECK (c.value (P::BitrotOn) != bit, "then a plain B still taps (Bitrot)");
+        c.footswitchPress (1, t); t += 0.1; c.footswitchRelease (1, t); t += 0.5;
+    }
 
     // the footswitch's own combo messages (Chocolate Plus E and F): both switches at once (0.6.8)
     {
@@ -1979,7 +1997,11 @@ static void testController()
         c.footswitchCombo (0, true, t);
         for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
         c.footswitchCombo (0, false, t); t += 0.5;
-        CHECK (c.rig() == 0, "E held again: back to Keystone");
+        CHECK (c.kaleidoscope(), "E held again: Kaleidoscope");
+        c.footswitchCombo (0, true, t);
+        for (int i = 0; i < 25; ++i) { t += 0.05; c.tick (t); }
+        c.footswitchCombo (0, false, t); t += 0.5;
+        CHECK (! c.kaleidoscope() && c.rig() == 0, "and again: round to Keystone");
         // a combo whose release never comes doesn't jam the switches
         c.footswitchCombo (1, true, t); t += 0.2; c.tick (t); t += 0.5;
         CHECK (c.footMode() == 1, "F with no release: Song mode");

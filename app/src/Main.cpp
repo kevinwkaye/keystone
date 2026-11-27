@@ -435,6 +435,10 @@ public:
                     else if (on) rack->pushMidi (MidiMessage::noteOn (fc, num - 128, (uint8) 127));
                     else rack->pushMidi (MidiMessage::noteOff (fc, num - 128));
                 }
+                // Keystone hears it too, so holding A and B for a second always gets you back
+                // round to Keystone, even with a pedal loaded (0.6.10)
+                const double now = Time::getMillisecondCounterHiRes() * 0.001;
+                MessageManager::callAsync ([this, p, on, now] { controller->footswitchCombo (p, on, now); flush(); });
                 return;
             }
             int fwdCh = ch;

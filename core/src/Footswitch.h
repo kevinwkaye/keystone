@@ -28,7 +28,19 @@ public:
         // a combo switch whose release never came (one sent in a one-message mode): a real
         // press on either of its switches means the feet have moved on, so let it go quietly
         if (ext[(size_t) (sw / 2)]) clearPair (sw / 2);
-        if (down[(size_t) sw]) return;
+        // pressed again while still down: its release never came (a footswitch sending one
+        // message per press, like a Chocolate Plus combo set to send A and B on release). Let
+        // the old press go, ending any hold job, so the switch can never jam (0.6.10)
+        if (down[(size_t) sw])
+        {
+            if (combo[(size_t) sw]) clearPair (sw / 2);
+            else
+            {
+                const bool wasHeld = held[(size_t) sw];
+                down[(size_t) sw] = false; held[(size_t) sw] = false;
+                if (wasHeld && onEvent) onEvent (sw, HoldEnd);
+            }
+        }
         down[(size_t) sw] = true;
         held[(size_t) sw] = false;
         combo[(size_t) sw] = false;

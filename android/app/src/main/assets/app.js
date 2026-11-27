@@ -1389,7 +1389,7 @@ var KS = (function () {
       pre = '<section class="card"><h2 class="label">Kuddle: tap and hold</h2>' + [['A', 'Mute', 'Last preset'], ['B', 'Auto wah', 'Next preset'], ['C', 'Room', 'Tuner'], ['D', 'Tape push', 'Squeeze while held']].map(function (j) {
         return '<div style="display:flex;align-items:center;gap:12px">' + flip(j[0]).replace('class="flip "', 'class="flip" style="width:36px;height:42px;font-size:22px"') +
           '<span style="flex:1"><span style="display:block;font-size:16px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span></div>';
-      }).join('') + '<div class="small">Hold A and B for a second: back to Keystone. Hold C and D: Keep. Learn and pedal calibration are shared with Keystone: switch to Keystone to change them.</div></section>';
+      }).join('') + '<div class="small">Hold A and B for a second: on to Kaleidoscope (Keystone with Gig lock on). Hold C and D: Keep. Learn and pedal calibration are shared with Keystone: switch to Keystone to change them.</div></section>';
     }
     else if (mod === 'footswitches') {
       var jobs = [['A', 'Grit: Edge / Drive. Groove: auto filter. Glow: Speckle', 'Next bank. Song mode: last song, on the press'], ['B', 'Grit: Bitrot. Groove: Dimension. Glow: delay', 'Grit: Gloss. Groove: nothing yet. Glow: Speckle Hold. Song mode: next part, on the press'],
@@ -1400,7 +1400,7 @@ var KS = (function () {
         return '<div style="display:flex;align-items:center;gap:12px">' + flip(j[0]).replace('class="flip "', 'class="flip" style="width:36px;height:42px;font-size:22px"') +
           '<span style="flex:1"><span style="display:block;font-size:16px">Tap: ' + j[1] + '</span><span class="small">Hold: ' + j[2] + '</span></span>' +
           '<button type="button" class="wide" style="height:44px;padding:0 14px;font-size:14px" data-learn="' + i + '">Learn</button></div>';
-      }).join('') + '<div class="small">Press C and D together to swap Stomp and Song mode. In Stomp mode, press A and B together for tap tempo, then tap B on the beat; hold them for a second for Kuddle. Songs and parts move in Song mode. Keep is the button on the phone.</div></section>' +
+      }).join('') + '<div class="small">Press C and D together to swap Stomp and Song mode. In Stomp mode, press A and B together for tap tempo, then tap B on the beat; hold them for a second to go round Keystone, Kuddle and Kaleidoscope. Songs and parts move in Song mode. Keep is the button on the phone.</div></section>' +
         '<section class="card"><h2 class="label">Two switches together</h2><div class="small">Some footswitches, like the Chocolate Plus, send a message of their own when you press two switches together (E for A and B, F for C and D) and swallow the two presses. If pressing two together does nothing, tap Learn A+B, then press A and B together on the footswitch, and the same for C and D.</div>' +
         '<div class="pair"><button type="button" class="wide" data-learn="5">Learn A+B</button><button type="button" class="wide" data-learn="6">Learn C+D</button></div></section>' +
         '<section class="card"><h2 class="label">Expression</h2><div class="small">Rock the pedal to heel and press Heel, then to toe and press Toe. If heel and toe still work the wrong way round, press Reverse.</div>' +
@@ -1502,7 +1502,7 @@ var KS = (function () {
       (lm ? '<section class="card" style="flex-direction:row;align-items:center;gap:14px">' + kalFlip(lm.name.charAt(0), lm.colour) +
         '<span style="flex:1;display:flex;flex-direction:column;gap:2px;min-width:0"><span class="label">Loaded now</span><span style="font-size:22px;font-weight:700">' + esc(lm.name) + '</span><span class="small">' + esc(lm.from) + '</span>' + (S.kalId === loaded ? kalDots(loaded) : '') + '</span>' +
         '<button type="button" class="wide" style="height:44px;padding:0 16px" data-go="tone">Controls</button></section>'
-        : '<section class="card"><span style="font-size:17px;font-weight:700">No pedal loaded</span><span class="small">Pick one and load it. On the floor: tap A and B to look through them, D to load, hold A and B to go back to Keystone.</span></section>') +
+        : '<section class="card"><span style="font-size:17px;font-weight:700">No pedal loaded</span><span class="small">Pick one and load it. On the floor: tap A and B to look through them, D to load, hold A and B to go round to Keystone. With a pedal loaded, holding A and B still gets you back.</span></section>') +
       '<h2 class="label">Pedals</h2>' +
       (ids.length ? '<div class="kgrid">' + grid + '</div>' + loadBtn +
         '<span class="small" style="text-align:center">The old pedal fades out, then the new one fades in.</span>'

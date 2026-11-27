@@ -31,19 +31,19 @@
 | Level jump, Delay on | +0.0 dB | within 1.0 |
 | Level jump, Reverb on | +0.0 dB | within 1.0 |
 | Clicks, worst switch (Reverb off) | 1.14x steady | 1.6x or 3 |
-| Tail block cost against playing | 0.80x | under 1.5x |
+| Tail block cost against playing | 0.95x | under 1.5x |
 
 | Case | 64 samples | 128 samples |
 |---|---|---|
-| Song default, modelled drive | 4.2% | 4.2% |
-| Everything on, Bloom at 80% | 16.5% | 15.9% |
-| Everything on, light effects | 15.1% | 14.6% |
-| Everything on, tape delay and Haze grains | 17.3% | 18.2% |
-| Everything on, Cloud reverb | 16.7% | 18.1% |
-| Everything on, Impulse reverb (2 s) | 16.7% | 14.0% |
-| Everything on, Galaxy delay and Arp grains | 15.9% | 15.8% |
-| Groove: wah, auto filter and Dimension | 4.7% | 5.3% |
-| Kuddle, Voodoo (Keystone asleep) | 2.5% | 2.6% |
-| Kuddle with the room on | 2.8% | 2.4% |
+| Song default, modelled drive | 4.7% | 4.6% |
+| Everything on, Bloom at 80% | 18.7% | 19.2% |
+| Everything on, light effects | 20.4% | 18.9% |
+| Everything on, tape delay and Haze grains | 22.6% | 16.6% |
+| Everything on, Cloud reverb | 18.8% | 19.8% |
+| Everything on, Impulse reverb (2 s) | 16.9% | 17.2% |
+| Everything on, Galaxy delay and Arp grains | 19.2% | 19.2% |
+| Groove: wah, auto filter and Dimension | 5.2% | 5.7% |
+| Kuddle, Voodoo (Keystone asleep) | 2.9% | 2.6% |
+| Kuddle with the room on | 3.2% | 2.8% |
 
 CPU is the share of one core for one Keystone at 48 kHz, measured on the build machine.

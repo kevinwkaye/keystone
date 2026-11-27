@@ -594,7 +594,7 @@ void Controller::tapTempo (double now)
 int Controller::footMode() const { return s->footMode; }
 
 // A and B are separate presses in Keystone's Song mode, a combo (held: swap rig) otherwise
-void Controller::syncPairs() { s->logic.pairEnabled = { s->rig == 1 || s->footMode == 0, true }; }
+void Controller::syncPairs() { s->logic.pairEnabled = { s->rig == 1 || s->kal || s->footMode == 0, true }; }
 
 void Controller::setFootMode (int m)
 {
@@ -902,6 +902,7 @@ void Controller::setKaleidoscope (bool on, bool announce)
         s->kalId.clear();
     }
     s->kal = on;
+    syncPairs();
     engine.setRig (on ? 2 : s->rig);
     if (! on && s->rig == 0) engine.setPedalBank (s->bank);
     if (onKalMode) onKalMode (on);
@@ -1106,7 +1107,7 @@ void Controller::onFootswitch (int sw, int ev)
     {
         // Kaleidoscope, picking a pedal (once one is loaded the host hands it the footswitches):
         // tap A back, B on, D load the one showing; hold C the tuner; hold A and B to leave
-        if (ev == E::ComboHoldAB) { if (! tuning) setKaleidoscope (false); return; }
+        if (ev == E::ComboHoldAB) { if (! tuning) setRig (0); return; }   // round to Keystone
         if (ev == E::HoldStart && sw == 2) { engine.action (Action::TunerToggle); queueState(); return; }
         if (ev != E::Tap) return;
         if (tuning) { engine.action (Action::TunerOff); queueState(); return; }
@@ -1123,8 +1124,17 @@ void Controller::onFootswitch (int sw, int ev)
         else if (sw == 3) loadPedal (ids[(size_t) std::clamp (s->kalPick, 0, n - 1)]);
         return;
     }
-    // hold A and B for a second: the other rig (Stomp mode in Keystone, any time in Kuddle)
-    if (ev == E::ComboHoldAB) { s->tapArmed = false; if (! tuning) setRig (1 - s->rig); return; }
+    // hold A and B for a second: the next rig round, Keystone, Kuddle, Kaleidoscope (0.6.10).
+    // Stomp mode in Keystone, any time in Kuddle. With gig lock on, Kuddle goes back to Keystone.
+    if (ev == E::ComboHoldAB)
+    {
+        s->tapArmed = false;
+        if (tuning) return;
+        if (s->rig == 0) setRig (1);
+        else if (s->gigLock) setRig (0);
+        else setKaleidoscope (true);
+        return;
+    }
     if (s->rig == 1)
     {
         // Kuddle: tap A Mute, B Auto wah, C Room, D Tape. Hold A previous preset, B next,
