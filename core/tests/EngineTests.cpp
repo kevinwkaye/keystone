@@ -1031,6 +1031,29 @@ static void testGloss()
         CHECK (on > off * 1.05, "To reverb sends the pad into the reverb (%.4f against %.4f)", on, off);
     }
     {
+        // switched off mid-note: a tail over the Fade time, not a cut, and no new notes.
+        // The clean bass comes back once it's off, so look at the pad alone (out minus dry)
+        Engine e; make (e);
+        auto in = cat (pluck (55.0, 2.0, 0.4, 4.0), pluck (73.42, 2.0, 0.4, 4.0));
+        in.resize (in.size() + at (8.0), 0.0f);
+        std::vector<float> out (in.size());
+        for (size_t i = 0; i < in.size(); i += 64)
+        {
+            if (i == at (1.5) / 64 * 64) e.setParam (P::GlossOn, 0);
+            e.process (in.data() + i, out.data() + i, (int) std::min<size_t> (64, in.size() - i));
+        }
+        Engine dry; dry.prepare (kSr, 128); neutral (dry);
+        const auto ref = render (dry, in);
+        std::vector<float> pad (out.size());
+        for (size_t i = 0; i < out.size(); ++i) pad[i] = out[i] - (i >= at (1.5) ? ref[i] : 0.0f);
+        const double before = rms (out.data() + at (1.2), at (0.25)), after = rms (pad.data() + at (1.6), at (0.25));
+        CHECK (after > 0.5 * before && after < 1.5 * before, "switched off, it fades rather than cuts (%.4f after, %.4f before)", after, before);
+        const double newNote = toneAt (pad, at (2.6), w, 146.83), held = toneAt (pad, at (2.6), w, 110.0);
+        CHECK (held > 0.001 && newNote < 0.2 * held, "and takes no new notes while it trails off (D %.4f, A %.4f)", newNote, held);
+        const double tail = rms (pad.data() + pad.size() - at (0.5), at (0.5));
+        CHECK (tail < 1.0e-4, "then it's gone (%.6f)", tail);
+    }
+    {
         // Gloss off costs nothing and changes nothing
         auto in = pluck (55.0, 1.5, 0.4, 3.0);
         Engine e; make (e); e.setParam (P::GlossOn, 0);

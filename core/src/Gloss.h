@@ -150,6 +150,9 @@ public:
     }
 
     bool sounding() const { return amp > 1.0e-5f || ampTarget > 0; }
+    // Switched off, the pad stops taking new notes and fades out over its Fade time, so it
+    // leaves a tail instead of cutting (0.6.10). Switched back on mid-tail, it carries on.
+    void setEnabled (bool on) { enabled = on; if (! on) ampTarget = 0; }
     // the note the pad is on (MIDI number), or -1
     int note() const { return cur == kNone ? -1 : cur; }
     // where the filter sits (Hz), for the tests
@@ -351,7 +354,7 @@ private:
         {
             gateOpen = false; cand = kNone; stable = 0;
             // you've stopped: the pad fades (unless it rings on) and waits for the next note
-            if (! ringOn) ampTarget = 0;
+            if (! ringOn || ! enabled) ampTarget = 0;
         }
         if (onset.process (x, playLvl)) smoothPeriod = 0;   // a new pluck may be any pitch
 
@@ -401,7 +404,7 @@ private:
         if (std::fabs (dev) > 0.4f) { cand = kNone; stable = 0; return; }
         if (nn == cand) { stable += len; devSum += dev; ++devCount; }
         else { cand = nn; stable = len; devSum = dev; devCount = 1; }
-        if (stable < settle) return;
+        if (stable < settle || ! enabled) return;
         // the first settled note sets how your bass is tuned, every one after nudges it
         if (! tuned) { tuneOff = clampf (tuneOff + devSum / (float) devCount, -0.45f, 0.45f); tuned = true; }
         else tuneOff = clampf (tuneOff + dev * 0.01f, -0.45f, 0.45f);
@@ -512,7 +515,7 @@ private:
     OnsetDetector onset;
     Svf f1, f2, airF;
     Voice voices[kVoices];
-    bool high = false, gateOpen = false, glide = false, ringOn = false;
+    bool high = false, gateOpen = false, glide = false, ringOn = false, enabled = true;
     float sinceAny = 0, lastRaw = 0, dPrev = 0, sincePrev = 0, smoothPeriod = 0;
     float playLvl = 0.05f, playFall = 0.99999f, padLvl = 0, lvlCoef = 0.99f;
     int cand = kNone, cur = kNone, ctl = 0, quiet = 0;

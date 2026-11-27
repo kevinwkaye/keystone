@@ -1255,6 +1255,7 @@ var KS = (function () {
     if (id === 'gloss.ring') return 'Fades away trails off when you stop playing. Rings on holds the pad until your next note, like a drone that follows you.';
     if (id === 'gloss.spread') return 'How far apart the five oscillators in each layer are tuned. Each one also drifts a little on its own, which is where the shimmer comes from.';
     if (id === 'gloss.wander') return 'A little unpredictability. Brightness, level, the balance of the layers and each oscillator\'s pitch drift slowly to new places every few seconds, and every note comes out slightly different. Keep it low for subtle.';
+    if (id === 'gloss.fade') return 'How long the pad takes to trail off when you stop playing, and when you switch Gloss off: it fades out over this time rather than cutting.';
     if (id === 'gloss.bloom') return 'Each new note starts darker and sweeps open over this time, so every chord gets its own swell.';
     if (id === 'gloss.touch') return 'Dig in and the pad opens up. Play harder through a build and it brightens with you.';
     if (id === 'gloss.shine') return 'A soft sine an octave over the top of the pad, for sparkle.';

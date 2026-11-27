@@ -755,7 +755,11 @@ void Engine::process (const float* in, float* out, int numSamples)
             std::fill (gs, gs + n, 0.0f);
             auto runGloss = [&]()
             {
-                const bool active = Vb (v, P::GlossOn) || d.glossOn.current() > 1.0e-4f;
+                // switched off, the pad keeps playing until its own fade has finished, so it
+                // leaves a tail; the clean bass comes back at once (0.6.10)
+                const bool on = Vb (v, P::GlossOn);
+                d.gloss.setEnabled (on);
+                const bool active = on || d.glossOn.current() > 1.0e-4f || (d.glossWasOn && d.gloss.sounding());
                 if (! active)
                 {
                     for (int i = 0; i < n; ++i) { d.glossOn.next(); d.glossClean.next(); }
@@ -770,9 +774,9 @@ void Engine::process (const float* in, float* out, int numSamples)
                     const float g = d.glossOn.next();
                     const float keep = 1.0f - g * (1.0f - d.glossClean.next());
                     lm[i] *= keep;
-                    gs[i] = gy[i] * g;   // the pad on its own, for To reverb
-                    if (glossPlace == 2) { gg[i] = g; d.glossKeep[(size_t) i] = keep; continue; }
-                    hb[i] = hb[i] * keep + gy[i] * g;
+                    gs[i] = gy[i];   // the pad on its own, for To reverb
+                    if (glossPlace == 2) { gg[i] = 1.0f; d.glossKeep[(size_t) i] = keep; continue; }
+                    hb[i] = hb[i] * keep + gy[i];
                 }
             };
             if (bitrotFirst) runBitrot();
