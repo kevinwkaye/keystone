@@ -1896,10 +1896,15 @@ static void testController()
         CHECK (c.bank() == 1 && c.currentSong() == 0 && c.value (P::GrHold) == before && c.value (P::GlossOn) == 0, "Groove, hold B: nothing yet");
     }
     hold (0);
-    hold (1);
-    CHECK (c.bank() == 2 && c.value (P::GrHold) == 1 && c.lastToast() == "SPECKLE HOLD", "Glow, hold B: Speckle's Hold on");
-    hold (1);
-    CHECK (c.value (P::GrHold) == 0, "Glow, hold B again: Hold off");
+    {
+        // Speckle's Hold is momentary (0.6.10): on while B is down, off when you let go
+        const bool wasEdited = c.edited();
+        c.footswitchPress (1, t);
+        for (int i = 0; i < 10; ++i) { t += 0.06; c.tick (t); }
+        CHECK (c.bank() == 2 && c.value (P::GrHold) == 1 && c.lastToast() == "SPECKLE HOLD", "Glow, hold B: Speckle's Hold while it's down");
+        c.footswitchRelease (1, t); t += 0.5;
+        CHECK (c.value (P::GrHold) == 0 && c.lastToast() == "HOLD OFF" && c.edited() == wasEdited, "let go of B: Hold lets go too, and the song isn't left edited");
+    }
     hold (0);
     c.stepSong (1);
     CHECK (c.currentSong() == 1 && c.value (P::BitrotOn) == 0 && c.value (P::PreFlip) == 0, "next song: back to its saved state");

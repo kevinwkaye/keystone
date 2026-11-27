@@ -943,7 +943,7 @@ var KS = (function () {
           return '<div class="mkey" style="' + (d ? '' : 'background:' + col + ';color:#0E0E10') + '"><span class="l">' + k[0] + '</span><span class="w">' + k[1] + '</span></div>';
         }).join('') + '</div><span class="small">Each press acts straight away, on the beat. The effects below switch from the phone only.</span>'
         : (S.tapping ? '<span class="small" style="color:#5DCAA5;font-weight:700">TAP TEMPO: tap B on the beat. B is B again two seconds after your last tap.</span>'
-          : '<span class="small">Tap A, B, C for the effects below, D for the drone. Hold A for the next bank. Hold B: ' + ['Gloss', 'nothing yet', 'Speckle Hold'][S.bank] + '. Hold C: ' + ['tuner', 'vinyl brake', 'runaway'][S.bank] + '. A and B together: tap tempo.</span>')) + '</div>';
+          : '<span class="small">Tap A, B, C for the effects below, D for the drone. Hold A for the next bank. Hold B: ' + ['Gloss', 'nothing yet', 'Speckle Hold while held'][S.bank] + '. Hold C: ' + ['tuner', 'vinyl brake', 'runaway'][S.bank] + '. A and B together: tap tempo.</span>')) + '</div>';
   }
 
   function playScreen() {
@@ -1393,7 +1393,7 @@ var KS = (function () {
       }).join('') + '<div class="small">Hold A and B for a second: on to Kaleidoscope (Keystone with Gig lock on). Hold C and D: Keep. Learn and pedal calibration are shared with Keystone: switch to Keystone to change them.</div></section>';
     }
     else if (mod === 'footswitches') {
-      var jobs = [['A', 'Grit: Edge / Drive. Groove: auto filter. Glow: Speckle', 'Next bank. Song mode: last song, on the press'], ['B', 'Grit: Bitrot. Groove: Dimension. Glow: delay', 'Grit: Gloss. Groove: nothing yet. Glow: Speckle Hold. Song mode: next part, on the press'],
+      var jobs = [['A', 'Grit: Edge / Drive. Groove: auto filter. Glow: Speckle', 'Next bank. Song mode: last song, on the press'], ['B', 'Grit: Bitrot. Groove: Dimension. Glow: delay', 'Grit: Gloss. Groove: nothing yet. Glow: Speckle Hold while held. Song mode: next part, on the press'],
                   ['C', 'Grit: Growl/Cut flip. Groove: wah. Glow: reverb', 'Grit: tuner. Groove: vinyl brake. Glow: runaway. Song mode: next song, on the press'], ['D', 'Drone hold / trail off, in every bank', 'Slap']];
       pre = '<section class="card"><h2 class="label">Banks</h2>' + bankBar() +
         '<span class="small">Hold A to step Grit, Groove, Glow. The bank sets what A, B and C do and what the pedal does: dirt blend in Grit, wah in Groove (volume with the wah off), Bloom in Glow. Changing bank never changes the sound. Each song opens in its own bank (This song, below).</span></section>' +

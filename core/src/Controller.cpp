@@ -85,6 +85,7 @@ struct Controller::State
     std::string captureFile, spaceFile;
     double lastDTap = -10;
     int bank = 0;
+    bool speckleHeld = false;   // hold B in Glow: Speckle's Hold only while B is down (0.6.10)
     // the two rigs: songs and current are the playing rig's list, other the resting one's
     int rig = 0;
     std::unique_ptr<Recorder> recorder;     // rehearsal takes, in Recordings beside the setlist
@@ -1271,13 +1272,21 @@ void Controller::onFootswitch (int sw, int ev)
         return;
     }
     if (ev == E::HoldEnd && sw == 2) { engine.setRunaway (false); engine.setBrake (false); watchEnd(); return; }
+    if (ev == E::HoldEnd && sw == 1 && s->speckleHeld)
+    {
+        // let go of B: Speckle's Hold lets go too, so it can never be left on by accident
+        s->speckleHeld = false;
+        setValue (P::GrHold, 0);
+        queueToast ("HOLD OFF");
+        return;
+    }
     if (ev == E::HoldStart)
     {
         switch (sw)
         {
             case 0: if (! tuning) setBank ((s->bank + 1) % 3); break;
             case 1:
-                // hold B (0.6.1): Grit the synth, Glow Speckle's Hold, Groove nothing yet.
+                // hold B (0.6.1): Grit the pad, Glow Speckle's Hold while held, Groove nothing yet.
                 // Songs and parts only move in Song mode now.
                 if (tuning) break;
                 if (s->bank == 0)
@@ -1287,8 +1296,10 @@ void Controller::onFootswitch (int sw, int ev)
                 }
                 else if (s->bank == 2)
                 {
-                    toggle (P::GrHold);
-                    queueToast (value (P::GrHold) > 0.5f ? "SPECKLE HOLD" : "HOLD OFF");
+                    // momentary (0.6.10): it holds while B is down and lets go with it
+                    s->speckleHeld = true;
+                    setValue (P::GrHold, 1);
+                    queueToast ("SPECKLE HOLD");
                 }
                 break;
             case 2:
