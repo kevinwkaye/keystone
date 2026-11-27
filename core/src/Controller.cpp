@@ -328,6 +328,9 @@ static std::vector<Controller::Song> readList (const json& j, const std::map<std
             // halls, rooms and plates no longer shimmer unless you ask (the Shimmer type still does)
             if (was ("reverb.shimmer", 0.3f) && ! was ("reverb.type", 8.0f)) song.values["reverb.shimmer"] = 0.0f;
         }
+        // setlist version 10 (0.6.7): Gloss is a pad now, and pads sit clean after the
+        // preamp. Songs still on the old Into drive default move; ones you'd changed stay.
+        if (parts && version < 10 && std::fabs (song.values["gloss.place"]) < 1.0e-3f) song.values["gloss.place"] = 2.0f;
         // setlist version 8 (0.4.2): each song has a tempo. It starts from the delay time,
         // which was the beat before, so synced delays and Speckle keep their timing.
         if (parts && version < 8) song.values["tempo.bpm"] = std::round (clampf (60000.0f / std::max (1.0f, song.values["delay.time"]), 40.0f, 240.0f) * 10.0f) / 10.0f;
@@ -434,7 +437,7 @@ void Controller::useBandSetlist (bool backup)
 void Controller::saveSetlist() const
 {
     json j;
-    j["version"] = 9;
+    j["version"] = 10;
     j["current"] = s->current;
     j["songs"] = json::array();
     for (const auto& song : s->songs)
