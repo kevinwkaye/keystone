@@ -15,6 +15,7 @@
 #include "Valve.h"
 #include "Recorder.h"
 #include "Sha256.h"
+#include "Gloss.h"
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -881,6 +882,9 @@ static void testGloss()
         e.setParam (P::GlossSpread, 0);
         e.setParam (P::GlossBreathe, 0);
         e.setParam (P::GlossPlays, 0);   // octave up: one line to look for
+        // the movement off, so the pitch and level checks see the bare pad
+        for (auto p : { P::GlossWander, P::GlossChorus, P::GlossAir, P::GlossShine, P::GlossWarmth, P::GlossTouch, P::GlossSend })
+            e.setParam (p, 0);
     };
     auto cat = [] (std::vector<float> a, const std::vector<float>& b) { a.insert (a.end(), b.begin(), b.end()); return a; };
     auto at = [] (double s) { return (size_t) (s * kSr); };
@@ -958,6 +962,73 @@ static void testGloss()
         in.resize (in.size() + at (4.0), 0.0f);
         const auto out = render (e, in);
         CHECK (rms (out.data() + at (5.0), w) > 0.3 * rms (out.data() + at (1.2), w), "Rings on: it holds after you stop");
+    }
+    {
+        // everything at its default (chorus, air, shine, warmth, wander): still clean, still
+        // near your playing level, still falls silent
+        Engine e; e.prepare (kSr, 128); neutral (e); e.setParam (P::GlossOn, 1); e.setParam (P::GlossClean, 0);
+        auto in = pluck (55.0, 3.0, 0.4, 4.0);
+        in.resize (in.size() + at (7.0), 0.0f);
+        const auto out = render (e, in);
+        bool finite = true;
+        double peak = 0;
+        for (float y : out) { finite = finite && std::isfinite (y); peak = std::max (peak, (double) std::fabs (y)); }
+        Engine dry; dry.prepare (kSr, 128); neutral (dry);
+        const auto ref = render (dry, in);
+        const double ratio = rms (out.data() + at (1.6), w) / std::max (1.0e-9, rms (ref.data() + at (1.6), w));
+        CHECK (finite && peak < 1.0, "at its defaults it stays clean (peak %.2f)", peak);
+        CHECK (ratio > 0.25 && ratio < 4.0, "at its defaults it lands near your playing level (%.2f)", ratio);
+        const double tail = rms (out.data() + out.size() - at (0.5), at (0.5));
+        CHECK (tail < 1.0e-4, "at its defaults it still fades to silence (%.6f)", tail);
+    }
+    {
+        // Wander: on a note held dead steady, the filter keeps moving, but only a little
+        auto run = [&] (float wander)
+        {
+            Vals v {};
+            for (int i = 0; i < kNumParams; ++i) v[(size_t) i] = paramTable()[i].def;
+            v[(size_t) P::GlossWander] = wander;
+            v[(size_t) P::GlossTouch] = 0;
+            v[(size_t) P::GlossBreathe] = 0;
+            Gloss g;
+            g.prepare ((float) kSr);
+            g.update (v);
+            double lo = 1e9, hi = 0;
+            float y[64];
+            std::vector<float> x (64);
+            for (size_t i = 0; i < at (30.0); i += 64)
+            {
+                for (size_t k = 0; k < 64; ++k) { const double t = (i + k) / kSr; x[k] = (float) (0.3 * std::min (1.0, t / 0.005) * std::sin (2 * M_PI * 55.0 * t)); }
+                g.process (x.data(), y, 64);
+                if (i > at (8.0) && i % at (0.1) < 64) { lo = std::min (lo, (double) g.cutoff()); hi = std::max (hi, (double) g.cutoff()); }
+            }
+            return hi / std::max (lo, 1.0);
+        };
+        const double still = run (0), moving = run (0.3), full = run (1.0);
+        CHECK (still < 1.01 && moving > 1.04 && moving < 1.3 && full > moving, "Wander moves the filter, subtly (%.2fx at 30%%, %.2fx at full, %.2fx without)", moving, full, still);
+    }
+    {
+        // Open sus2: octave, fifth and ninth over the note
+        Engine e; make (e); e.setParam (P::GlossPlays, 2); e.setParam (P::GlossSpread, 0.5f);
+        auto in = pluck (55.0, 3.0, 0.4, 4.0);
+        const auto out = render (e, in);
+        // each layer is five detuned oscillators: take the strongest line within 4 Hz
+        auto band = [&] (double f) { double m = 0; for (double d = -4; d <= 4; d += 0.5) m = std::max (m, toneAt (out, at (1.8), at (1.0), f + d)); return m; };
+        const double oct = band (110.0), fifth = band (165.0), ninth = band (247.5);
+        CHECK (oct > 0.003 && fifth > 0.2 * oct && ninth > 0.15 * oct, "Open sus2 plays the octave, fifth and ninth (%.4f, %.4f, %.4f)", oct, fifth, ninth);
+    }
+    {
+        // To reverb: more of the pad in the reverb
+        auto tailOf = [&] (float send)
+        {
+            Engine e; make (e); e.setParam (P::RvOn, 1); e.setParam (P::GlossSend, send);
+            auto in = pluck (55.0, 2.0, 0.4, 3.0);
+            in.resize (in.size() + at (1.0), 0.0f);
+            const auto out = render (e, in);
+            return rms (out.data() + at (1.5), w);
+        };
+        const double off = tailOf (0), on = tailOf (1);
+        CHECK (on > off * 1.05, "To reverb sends the pad into the reverb (%.4f against %.4f)", on, off);
     }
     {
         // Gloss off costs nothing and changes nothing

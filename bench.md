@@ -19,8 +19,8 @@
 | Aliasing, Preamp flipped to Cut, 2.1 kHz | -73.2 dB | under -70 |
 | Aliasing, Output iron at full, 110 Hz | -83.0 dB | under -80 |
 | Aliasing, Limiter working hard, 2.1 kHz | -77.5 dB | under -74 |
-| Aliasing, Gloss pad saw, 220 Hz, bright | -68.2 dB | under -64 |
-| Aliasing, Gloss pad square, 330 Hz, bright | -69.2 dB | under -64 |
+| Aliasing, Gloss pad saw, 220 Hz, bright | -67.0 dB | under -64 |
+| Aliasing, Gloss pad square, 330 Hz, bright | -65.7 dB | under -64 |
 | Level jump, Drive on | +0.5 dB | within 1.5 |
 | Level jump, Valve preamp on | +1.3 dB | within 2.0 |
 | Level jump, Dimension on | +0.0 dB | within 1.0 |

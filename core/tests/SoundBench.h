@@ -139,10 +139,10 @@ static void aliasing()
         { "Preamp flipped to Cut, 2.1 kHz", [only] (Engine& e) { only ({ P::PreOn }) (e); e.setParam (P::PreBlend, 1); }, 2100, 0.7, -70 },
         { "Output iron at full, 110 Hz", [] (Engine& e) { neutral (e); e.setParam (P::OutLimit, 0); e.setParam (P::OutIron, 1); }, 110, 0.8, -80 },
         { "Limiter working hard, 2.1 kHz", [] (Engine& e) { neutral (e); e.setParam (P::OutIron, 0); e.setParam (P::OutLevel, 12); }, 2100, 0.6, -74 },
-        // Gloss (0.6.7): the pad's detuned oscillators are BLEP-smoothed. Spread and breathe at
-        // zero and unison, so every line it plays is a harmonic of the note
-        { "Gloss pad saw, 220 Hz, bright", [only] (Engine& e) { only ({ P::GlossOn }) (e); e.setParam (P::GlossClean, 0); e.setParam (P::GlossWeight, 0); e.setParam (P::GlossSpread, 0); e.setParam (P::GlossBreathe, 0); e.setParam (P::GlossPlays, 2); e.setParam (P::GlossBright, 8000); }, 220, 0.5, -64 },
-        { "Gloss pad square, 330 Hz, bright", [only] (Engine& e) { only ({ P::GlossOn }) (e); e.setParam (P::GlossVoice, 1); e.setParam (P::GlossClean, 0); e.setParam (P::GlossWeight, 0); e.setParam (P::GlossSpread, 0); e.setParam (P::GlossBreathe, 0); e.setParam (P::GlossPlays, 2); e.setParam (P::GlossBright, 8000); }, 330, 0.5, -64 },
+        // Gloss (0.6.7): the pad's detuned oscillators are BLEP-smoothed. Spread, breathe and
+        // the movement at zero and unison, so every line it plays is a harmonic of the note
+        { "Gloss pad saw, 220 Hz, bright", [only] (Engine& e) { only ({ P::GlossOn }) (e); e.setParam (P::GlossClean, 0); e.setParam (P::GlossWeight, 0); e.setParam (P::GlossSpread, 0); e.setParam (P::GlossBreathe, 0); e.setParam (P::GlossPlays, 3); e.setParam (P::GlossBright, 8000); for (auto p : { P::GlossWander, P::GlossChorus, P::GlossAir, P::GlossShine, P::GlossWarmth, P::GlossTouch }) e.setParam (p, 0); }, 220, 0.5, -64 },
+        { "Gloss pad square, 330 Hz, bright", [only] (Engine& e) { only ({ P::GlossOn }) (e); e.setParam (P::GlossVoice, 1); e.setParam (P::GlossClean, 0); e.setParam (P::GlossWeight, 0); e.setParam (P::GlossSpread, 0); e.setParam (P::GlossBreathe, 0); e.setParam (P::GlossPlays, 3); e.setParam (P::GlossBright, 8000); for (auto p : { P::GlossWander, P::GlossChorus, P::GlossAir, P::GlossShine, P::GlossWarmth, P::GlossTouch }) e.setParam (p, 0); }, 330, 0.5, -64 },
     };
     for (const auto& c : cases)
     {
